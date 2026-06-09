@@ -1,0 +1,51 @@
+name: Release
+
+# Push a version tag to build & publish downloads:
+#   git tag v0.6.0 && git push origin v0.6.0
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  mac:
+    name: Build macOS app
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: 'droiddock 2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run build
+      # Unsigned, zipped, for both Apple Silicon and Intel.
+      - run: npx electron-builder --mac zip --arm64 --x64 -c.mac.identity=null
+      - name: Publish macOS zips to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: 'droiddock 2/dist/*.zip'
+
+  android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: droiddock-android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      # ubuntu-latest ships the Android SDK; the Gradle wrapper is in the repo.
+      - run: chmod +x gradlew && ./gradlew assembleDebug
+      - run: cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/DroidDock.apk"
+      - name: Publish APK to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: DroidDock.apk

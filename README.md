@@ -81,43 +81,50 @@ they're both open on the same network.
 
 ---
 
-## 🛠️ Getting started
+## ⬇️ Install (the easy way — no build tools)
 
-### Prerequisites (one‑time)
+Grab the prebuilt apps from the [**Releases**](../../releases) page:
+
+1. **Mac** — download `DroidDock-*-mac.zip`, unzip, drag **DroidDock.app** to Applications.
+   *(It's unsigned, so the first launch is right‑click → Open.)*
+2. **Android** — download `DroidDock.apk` and install it (allow "install unknown apps"
+   when prompted).
+3. Open the Mac app → **Pair Device** → scan the QR with the phone app. **Done** —
+   clipboard, notifications, messages, contacts, calls, files and photos all work.
+
+> ✅ **No ADB, no scrcpy, no Developer Options** for any of that — it's all over the Wi‑Fi
+> app link. `adb` even **auto‑installs** the first time it's needed.
+
+### 📺 Optional: screen mirroring
+
+Mirroring (and phone camera) use `scrcpy`. If it's missing, the app shows a one‑click
+**Install with Homebrew** button. This is the *only* feature that needs ADB +
+Developer Options on the phone today — see [Roadmap](#-roadmap) for where that's headed.
+
+---
+
+## 🧑‍💻 Build from source (developers)
 
 ```bash
-brew install node                              # Node.js 22+
-brew install --cask android-platform-tools     # adb
-brew install scrcpy                            # screen mirroring (optional)
-```
+# Mac app
+cd "droiddock 2" && npm install && npm run dev
+#   packaged build:  npm run dist        (output in dist/)
 
-On the phone: **Settings → About phone → tap *Build number* 7×**, then enable **USB debugging**.
-
-### ▶️ Run the Mac app
-
-```bash
-cd "droiddock 2"
-npm install
-npm run dev          # launch in development
-npm run dist         # or build a packaged .app (output in dist/)
+# Android app  (Android Studio → Run, or:)
+cd droiddock-android && ./gradlew installDebug
 ```
 
 > 💡 If your terminal exports `ELECTRON_RUN_AS_NODE=1` (some IDE terminals do), Electron
 > boots as plain Node and crashes with `electron.app … whenReady undefined`.
 > Launch with `env -u ELECTRON_RUN_AS_NODE npm run dev`.
 
-### 📲 Build & install the Android app
+Releases are built automatically by [`.github/workflows/release.yml`](.github/workflows/release.yml) —
+push a tag (`git tag v0.6.0 && git push origin v0.6.0`) and the `.app` + `.apk` are
+built and attached to a GitHub Release.
 
-Open [`droiddock-android/`](droiddock-android/) in **Android Studio** and press **Run**, or:
-
-```bash
-cd droiddock-android
-./gradlew installDebug      # builds and installs on a connected phone
-```
-
-On first launch, grant the permissions the app requests (Notification access,
-SMS · Contacts · Calls, All‑files access). For automatic phone → Mac clipboard, enable
-the **DroidDock Clipboard** accessibility service.
+On the Android app's first launch, grant the permissions it requests (Notification
+access, SMS · Contacts · Calls, All‑files access). For automatic phone → Mac clipboard,
+enable the **DroidDock Clipboard** accessibility service.
 
 ---
 
@@ -157,7 +164,28 @@ DroidDock/
   phone → Mac auto‑clipboard is done through the accessibility service: it reads the
   copied text straight from accessibility events and sends it the moment a "copied" toast
   confirms a real copy — no clipboard access required.
-- Screen mirroring uses `scrcpy` over ADB, so it needs USB or Wi‑Fi ADB connected.
+- Screen mirroring currently uses `scrcpy` over ADB, so it needs Developer Options +
+  USB/Wi‑Fi debugging on the phone (see Roadmap to remove that).
+
+---
+
+## 🧭 Roadmap
+
+Toward a **zero‑setup** experience — install the two apps, scan a QR, done:
+
+- [x] Wi‑Fi app link covers clipboard / notifications / messages / files / photos with no ADB
+- [x] `adb` **auto‑downloads** on first run (no manual platform‑tools install)
+- [x] One‑click **scrcpy install** via Homebrew from the Setup modal
+- [x] Prebuilt **`.app` + `.apk`** published by CI on each tag
+- [ ] **Screen mirroring over the app link via MediaProjection** — the Android app captures
+      its own screen (MediaCodec H.264) and streams it to the Mac over the existing
+      WebSocket; control (tap/type) is injected back through the accessibility service.
+      This removes ADB, scrcpy **and** Developer Options for mirroring too — leaving the
+      current ADB/scrcpy path as a power‑user fallback.
+
+Android can't let an app enable Developer Options or USB/Wireless debugging itself (a
+security restriction), which is exactly why the MediaProjection route — a one‑time
+on‑phone "Allow screen capture" tap — is the right long‑term fix.
 
 ---
 
