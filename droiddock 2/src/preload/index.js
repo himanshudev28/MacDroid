@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 contextBridge.exposeInMainWorld('droid', {
   tools: () => ipcRenderer.invoke('tools'),
+  installScrcpy: () => ipcRenderer.invoke('scrcpy:install'),
   onTools: (cb) => {
     const fn = (_e, t) => cb(t)
     ipcRenderer.on('tools', fn)

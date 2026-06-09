@@ -38,7 +38,8 @@ function augmentedPath() {
 const CANDIDATES = {
   adb: [...sdkPlatformToolDirs().map((d) => join(d, 'adb')),
     '/opt/homebrew/bin/adb', '/usr/local/bin/adb', '/opt/local/bin/adb'],
-  scrcpy: ['/opt/homebrew/bin/scrcpy', '/usr/local/bin/scrcpy', '/opt/local/bin/scrcpy']
+  scrcpy: ['/opt/homebrew/bin/scrcpy', '/usr/local/bin/scrcpy', '/opt/local/bin/scrcpy'],
+  brew: ['/opt/homebrew/bin/brew', '/usr/local/bin/brew']
 }
 
 function which(cmd) {
@@ -105,6 +106,24 @@ function download(url, dest, onProgress, redirects = 0) {
       file.close()
       reject(e)
     })
+  })
+}
+
+/** Install a Homebrew formula (e.g. scrcpy). Resolves on success. */
+export function brewInstall(brew, formula) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(brew, ['install', formula], {
+      env: { ...process.env, PATH: augmentedPath(), HOMEBREW_NO_AUTO_UPDATE: '1' }
+    })
+    let err = ''
+    child.stderr.on('data', (d) => (err += d))
+    child.stdout.on('data', () => {})
+    child.on('error', reject)
+    child.on('close', (code) =>
+      code === 0
+        ? resolve()
+        : reject(new Error(err.trim().split('\n').slice(-2).join(' ') || `brew exited ${code}`))
+    )
   })
 }
 

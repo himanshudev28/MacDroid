@@ -5,7 +5,9 @@ import * as adb from './adb'
 import * as wifi from './wifi'
 
 let win = null
-const tools = { adb: null, scrcpy: null }
+const tools = { adb: null, scrcpy: null, brew: null }
+
+const toolsStatus = () => ({ adb: !!tools.adb, scrcpy: !!tools.scrcpy, brew: !!tools.brew })
 let devices = []
 let tracker = null // adb track-devices controller
 
@@ -187,7 +189,7 @@ async function activateAdb() {
   if (!tracker) tracker = adb.trackDevices(tools.adb, onDeviceList)
   scheduleMdns()
   if (win && !win.isDestroyed()) {
-    win.webContents.send('tools', { adb: !!tools.adb, scrcpy: !!tools.scrcpy })
+    win.webContents.send('tools', toolsStatus())
   }
 }
 
@@ -213,6 +215,7 @@ async function ensureAdb() {
 app.whenReady().then(async () => {
   tools.adb = await adb.resolveTool('adb')
   tools.scrcpy = await adb.resolveTool('scrcpy')
+  tools.brew = await adb.resolveTool('brew')
 
   createWindow()
   // Wi-Fi app-link features work with no adb at all; bring adb online in the
@@ -270,11 +273,23 @@ app.on('window-all-closed', () => {
 /* ---------------- IPC ---------------- */
 
 ipcMain.handle('tools', () => ({
-  adb: !!tools.adb,
-  scrcpy: !!tools.scrcpy,
+  ...toolsStatus(),
   adbPath: tools.adb,
   scrcpyPath: tools.scrcpy
 }))
+
+// One-click install of scrcpy via Homebrew (for the Setup modal).
+ipcMain.handle('scrcpy:install', async () => {
+  try {
+    if (!tools.brew) return fail('Homebrew not found — install it from brew.sh, then retry')
+    await adb.brewInstall(tools.brew, 'scrcpy')
+    tools.scrcpy = await adb.resolveTool('scrcpy')
+    if (win && !win.isDestroyed()) win.webContents.send('tools', toolsStatus())
+    return tools.scrcpy ? ok(true) : fail('scrcpy installed but could not be located')
+  } catch (e) {
+    return fail(e)
+  }
+})
 
 ipcMain.handle('devices:get', () => devices)
 

@@ -392,7 +392,12 @@ export default function App() {
 
       <Toasts items={toasts} />
       {setup && (
-        <SetupModal tools={tools} reason={setup.reason} onClose={() => setSetup(null)} />
+        <SetupModal
+          tools={tools}
+          reason={setup.reason}
+          onClose={() => setSetup(null)}
+          onInstallScrcpy={() => window.droid.installScrcpy()}
+        />
       )}
       {pairOpen && wifi && <PairingModal status={wifi} onClose={() => setPairOpen(false)} />}
       {wPairOpen && (
