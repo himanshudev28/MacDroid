@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld('droid', {
   // screen mirroring over the app link (MediaProjection)
   mirrorStart: () => ipcRenderer.invoke('mirror:start'),
   mirrorStop: () => ipcRenderer.invoke('mirror:stop'),
+  mirrorInput: (msg) => ipcRenderer.invoke('mirror:input', msg),
   onMirrorStarted: (cb) => {
     const fn = (_e, m) => cb(m)
     ipcRenderer.on('mirror-started', fn)

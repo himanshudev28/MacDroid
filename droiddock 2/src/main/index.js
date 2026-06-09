@@ -622,6 +622,9 @@ ipcMain.handle('mirror:start', () => {
 
 ipcMain.handle('mirror:stop', () => ok(wifi.push({ type: 'mirror-stop' })))
 
+// Tap / swipe / nav from the Mac → injected on the phone via accessibility gestures.
+ipcMain.handle('mirror:input', (_e, msg) => ok(wifi.push(msg)))
+
 ipcMain.handle('wifi:sendClip', () => {
   try {
     return ok(wifi.sendClipboardNow())

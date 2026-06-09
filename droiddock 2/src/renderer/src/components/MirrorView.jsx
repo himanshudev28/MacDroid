@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { MonitorSmartphone, Usb, Square } from 'lucide-react'
+import { MonitorSmartphone, Usb, Square, ArrowLeft, Circle, SquareStack } from 'lucide-react'
 
 /**
  * Screen mirroring over the Wi-Fi app link (no ADB/scrcpy). The phone captures its
@@ -11,6 +11,7 @@ export default function MirrorView({ linked, onToast }) {
   const decoderRef = useRef(null)
   const tsRef = useRef(0)
   const waitingKeyRef = useRef(true)
+  const downRef = useRef(null) // pointer-down origin for tap-vs-swipe
   const [state, setState] = useState('idle') // idle | requesting | live
 
   const teardown = useCallback(() => {
@@ -111,6 +112,42 @@ export default function MirrorView({ linked, onToast }) {
     setState('idle')
   }
 
+  // --- control: map canvas pointer position → 0..1 fractions of the phone screen ---
+  const frac = (e) => {
+    const c = canvasRef.current
+    if (!c) return null
+    const r = c.getBoundingClientRect()
+    return {
+      x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
+      y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))
+    }
+  }
+  const onDown = (e) => {
+    const p = frac(e)
+    if (p) downRef.current = { ...p, t: Date.now() }
+  }
+  const onUp = (e) => {
+    const d = downRef.current
+    downRef.current = null
+    const p = frac(e)
+    if (!d || !p) return
+    const dist = Math.hypot(p.x - d.x, p.y - d.y)
+    if (dist < 0.02) {
+      window.droid.mirrorInput({ type: 'mirror-tap', x: p.x, y: p.y })
+    } else {
+      window.droid.mirrorInput({
+        type: 'mirror-swipe',
+        x1: d.x, y1: d.y, x2: p.x, y2: p.y,
+        dur: Math.min(800, Math.max(60, Date.now() - d.t))
+      })
+    }
+  }
+  const onWheel = (e) => {
+    const dy = e.deltaY > 0 ? -0.3 : 0.3 // content moves opposite to the wheel
+    window.droid.mirrorInput({ type: 'mirror-swipe', x1: 0.5, y1: 0.5, x2: 0.5, y2: 0.5 + dy, dur: 120 })
+  }
+  const key = (k) => window.droid.mirrorInput({ type: 'mirror-key', key: k })
+
   if (!linked) {
     return (
       <Empty
@@ -143,18 +180,47 @@ export default function MirrorView({ linked, onToast }) {
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-line px-5">
         <span className="font-mono text-[10px] tracking-[0.25em] text-ok">● MIRRORING · WI-FI</span>
-        <button
-          onClick={stop}
-          className="flex items-center gap-1.5 border border-line px-3 py-1.5 font-display text-[11px] font-semibold tracking-wider text-dim transition-colors hover:border-bad/50 hover:text-bad"
-        >
-          <Square size={11} />
-          STOP
-        </button>
+        <div className="flex items-center gap-1.5">
+          <NavBtn title="Back" onClick={() => key('back')}>
+            <ArrowLeft size={14} />
+          </NavBtn>
+          <NavBtn title="Home" onClick={() => key('home')}>
+            <Circle size={13} />
+          </NavBtn>
+          <NavBtn title="Recents" onClick={() => key('recents')}>
+            <SquareStack size={13} />
+          </NavBtn>
+          <button
+            onClick={stop}
+            className="ml-2 flex items-center gap-1.5 border border-line px-3 py-1.5 font-display text-[11px] font-semibold tracking-wider text-dim transition-colors hover:border-bad/50 hover:text-bad"
+          >
+            <Square size={11} />
+            STOP
+          </button>
+        </div>
       </div>
       <div className="flex min-h-0 flex-1 items-center justify-center bg-ink p-4">
-        <canvas ref={canvasRef} className="max-h-full max-w-full border border-line object-contain" />
+        <canvas
+          ref={canvasRef}
+          onPointerDown={onDown}
+          onPointerUp={onUp}
+          onWheel={onWheel}
+          className="max-h-full max-w-full cursor-pointer touch-none border border-line"
+        />
       </div>
     </div>
+  )
+}
+
+function NavBtn({ title, onClick, children }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className="border border-line p-1.5 text-dim transition-colors hover:border-amber/40 hover:text-amber"
+    >
+      {children}
+    </button>
   )
 }
 
