@@ -180,13 +180,44 @@ function createWindow() {
   }
 }
 
+/** Bring adb online: start its server + device tracker, and tell the renderer. */
+async function activateAdb() {
+  if (!tools.adb) return
+  await adb.startServer(tools.adb)
+  if (!tracker) tracker = adb.trackDevices(tools.adb, onDeviceList)
+  scheduleMdns()
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('tools', { adb: !!tools.adb, scrcpy: !!tools.scrcpy })
+  }
+}
+
+/** Resolve adb, falling back to a cached/auto-downloaded copy so the user never has
+ *  to install platform-tools by hand. Runs in the background; non-blocking. */
+async function ensureAdb() {
+  if (tools.adb) return activateAdb()
+  const toolsDir = join(app.getPath('userData'), 'tools')
+  tools.adb = adb.bundledAdb(toolsDir) // previously downloaded?
+  if (tools.adb) return activateAdb()
+  const emit = (kind, text) =>
+    win && !win.isDestroyed() && win.webContents.send('wifi-event', { kind, text })
+  try {
+    emit('info', 'Setting up adb (one-time, ~5 MB)…')
+    tools.adb = await adb.downloadAdb(toolsDir, () => {})
+    emit('ok', 'adb ready — full features enabled')
+    await activateAdb()
+  } catch (e) {
+    emit('bad', `Couldn't auto-install adb: ${String(e.message || e)}. Wi-Fi features still work.`)
+  }
+}
+
 app.whenReady().then(async () => {
   tools.adb = await adb.resolveTool('adb')
   tools.scrcpy = await adb.resolveTool('scrcpy')
-  if (tools.adb) await adb.startServer(tools.adb)
 
   createWindow()
-  if (tools.adb) tracker = adb.trackDevices(tools.adb, onDeviceList)
+  // Wi-Fi app-link features work with no adb at all; bring adb online in the
+  // background (resolve → cached → auto-download) for the ADB-only extras.
+  ensureAdb()
   scheduleMdns()
 
   wifi.start({

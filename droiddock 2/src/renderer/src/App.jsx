@@ -57,6 +57,7 @@ export default function App() {
   /* boot: tool detection + device + wifi subscriptions */
   useEffect(() => {
     window.droid.tools().then(setTools)
+    const offTools = window.droid.onTools(setTools) // adb may come online after auto-download
     window.droid.devices().then(setDevices)
     window.droid.wifiStatus().then(setWifi)
     window.droid.pairedInfo().then((r) => r.ok && setPairedGuid(r.data.guid))
@@ -81,6 +82,7 @@ export default function App() {
       })
     })
     return () => {
+      offTools()
       offDevices()
       offWifi()
       offWifiEvent()

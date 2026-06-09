@@ -1,6 +1,7 @@
 // All interaction with adb / scrcpy lives here (main process only).
 import { execFile, spawn } from 'node:child_process'
-import { existsSync, createWriteStream } from 'node:fs'
+import { existsSync, createWriteStream, mkdirSync, chmodSync, rmSync } from 'node:fs'
+import { get as httpsGet } from 'node:https'
 import { join, basename, extname } from 'node:path'
 import { homedir } from 'node:os'
 
@@ -58,6 +59,77 @@ export async function resolveTool(name) {
     if (existsSync(p)) return p
   }
   return null
+}
+
+/* ---- Auto-provision adb: download Google's platform-tools so the user never has
+   to install it by hand. Cached in the app's data dir after the first time. ---- */
+
+const PLATFORM_TOOLS_URL = {
+  darwin: 'https://dl.google.com/android/repository/platform-tools-latest-darwin.zip',
+  linux: 'https://dl.google.com/android/repository/platform-tools-latest-linux.zip',
+  win32: 'https://dl.google.com/android/repository/platform-tools-latest-windows.zip'
+}
+
+/** Path where a previously auto-downloaded adb would live, or null if not present. */
+export function bundledAdb(baseDir) {
+  const exe = process.platform === 'win32' ? 'adb.exe' : 'adb'
+  const p = join(baseDir, 'platform-tools', exe)
+  return existsSync(p) ? p : null
+}
+
+function download(url, dest, onProgress, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirects > 5) return reject(new Error('too many redirects'))
+    const file = createWriteStream(dest)
+    const req = httpsGet(url, (res) => {
+      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+        file.close()
+        res.resume()
+        return resolve(download(res.headers.location, dest, onProgress, redirects + 1))
+      }
+      if (res.statusCode !== 200) {
+        file.close()
+        res.resume()
+        return reject(new Error(`download failed (HTTP ${res.statusCode})`))
+      }
+      const total = Number(res.headers['content-length'] || 0)
+      let got = 0
+      res.on('data', (c) => {
+        got += c.length
+        if (total && onProgress) onProgress(got / total)
+      })
+      res.pipe(file)
+      file.on('finish', () => file.close(() => resolve(dest)))
+    })
+    req.on('error', (e) => {
+      file.close()
+      reject(e)
+    })
+  })
+}
+
+/** Download + extract platform-tools into baseDir; resolves to the adb path. */
+export async function downloadAdb(baseDir, onProgress) {
+  const url = PLATFORM_TOOLS_URL[process.platform]
+  if (!url) throw new Error(`no platform-tools build for ${process.platform}`)
+  mkdirSync(baseDir, { recursive: true })
+  const zip = join(baseDir, 'platform-tools.zip')
+  await download(url, zip, onProgress)
+  // macOS/Linux ship `unzip`; Windows uses tar (built in since Win10).
+  if (process.platform === 'win32') {
+    await run('tar', ['-xf', zip, '-C', baseDir])
+  } else {
+    await run('/usr/bin/unzip', ['-o', '-q', zip, '-d', baseDir])
+  }
+  try {
+    rmSync(zip, { force: true })
+  } catch {
+    /* leftover zip is harmless */
+  }
+  const adbPath = bundledAdb(baseDir)
+  if (!adbPath) throw new Error('platform-tools extracted but adb is missing')
+  if (process.platform !== 'win32') chmodSync(adbPath, 0o755)
+  return adbPath
 }
 
 function run(bin, args, { timeout = 20000 } = {}) {

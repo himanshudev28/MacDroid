@@ -2,6 +2,11 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 contextBridge.exposeInMainWorld('droid', {
   tools: () => ipcRenderer.invoke('tools'),
+  onTools: (cb) => {
+    const fn = (_e, t) => cb(t)
+    ipcRenderer.on('tools', fn)
+    return () => ipcRenderer.removeListener('tools', fn)
+  },
   devices: () => ipcRenderer.invoke('devices:get'),
   onDevices: (cb) => {
     const fn = (_e, list) => cb(list)
