@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DroidDock</string>
+    <string name="send_to_mac">Send to Mac</string>
+    <string name="tile_label">Send to Mac</string>
+    <string name="a11y_label">DroidDock Clipboard</string>
+    <string name="a11y_desc">Lets DroidDock automatically send text you copy on this phone to your paired Mac. Only the clipboard is used — no screen content is read.</string>
+</resources>

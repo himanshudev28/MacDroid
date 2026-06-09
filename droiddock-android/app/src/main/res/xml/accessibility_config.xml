@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- DroidDock clipboard auto-capture. We only listen for clipboard changes via
+     ClipboardManager; we do NOT read window content (canRetrieveWindowContent=false). -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeViewLongClicked|typeViewTextSelectionChanged|typeNotificationStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/a11y_desc"
+    android:notificationTimeout="100"
+    android:settingsActivity="com.droiddock.app.MainActivity" />

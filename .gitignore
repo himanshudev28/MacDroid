@@ -1,0 +1,24 @@
+# ---- macOS ----
+.DS_Store
+**/.DS_Store
+
+# ---- Mac app: Electron / Node (droiddock 2) ----
+**/node_modules/
+droiddock 2/out/
+droiddock 2/dist/
+# keep droiddock 2/build/ — it holds the app icon (electron-builder resources)
+
+# ---- Android: Gradle / Kotlin / Android Studio (droiddock-android) ----
+**/.gradle/
+**/.kotlin/
+droiddock-android/build/
+droiddock-android/app/build/
+droiddock-android/**/build/
+droiddock-android/captures/
+droiddock-android/.cxx/
+**/local.properties
+*.iml
+.idea/
+
+# ---- logs / misc ----
+*.log
