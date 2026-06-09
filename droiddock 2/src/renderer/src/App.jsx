@@ -11,6 +11,7 @@ import ContactsView from './components/ContactsView.jsx'
 import PhotosView from './components/PhotosView.jsx'
 import SettingsView from './components/SettingsView.jsx'
 import CallOverlay from './components/CallOverlay.jsx'
+import SetupModal from './components/SetupModal.jsx'
 
 const ROOT = '/sdcard'
 
@@ -26,6 +27,7 @@ export default function App() {
   const [toasts, setToasts] = useState([])
   const [wifi, setWifi] = useState(null)
   const [pairOpen, setPairOpen] = useState(false)
+  const [setup, setSetup] = useState(null) // { reason } when a needed tool is missing
   const [wPairOpen, setWPairOpen] = useState(false)
   const [pairedGuid, setPairedGuid] = useState(null)
   const [view, setView] = useState('files')
@@ -214,6 +216,7 @@ export default function App() {
     })
 
   const mirror = async () => {
+    if (!tools?.scrcpy) return setSetup({ reason: 'Screen mirroring needs scrcpy.' })
     const res = await window.droid.mirror(serial)
     if (!res.ok) toast('bad', res.error)
   }
@@ -246,6 +249,7 @@ export default function App() {
     })
 
   const camera = async () => {
+    if (!tools?.scrcpy) return setSetup({ reason: 'Phone camera needs scrcpy.' })
     const res = await window.droid.camera(serial)
     if (!res.ok) toast('bad', res.error)
   }
@@ -265,8 +269,8 @@ export default function App() {
         </div>
         {tools && (
           <div className="no-drag flex items-center gap-2 font-mono text-[10px] tracking-wider">
-            <Chip label="ADB" on={tools.adb} />
-            <Chip label="SCRCPY" on={tools.scrcpy} />
+            <Chip label="ADB" on={tools.adb} onClick={() => setSetup({ reason: null })} />
+            <Chip label="SCRCPY" on={tools.scrcpy} onClick={() => setSetup({ reason: null })} />
           </div>
         )}
       </header>
@@ -385,6 +389,9 @@ export default function App() {
       </div>
 
       <Toasts items={toasts} />
+      {setup && (
+        <SetupModal tools={tools} reason={setup.reason} onClose={() => setSetup(null)} />
+      )}
       {pairOpen && wifi && <PairingModal status={wifi} onClose={() => setPairOpen(false)} />}
       {wPairOpen && (
         <WirelessPairModal
@@ -405,17 +412,18 @@ export default function App() {
   )
 }
 
-function Chip({ label, on }) {
+function Chip({ label, on, onClick }) {
   return (
-    <span
-      className={`flex items-center gap-1.5 rounded-sm border px-2 py-0.5 ${
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-1.5 rounded-sm border px-2 py-0.5 transition-colors hover:border-amber/50 ${
         on ? 'border-amber/30 text-amber' : 'border-line text-dim'
       }`}
-      title={on ? `${label} detected` : `${label} not found`}
+      title={on ? `${label} detected — click for setup` : `${label} not found — click to install`}
     >
       <span className={`h-1 w-1 rounded-full ${on ? 'bg-amber' : 'bg-dim/50'}`} />
       {label}
-    </span>
+    </button>
   )
 }
 
