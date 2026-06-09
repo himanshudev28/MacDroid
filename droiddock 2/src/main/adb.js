@@ -4,19 +4,48 @@ import { existsSync, createWriteStream } from 'node:fs'
 import { join, basename, extname } from 'node:path'
 import { homedir } from 'node:os'
 
+// Where the Android SDK platform-tools may live (env first, then the default location).
+function sdkPlatformToolDirs() {
+  const dirs = []
+  for (const root of [process.env.ANDROID_HOME, process.env.ANDROID_SDK_ROOT]) {
+    if (root) dirs.push(join(root, 'platform-tools'))
+  }
+  dirs.push(join(homedir(), 'Library/Android/sdk/platform-tools')) // macOS default
+  dirs.push(join(homedir(), 'Android/Sdk/platform-tools')) // some custom installs
+  return dirs
+}
+
+// Common bin dirs a GUI-launched (Finder/Dock) app's minimal PATH usually lacks:
+// Homebrew (Apple Silicon + Intel), MacPorts, system, and the SDK platform-tools.
+function toolDirs() {
+  return [
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+    '/opt/local/bin',
+    '/usr/bin',
+    '/bin',
+    ...sdkPlatformToolDirs()
+  ]
+}
+
+// process PATH + the common locations above, de-duplicated.
+function augmentedPath() {
+  const current = (process.env.PATH || '').split(':').filter(Boolean)
+  return [...new Set([...current, ...toolDirs()])].join(':')
+}
+
 const CANDIDATES = {
-  adb: [
-    '/opt/homebrew/bin/adb',
-    '/usr/local/bin/adb',
-    join(homedir(), 'Library/Android/sdk/platform-tools/adb')
-  ],
-  scrcpy: ['/opt/homebrew/bin/scrcpy', '/usr/local/bin/scrcpy']
+  adb: [...sdkPlatformToolDirs().map((d) => join(d, 'adb')),
+    '/opt/homebrew/bin/adb', '/usr/local/bin/adb', '/opt/local/bin/adb'],
+  scrcpy: ['/opt/homebrew/bin/scrcpy', '/usr/local/bin/scrcpy', '/opt/local/bin/scrcpy']
 }
 
 function which(cmd) {
   return new Promise((resolve) => {
-    execFile('/usr/bin/which', [cmd], (err, stdout) => {
-      const p = (stdout || '').trim()
+    // search an augmented PATH so tools in Homebrew/MacPorts/the SDK are found even
+    // when the app was launched from Finder (which gives a bare PATH).
+    execFile('/usr/bin/which', [cmd], { env: { ...process.env, PATH: augmentedPath() } }, (err, stdout) => {
+      const p = (stdout || '').trim().split('\n')[0]
       resolve(!err && p ? p : null)
     })
   })
@@ -207,9 +236,14 @@ export function connectTcp(adb, addr) {
 }
 
 // scrcpy shells out to `adb`. In a GUI-launched app the system PATH often doesn't
-// include the SDK platform-tools, so scrcpy can't find adb and fails to start. Point
-// it at our resolved absolute adb via the ADB env var that scrcpy honors.
-const scrcpyEnv = (adb) => (adb ? { ...process.env, ADB: adb } : process.env)
+// include the SDK platform-tools, so scrcpy can't find adb and fails to start. Give it
+// both: the exact adb via the ADB env var scrcpy honors (keeps versions consistent),
+// and an augmented PATH so it can still locate adb on any setup.
+const scrcpyEnv = (adb) => ({
+  ...process.env,
+  PATH: augmentedPath(),
+  ...(adb ? { ADB: adb } : {})
+})
 
 export function camera(scrcpy, serial, adb) {
   const child = spawn(
