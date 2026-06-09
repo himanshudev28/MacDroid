@@ -206,7 +206,12 @@ export function connectTcp(adb, addr) {
   return run(adb, ['connect', addr], { timeout: 4000 }).catch(() => {})
 }
 
-export function camera(scrcpy, serial) {
+// scrcpy shells out to `adb`. In a GUI-launched app the system PATH often doesn't
+// include the SDK platform-tools, so scrcpy can't find adb and fails to start. Point
+// it at our resolved absolute adb via the ADB env var that scrcpy honors.
+const scrcpyEnv = (adb) => (adb ? { ...process.env, ADB: adb } : process.env)
+
+export function camera(scrcpy, serial, adb) {
   const child = spawn(
     scrcpy,
     [
@@ -218,7 +223,7 @@ export function camera(scrcpy, serial) {
       '--window-title',
       'DroidDock — Camera'
     ],
-    { detached: true, stdio: 'ignore' }
+    { detached: true, stdio: 'ignore', env: scrcpyEnv(adb) }
   )
   child.unref()
 }
@@ -332,10 +337,11 @@ export function screenshot(adb, serial, destDir) {
   })
 }
 
-export function mirror(scrcpy, serial) {
+export function mirror(scrcpy, serial, adb) {
   const child = spawn(scrcpy, ['-s', serial, '--window-title', 'DroidDock — Mirror'], {
     detached: true,
-    stdio: 'ignore'
+    stdio: 'ignore',
+    env: scrcpyEnv(adb)
   })
   child.unref()
   return child

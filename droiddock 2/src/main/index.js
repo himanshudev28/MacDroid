@@ -57,7 +57,7 @@ let mirrorState = null // { child, serial, id, diedAt }
 const MIRROR_GRACE_MS = 10000
 
 function startMirror(serial, id) {
-  const child = adb.mirror(tools.scrcpy, serial)
+  const child = adb.mirror(tools.scrcpy, serial, tools.adb)
   mirrorState = { child, serial, id, diedAt: 0 }
   child.on('exit', () => {
     if (mirrorState && mirrorState.child === child) {
@@ -506,7 +506,7 @@ ipcMain.handle('adb:wireless', async (_e, serial) => {
 ipcMain.handle('camera', async (_e, serial) => {
   try {
     if (!tools.scrcpy) throw new Error('scrcpy not found — brew install scrcpy')
-    adb.camera(tools.scrcpy, serial)
+    adb.camera(tools.scrcpy, serial, tools.adb)
     return ok(true)
   } catch (e) {
     return fail(e)
