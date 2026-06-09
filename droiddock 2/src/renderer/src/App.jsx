@@ -12,6 +12,7 @@ import PhotosView from './components/PhotosView.jsx'
 import SettingsView from './components/SettingsView.jsx'
 import CallOverlay from './components/CallOverlay.jsx'
 import SetupModal from './components/SetupModal.jsx'
+import MirrorView from './components/MirrorView.jsx'
 
 const ROOT = '/sdcard'
 
@@ -306,6 +307,7 @@ export default function App() {
             {[
               ['files', 'FILES'],
               ['photos', 'PHOTOS'],
+              ['screen', 'SCREEN'],
               ['messages', 'MESSAGES'],
               ['contacts', 'CONTACTS'],
               ['notifications', `NOTIFS${notifs.length ? ` · ${notifs.length}` : ''}`],
@@ -360,6 +362,8 @@ export default function App() {
               <SettingsView onToast={toast} />
             ) : view === 'photos' ? (
               <PhotosView available={fsAvailable} onToast={toast} />
+            ) : view === 'screen' ? (
+              <MirrorView linked={!!wifi?.connected} onToast={toast} />
             ) : fsAvailable ? (
               <FileBrowser
                 path={path}

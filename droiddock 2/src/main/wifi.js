@@ -255,10 +255,16 @@ export function start({ statusCb, eventCb, forwardCb }) {
     }, 5000)
 
     socket.on('message', (raw, isBinary) => {
-      // Binary frames are file-transfer chunks — hand straight to the isolated
-      // transfer manager and never touch the JSON path (Phase 6a A3).
+      // Binary frames: kind byte 3 = mirror video frame → renderer; everything
+      // else is a file-transfer chunk handled by the isolated transfer manager.
       if (isBinary) {
-        if (authed && phone && phone.socket === socket) transfer.onBinary(raw)
+        if (authed && phone && phone.socket === socket) {
+          if (raw.length > 2 && raw[0] === 3) {
+            onForward('mirror-frame', { key: (raw[1] & 1) === 1, data: Buffer.from(raw.subarray(2)) })
+          } else {
+            transfer.onBinary(raw)
+          }
+        }
         return
       }
       let msg
@@ -309,6 +315,12 @@ export function start({ statusCb, eventCb, forwardCb }) {
         onForward('media', msg)
       } else if (msg.type === 'sms-changed') {
         onForward('sms-changed', {})
+      } else if (
+        msg.type === 'mirror-started' ||
+        msg.type === 'mirror-stopped' ||
+        msg.type === 'mirror-error'
+      ) {
+        onForward(msg.type, msg)
       } else if (msg.type === 'call') {
         showCall(msg)
       } else if (msg.type === 'notification-removed') {

@@ -246,6 +246,8 @@ object ConnectionManager {
                         }
                     }
                     "media-cmd" -> MediaRemote.command(msg.optString("cmd"), msg.optInt("value"))
+                    "mirror-start" -> MirrorPermissionActivity.request(appCtx)
+                    "mirror-stop" -> MirrorService.stop(appCtx)
                 }
             }
 
@@ -279,6 +281,17 @@ object ConnectionManager {
     }
 
     fun send(obj: JSONObject): Boolean = ws?.send(obj.toString()) ?: false
+
+    /** Send one H.264 access unit as a binary frame: [kind=3][flags][payload].
+     *  flags bit0 = keyframe. Used by MirrorService for screen mirroring. */
+    fun sendVideo(flags: Int, payload: ByteArray): Boolean {
+        val socket = ws ?: return false
+        val out = ByteArray(payload.size + 2)
+        out[0] = 3
+        out[1] = flags.toByte()
+        System.arraycopy(payload, 0, out, 2, payload.size)
+        return socket.send(ByteString.of(*out))
+    }
 
     /** Replies to a reqId-tagged request from the Mac, converting failures into readable errors. */
     private fun respond(socket: WebSocket, req: JSONObject, type: String, build: (JSONObject) -> Unit) {

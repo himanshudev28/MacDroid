@@ -613,6 +613,15 @@ ipcMain.handle('sms:send', async (_e, address, text) => {
 
 ipcMain.handle('media:cmd', (_e, cmd, value) => ok(wifi.push({ type: 'media-cmd', cmd, value })))
 
+/* ---- Screen mirroring over the app link (MediaProjection, no ADB) ---- */
+
+ipcMain.handle('mirror:start', () => {
+  if (!wifi.push({ type: 'mirror-start' })) return fail('Phone not linked over Wi-Fi')
+  return ok(true)
+})
+
+ipcMain.handle('mirror:stop', () => ok(wifi.push({ type: 'mirror-stop' })))
+
 ipcMain.handle('wifi:sendClip', () => {
   try {
     return ok(wifi.sendClipboardNow())

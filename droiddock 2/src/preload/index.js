@@ -52,6 +52,29 @@ contextBridge.exposeInMainWorld('droid', {
   smsMessages: (threadId) => ipcRenderer.invoke('sms:messages', threadId),
   smsSend: (address, text) => ipcRenderer.invoke('sms:send', address, text),
   mediaCmd: (cmd, value) => ipcRenderer.invoke('media:cmd', cmd, value),
+  // screen mirroring over the app link (MediaProjection)
+  mirrorStart: () => ipcRenderer.invoke('mirror:start'),
+  mirrorStop: () => ipcRenderer.invoke('mirror:stop'),
+  onMirrorStarted: (cb) => {
+    const fn = (_e, m) => cb(m)
+    ipcRenderer.on('mirror-started', fn)
+    return () => ipcRenderer.removeListener('mirror-started', fn)
+  },
+  onMirrorFrame: (cb) => {
+    const fn = (_e, m) => cb(m)
+    ipcRenderer.on('mirror-frame', fn)
+    return () => ipcRenderer.removeListener('mirror-frame', fn)
+  },
+  onMirrorStopped: (cb) => {
+    const fn = () => cb()
+    ipcRenderer.on('mirror-stopped', fn)
+    return () => ipcRenderer.removeListener('mirror-stopped', fn)
+  },
+  onMirrorError: (cb) => {
+    const fn = (_e, m) => cb(m)
+    ipcRenderer.on('mirror-error', fn)
+    return () => ipcRenderer.removeListener('mirror-error', fn)
+  },
   onMedia: (cb) => {
     const fn = (_e, m) => cb(m)
     ipcRenderer.on('media', fn)
