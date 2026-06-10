@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Circle, SquareStack, Pin, X } from 'lucide-react'
+import { ArrowLeft, Circle, SquareStack, Pin, X, SwitchCamera } from 'lucide-react'
 
 /**
  * Pop-out, phone-shaped mirror window (the #mirror route). Decodes the H.264 stream with
@@ -14,6 +14,7 @@ export default function MirrorWindow() {
   const downRef = useRef(null)
   const [live, setLive] = useState(false)
   const [source, setSource] = useState('screen')
+  const [facing, setFacing] = useState('back')
   const [onTop, setOnTop] = useState(false)
   const isCam = source === 'camera'
 
@@ -52,6 +53,7 @@ export default function MirrorWindow() {
 
     const offStarted = window.droid.onMirrorStarted((m) => {
       setSource(m.source || 'screen')
+      setFacing(m.facing || 'back')
       setLive(true)
       setupDecoder(m.codec)
     })
@@ -86,6 +88,26 @@ export default function MirrorWindow() {
     }
   }, [])
 
+  // Type on the Mac keyboard → inject into the focused field on the phone (screen mode).
+  useEffect(() => {
+    if (!live || isCam) return undefined
+    const onKey = (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return // leave shortcuts alone
+      if (e.key === 'Backspace') {
+        window.droid.mirrorInput({ type: 'mirror-text', op: 'backspace' })
+        e.preventDefault()
+      } else if (e.key === 'Enter') {
+        window.droid.mirrorInput({ type: 'mirror-text', op: 'enter' })
+        e.preventDefault()
+      } else if (e.key.length === 1) {
+        window.droid.mirrorInput({ type: 'mirror-text', text: e.key })
+        e.preventDefault()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [live, isCam])
+
   // --- control: canvas pointer → 0..1 phone-screen fractions ---
   const frac = (e) => {
     const c = canvasRef.current
@@ -119,6 +141,8 @@ export default function MirrorWindow() {
     window.droid.mirrorInput({ type: 'mirror-swipe', x1: 0.5, y1: 0.5, x2: 0.5, y2: 0.5 + dy, dur: 120 })
   }
   const key = (k) => window.droid.mirrorInput({ type: 'mirror-key', key: k })
+  const flipCamera = () =>
+    window.droid.mirrorInput({ type: 'camera-flip', facing: facing === 'front' ? 'back' : 'front' })
   const toggleTop = () => {
     const next = !onTop
     setOnTop(next)
@@ -145,6 +169,11 @@ export default function MirrorWindow() {
               </Btn>
             </>
           )}
+          {isCam && live && (
+            <Btn title="Switch front/back camera" onClick={flipCamera}>
+              <SwitchCamera size={13} />
+            </Btn>
+          )}
           <Btn title={onTop ? 'Unpin (on top)' : 'Keep on top'} onClick={toggleTop} active={onTop}>
             <Pin size={12} />
           </Btn>
@@ -161,6 +190,15 @@ export default function MirrorWindow() {
             onPointerDown={isCam ? undefined : onDown}
             onPointerUp={isCam ? undefined : onUp}
             onWheel={isCam ? undefined : onWheel}
+            onContextMenu={
+              isCam
+                ? undefined
+                : (e) => {
+                    e.preventDefault()
+                    key('back')
+                  }
+            }
+            style={isCam && facing === 'front' ? { transform: 'scaleX(-1)' } : undefined}
             className={`h-full w-full object-contain ${isCam ? '' : 'cursor-pointer'}`}
           />
         ) : (

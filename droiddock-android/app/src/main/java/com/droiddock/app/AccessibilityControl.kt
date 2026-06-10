@@ -4,8 +4,10 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Context
 import android.graphics.Path
+import android.os.Bundle
 import android.util.DisplayMetrics
 import android.view.WindowManager
+import android.view.accessibility.AccessibilityNodeInfo
 
 /**
  * Injects taps / swipes / nav actions onto the phone for the Mac-side screen control.
@@ -49,6 +51,32 @@ object AccessibilityControl {
             .addStroke(GestureDescription.StrokeDescription(path, 0, dur))
             .build()
         runCatching { svc.dispatchGesture(g, null, null) }
+    }
+
+    /** Type [text] into the currently-focused input field (append at the end). */
+    fun typeText(text: String) {
+        val node = service?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return
+        setNodeText(node, (node.text?.toString() ?: "") + text)
+    }
+
+    /** Delete the last character of the focused input field. */
+    fun backspace() {
+        val node = service?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return
+        val cur = node.text?.toString() ?: return
+        if (cur.isEmpty()) return
+        setNodeText(node, cur.dropLast(1))
+    }
+
+    private fun setNodeText(node: AccessibilityNodeInfo, text: String) {
+        val args = Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+        }
+        runCatching { node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args) }
+        val sel = Bundle().apply {
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, text.length)
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, text.length)
+        }
+        runCatching { node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, sel) }
     }
 
     /** Hardware-key equivalents via global accessibility actions. */

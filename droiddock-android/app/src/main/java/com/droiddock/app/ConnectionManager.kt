@@ -255,12 +255,24 @@ object ConnectionManager {
                             android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
                         MirrorPermissionActivity.request(appCtx, "camera", facing)
                     }
+                    "camera-flip" -> {
+                        val facing = if (msg.optString("facing") == "front")
+                            android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT
+                        else
+                            android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
+                        MirrorService.instance?.flip(facing)
+                    }
                     "mirror-tap" -> AccessibilityControl.tap(msg.optDouble("x"), msg.optDouble("y"))
                     "mirror-swipe" -> AccessibilityControl.swipe(
                         msg.optDouble("x1"), msg.optDouble("y1"),
                         msg.optDouble("x2"), msg.optDouble("y2"), msg.optInt("dur", 120)
                     )
                     "mirror-key" -> AccessibilityControl.key(msg.optString("key"))
+                    "mirror-text" -> when (msg.optString("op")) {
+                        "backspace" -> AccessibilityControl.backspace()
+                        "enter" -> AccessibilityControl.typeText("\n")
+                        else -> AccessibilityControl.typeText(msg.optString("text"))
+                    }
                 }
             }
 
