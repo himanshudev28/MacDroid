@@ -210,10 +210,15 @@ function openMirrorWindow() {
       mirrorWin.webContents.send('mirror-started', lastMirrorStarted)
     }
   })
-  // closing the window ends the stream
+  // closing the window ends the stream. Tell the phone to stop, and reset the
+  // main-window launcher right away — in Auto mode the phone pauses instead of
+  // replying 'mirror-stopped', so we can't wait for a round-trip or the SCREEN
+  // tab stays stuck on "Mirroring in a window".
   mirrorWin.on('closed', () => {
     mirrorWin = null
+    lastMirrorStarted = null
     wifi.push({ type: 'mirror-stop' })
+    if (win && !win.isDestroyed()) win.webContents.send('mirror-stopped', {})
   })
   const base =
     process.env['ELECTRON_RENDERER_URL'] ||
