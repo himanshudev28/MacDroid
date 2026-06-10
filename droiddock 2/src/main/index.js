@@ -5,6 +5,8 @@ import * as adb from './adb'
 import * as wifi from './wifi'
 
 let win = null
+let mirrorWin = null // pop-out, phone-shaped mirror/camera window
+let lastMirrorStarted = null // replayed to the pop-out window once it finishes loading
 const tools = { adb: null, scrcpy: null, brew: null }
 
 const toolsStatus = () => ({ adb: !!tools.adb, scrcpy: !!tools.scrcpy, brew: !!tools.brew })
@@ -182,6 +184,58 @@ function createWindow() {
   }
 }
 
+/** Open the frameless, phone-shaped pop-out mirror window (loads the #mirror route). */
+function openMirrorWindow() {
+  if (mirrorWin && !mirrorWin.isDestroyed()) {
+    mirrorWin.focus()
+    return
+  }
+  mirrorWin = new BrowserWindow({
+    width: 360,
+    height: 760,
+    minWidth: 200,
+    minHeight: 240,
+    show: false,
+    frame: false,
+    backgroundColor: '#0b0d10',
+    fullscreenable: false,
+    title: 'DroidDock — Mirror',
+    webPreferences: { preload: join(__dirname, '../preload/index.js') }
+  })
+  mirrorWin.once('ready-to-show', () => mirrorWin.show())
+  // if the stream already started before this window finished loading, replay it
+  mirrorWin.webContents.on('did-finish-load', () => {
+    if (lastMirrorStarted && mirrorWin && !mirrorWin.isDestroyed()) {
+      fitMirrorWindow(lastMirrorStarted.width, lastMirrorStarted.height)
+      mirrorWin.webContents.send('mirror-started', lastMirrorStarted)
+    }
+  })
+  // closing the window ends the stream
+  mirrorWin.on('closed', () => {
+    mirrorWin = null
+    wifi.push({ type: 'mirror-stop' })
+  })
+  const base =
+    process.env['ELECTRON_RENDERER_URL'] ||
+    `file://${join(__dirname, '../renderer/index.html')}`
+  if (process.env['ELECTRON_RENDERER_URL']) {
+    mirrorWin.loadURL(`${base}#mirror`)
+  } else {
+    mirrorWin.loadFile(join(__dirname, '../renderer/index.html'), { hash: 'mirror' })
+  }
+}
+
+/** Lock the pop-out window to the phone's aspect ratio (minus the 36px control bar). */
+function fitMirrorWindow(w, h) {
+  if (!mirrorWin || mirrorWin.isDestroyed() || !w || !h) return
+  const bar = 36
+  const targetH = 760
+  const videoH = targetH - bar
+  const width = Math.max(200, Math.round((videoH * w) / h))
+  mirrorWin.setAspectRatio(w / h, { width: 0, height: bar })
+  mirrorWin.setContentSize(width, targetH)
+}
+
 /** Bring adb online: start its server + device tracker, and tell the renderer. */
 async function activateAdb() {
   if (!tools.adb) return
@@ -253,6 +307,24 @@ app.whenReady().then(async () => {
         appLinkPaused = false
         scheduleMdns()
         return
+      }
+      // Mirror video → the pop-out window decodes/renders; the main window only needs
+      // the status (started/stopped/error) for the SCREEN-tab launcher.
+      if (channel === 'mirror-frame') {
+        if (mirrorWin && !mirrorWin.isDestroyed()) mirrorWin.webContents.send(channel, payload)
+        return
+      }
+      if (channel === 'mirror-started') {
+        lastMirrorStarted = payload
+        fitMirrorWindow(payload.width, payload.height)
+      }
+      if (channel === 'mirror-stopped' || channel === 'mirror-error') lastMirrorStarted = null
+      if (
+        channel === 'mirror-started' ||
+        channel === 'mirror-stopped' ||
+        channel === 'mirror-error'
+      ) {
+        if (mirrorWin && !mirrorWin.isDestroyed()) mirrorWin.webContents.send(channel, payload)
       }
       if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
     }
@@ -615,22 +687,34 @@ ipcMain.handle('media:cmd', (_e, cmd, value) => ok(wifi.push({ type: 'media-cmd'
 
 /* ---- Screen mirroring over the app link (MediaProjection, no ADB) ---- */
 
-ipcMain.handle('mirror:start', () => {
-  if (!wifi.push({ type: 'mirror-start' })) return fail('Phone not linked over Wi-Fi')
+// Open the pop-out window and ask the phone to start (screen or camera).
+ipcMain.handle('mirror:popout', (_e, source) => {
+  const msg = source === 'camera' ? { type: 'camera-start', facing: 'back' } : { type: 'mirror-start' }
+  if (!wifi.push(msg)) return fail('Phone not linked over Wi-Fi')
+  openMirrorWindow()
   return ok(true)
 })
 
-ipcMain.handle('mirror:stop', () => ok(wifi.push({ type: 'mirror-stop' })))
+ipcMain.handle('mirror:stop', () => {
+  if (mirrorWin && !mirrorWin.isDestroyed()) {
+    mirrorWin.close() // 'closed' handler pushes mirror-stop
+    return ok(true)
+  }
+  return ok(wifi.push({ type: 'mirror-stop' }))
+})
+
+ipcMain.handle('mirror:focus', () => {
+  if (mirrorWin && !mirrorWin.isDestroyed()) mirrorWin.focus()
+  return ok(true)
+})
+
+ipcMain.handle('mirror:setOnTop', (_e, on) => {
+  if (mirrorWin && !mirrorWin.isDestroyed()) mirrorWin.setAlwaysOnTop(!!on)
+  return ok(true)
+})
 
 // Tap / swipe / nav from the Mac → injected on the phone via accessibility gestures.
 ipcMain.handle('mirror:input', (_e, msg) => ok(wifi.push(msg)))
-
-// Phone camera over the app link (same H.264 pipeline as screen mirroring, no ADB).
-ipcMain.handle('camera:start', (_e, facing) => {
-  if (!wifi.push({ type: 'camera-start', facing: facing || 'back' }))
-    return fail('Phone not linked over Wi-Fi')
-  return ok(true)
-})
 
 ipcMain.handle('wifi:sendClip', () => {
   try {

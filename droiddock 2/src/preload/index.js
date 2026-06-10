@@ -53,10 +53,11 @@ contextBridge.exposeInMainWorld('droid', {
   smsSend: (address, text) => ipcRenderer.invoke('sms:send', address, text),
   mediaCmd: (cmd, value) => ipcRenderer.invoke('media:cmd', cmd, value),
   // screen mirroring over the app link (MediaProjection)
-  mirrorStart: () => ipcRenderer.invoke('mirror:start'),
+  mirrorPopout: (source) => ipcRenderer.invoke('mirror:popout', source),
   mirrorStop: () => ipcRenderer.invoke('mirror:stop'),
+  mirrorFocus: () => ipcRenderer.invoke('mirror:focus'),
+  mirrorSetOnTop: (on) => ipcRenderer.invoke('mirror:setOnTop', on),
   mirrorInput: (msg) => ipcRenderer.invoke('mirror:input', msg),
-  cameraStart: (facing) => ipcRenderer.invoke('camera:start', facing),
   onMirrorStarted: (cb) => {
     const fn = (_e, m) => cb(m)
     ipcRenderer.on('mirror-started', fn)
