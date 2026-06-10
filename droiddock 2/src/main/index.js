@@ -625,6 +625,13 @@ ipcMain.handle('mirror:stop', () => ok(wifi.push({ type: 'mirror-stop' })))
 // Tap / swipe / nav from the Mac → injected on the phone via accessibility gestures.
 ipcMain.handle('mirror:input', (_e, msg) => ok(wifi.push(msg)))
 
+// Phone camera over the app link (same H.264 pipeline as screen mirroring, no ADB).
+ipcMain.handle('camera:start', (_e, facing) => {
+  if (!wifi.push({ type: 'camera-start', facing: facing || 'back' }))
+    return fail('Phone not linked over Wi-Fi')
+  return ok(true)
+})
+
 ipcMain.handle('wifi:sendClip', () => {
   try {
     return ok(wifi.sendClipboardNow())

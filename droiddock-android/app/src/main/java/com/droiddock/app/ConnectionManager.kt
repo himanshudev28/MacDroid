@@ -246,8 +246,15 @@ object ConnectionManager {
                         }
                     }
                     "media-cmd" -> MediaRemote.command(msg.optString("cmd"), msg.optInt("value"))
-                    "mirror-start" -> MirrorPermissionActivity.request(appCtx)
-                    "mirror-stop" -> MirrorService.stop(appCtx)
+                    "mirror-start" -> MirrorPermissionActivity.request(appCtx, "screen")
+                    "mirror-stop", "camera-stop" -> MirrorService.stop(appCtx)
+                    "camera-start" -> {
+                        val facing = if (msg.optString("facing") == "front")
+                            android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT
+                        else
+                            android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
+                        MirrorPermissionActivity.request(appCtx, "camera", facing)
+                    }
                     "mirror-tap" -> AccessibilityControl.tap(msg.optDouble("x"), msg.optDouble("y"))
                     "mirror-swipe" -> AccessibilityControl.swipe(
                         msg.optDouble("x1"), msg.optDouble("y1"),

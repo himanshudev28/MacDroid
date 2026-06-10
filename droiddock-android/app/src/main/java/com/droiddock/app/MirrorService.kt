@@ -1,12 +1,18 @@
 package com.droiddock.app
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraDevice
+import android.hardware.camera2.CameraManager
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.MediaCodec
@@ -15,20 +21,25 @@ import android.media.MediaFormat
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.os.Handler
+import android.os.HandlerThread
 import android.os.IBinder
 import android.util.DisplayMetrics
+import android.util.Size
+import android.view.Surface
 import android.view.WindowManager
 import org.json.JSONObject
 import java.nio.ByteBuffer
 import kotlin.concurrent.thread
 
 /**
- * Screen mirroring over the app link — no ADB / scrcpy / Developer Options.
+ * Screen mirroring AND phone-camera streaming over the app link — no ADB / scrcpy.
  *
- * Captures the screen with MediaProjection, encodes H.264 with MediaCodec, and streams
- * each access unit to the Mac as a binary frame (kind=3) over the existing WebSocket.
- * The Mac decodes with WebCodecs and renders to a canvas. Foreground service of type
- * mediaProjection, as Android 14+ requires.
+ * Encodes H.264 with MediaCodec and streams each access unit to the Mac as a binary
+ * frame (kind=3) over the existing WebSocket; the Mac decodes with WebCodecs. The encoder
+ * input surface is fed either by a MediaProjection VirtualDisplay (source="screen") or by
+ * a Camera2 capture session (source="camera"). Foreground service of type
+ * mediaProjection | camera as Android 14+ requires.
  */
 class MirrorService : Service() {
 
@@ -39,6 +50,11 @@ class MirrorService : Service() {
     @Volatile private var running = false
     private var configBytes: ByteArray? = null
 
+    // camera
+    private var cameraDevice: CameraDevice? = null
+    private var captureSession: CameraCaptureSession? = null
+    private var camThread: HandlerThread? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -46,16 +62,19 @@ class MirrorService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        val resultCode = intent?.getIntExtra(EXTRA_CODE, 0) ?: 0
-        @Suppress("DEPRECATION")
-        val data = intent?.getParcelableExtra<Intent>(EXTRA_DATA)
-        if (data == null) {
-            stopSelf()
-            return START_NOT_STICKY
-        }
-        startForegroundNotif()
+        val source = intent?.getStringExtra(EXTRA_SOURCE) ?: "screen"
+        startForegroundNotif(source)
         try {
-            startCapture(resultCode, data)
+            if (source == "camera") {
+                startCamera(intent?.getIntExtra(EXTRA_FACING, CameraCharacteristics.LENS_FACING_BACK)
+                    ?: CameraCharacteristics.LENS_FACING_BACK)
+            } else {
+                val resultCode = intent?.getIntExtra(EXTRA_CODE, 0) ?: 0
+                @Suppress("DEPRECATION")
+                val data = intent?.getParcelableExtra<Intent>(EXTRA_DATA)
+                    ?: throw IllegalStateException("no projection data")
+                startScreen(resultCode, data)
+            }
         } catch (e: Exception) {
             ConnectionManager.send(
                 JSONObject().put("type", "mirror-error").put("error", e.message ?: "mirror failed")
@@ -65,34 +84,8 @@ class MirrorService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun startCapture(resultCode: Int, data: Intent) {
-        val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        val proj = mpm.getMediaProjection(resultCode, data)
-            ?: throw IllegalStateException("no projection")
-        projection = proj
-        proj.registerCallback(object : MediaProjection.Callback() {
-            override fun onStop() {
-                stopSelf()
-            }
-        }, null)
-
-        // Real screen size, scaled so the long edge is at most CAP (keeps bandwidth sane).
-        val metrics = DisplayMetrics()
-        val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        @Suppress("DEPRECATION") wm.defaultDisplay.getRealMetrics(metrics)
-        val dpi = metrics.densityDpi
-        var w = metrics.widthPixels
-        var h = metrics.heightPixels
-        val cap = 1280
-        val longEdge = maxOf(w, h)
-        if (longEdge > cap) {
-            val s = cap.toFloat() / longEdge
-            w = (w * s).toInt()
-            h = (h * s).toInt()
-        }
-        w = w and 1.inv() // encoders need even dimensions
-        h = h and 1.inv()
-
+    /** Configure + start the encoder, begin draining, and return its input surface. */
+    private fun startEncoder(w: Int, h: Int, source: String): Surface {
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, w, h).apply {
             setInteger(
                 MediaFormat.KEY_COLOR_FORMAT,
@@ -111,18 +104,106 @@ class MirrorService : Service() {
         val surface = enc.createInputSurface()
         enc.start()
         encoder = enc
+        running = true
+        drainThread = thread(name = "mirror-drain") { drain(enc, w, h, source) }
+        return surface
+    }
 
+    private fun startScreen(resultCode: Int, data: Intent) {
+        val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        val proj = mpm.getMediaProjection(resultCode, data)
+            ?: throw IllegalStateException("no projection")
+        projection = proj
+        proj.registerCallback(object : MediaProjection.Callback() {
+            override fun onStop() {
+                stopSelf()
+            }
+        }, null)
+
+        val metrics = DisplayMetrics()
+        val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        @Suppress("DEPRECATION") wm.defaultDisplay.getRealMetrics(metrics)
+        val dpi = metrics.densityDpi
+        var w = metrics.widthPixels
+        var h = metrics.heightPixels
+        val cap = 1280
+        val longEdge = maxOf(w, h)
+        if (longEdge > cap) {
+            val s = cap.toFloat() / longEdge
+            w = (w * s).toInt()
+            h = (h * s).toInt()
+        }
+        w = w and 1.inv()
+        h = h and 1.inv()
+
+        val surface = startEncoder(w, h, "screen")
         virtualDisplay = proj.createVirtualDisplay(
             "DroidDockMirror", w, h, dpi,
             DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC,
             surface, null, null
         )
-
-        running = true
-        drainThread = thread(name = "mirror-drain") { drain(enc, w, h) }
     }
 
-    private fun drain(enc: MediaCodec, w: Int, h: Int) {
+    private fun startCamera(facing: Int) {
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            throw SecurityException("Grant the Camera permission to DroidDock")
+        }
+        val mgr = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        val camId = mgr.cameraIdList.firstOrNull {
+            mgr.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == facing
+        } ?: mgr.cameraIdList.firstOrNull() ?: throw IllegalStateException("no camera")
+
+        val chars = mgr.getCameraCharacteristics(camId)
+        val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+        val sizes = map?.getOutputSizes(MediaCodec::class.java) ?: emptyArray()
+        val cap = 1280
+        val pick = sizes.filter { maxOf(it.width, it.height) <= cap }
+            .maxByOrNull { it.width.toLong() * it.height }
+            ?: sizes.minByOrNull { it.width.toLong() * it.height }
+            ?: Size(1280, 720)
+        val w = pick.width and 1.inv()
+        val h = pick.height and 1.inv()
+
+        val surface = startEncoder(w, h, "camera")
+        camThread = HandlerThread("ddcam").also { it.start() }
+        val handler = Handler(camThread!!.looper)
+
+        mgr.openCamera(camId, object : CameraDevice.StateCallback() {
+            override fun onOpened(device: CameraDevice) {
+                cameraDevice = device
+                val req = device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
+                    .apply { addTarget(surface) }
+                @Suppress("DEPRECATION")
+                device.createCaptureSession(
+                    listOf(surface),
+                    object : CameraCaptureSession.StateCallback() {
+                        override fun onConfigured(session: CameraCaptureSession) {
+                            captureSession = session
+                            runCatching { session.setRepeatingRequest(req.build(), null, handler) }
+                        }
+
+                        override fun onConfigureFailed(session: CameraCaptureSession) {
+                            stopSelf()
+                        }
+                    },
+                    handler
+                )
+            }
+
+            override fun onDisconnected(device: CameraDevice) {
+                stopSelf()
+            }
+
+            override fun onError(device: CameraDevice, error: Int) {
+                ConnectionManager.send(
+                    JSONObject().put("type", "mirror-error").put("error", "camera error $error")
+                )
+                stopSelf()
+            }
+        }, handler)
+    }
+
+    private fun drain(enc: MediaCodec, w: Int, h: Int, source: String) {
         val info = MediaCodec.BufferInfo()
         var announced = false
         while (running) {
@@ -150,11 +231,11 @@ class MirrorService : Service() {
                             JSONObject().put("type", "mirror-started")
                                 .put("width", w).put("height", h)
                                 .put("codec", avcCodecString(bytes))
+                                .put("source", source)
                         )
                         announced = true
                     }
                 } else {
-                    // Prepend SPS/PPS to keyframes so the decoder always has them.
                     val payload =
                         if (isKey && configBytes != null) configBytes!! + bytes else bytes
                     ConnectionManager.sendVideo(if (isKey) 1 else 0, payload)
@@ -171,7 +252,6 @@ class MirrorService : Service() {
         }
     }
 
-    /** Build the `avc1.PPCCLL` codec string from the SPS in the codec-config bytes. */
     private fun avcCodecString(config: ByteArray): String {
         var i = 0
         while (i + 4 < config.size) {
@@ -196,10 +276,16 @@ class MirrorService : Service() {
     override fun onDestroy() {
         running = false
         runCatching { drainThread?.join(300) }
+        runCatching { captureSession?.close() }
+        runCatching { cameraDevice?.close() }
+        runCatching { camThread?.quitSafely() }
         runCatching { virtualDisplay?.release() }
         runCatching { encoder?.stop() }
         runCatching { encoder?.release() }
         runCatching { projection?.stop() }
+        captureSession = null
+        cameraDevice = null
+        camThread = null
         virtualDisplay = null
         encoder = null
         projection = null
@@ -207,19 +293,25 @@ class MirrorService : Service() {
         super.onDestroy()
     }
 
-    private fun startForegroundNotif() {
+    private fun startForegroundNotif(source: String) {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL, "Screen mirroring", NotificationManager.IMPORTANCE_LOW)
         )
+        val text = if (source == "camera") "Streaming camera to Mac" else "Mirroring your screen to Mac"
         val n = Notification.Builder(this, CHANNEL)
             .setContentTitle("DroidDock")
-            .setContentText("Mirroring your screen to Mac")
+            .setContentText(text)
             .setSmallIcon(R.drawable.ic_stat)
             .setOngoing(true)
             .build()
         if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            val type = if (source == "camera") {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+            } else {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            }
+            startForeground(NOTIF_ID, n, type)
         } else {
             startForeground(NOTIF_ID, n)
         }
@@ -231,6 +323,8 @@ class MirrorService : Service() {
         const val ACTION_STOP = "com.droiddock.app.MIRROR_STOP"
         const val EXTRA_CODE = "code"
         const val EXTRA_DATA = "data"
+        const val EXTRA_SOURCE = "source"
+        const val EXTRA_FACING = "facing"
 
         fun stop(ctx: Context) {
             runCatching {

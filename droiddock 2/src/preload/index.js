@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld('droid', {
   mirrorStart: () => ipcRenderer.invoke('mirror:start'),
   mirrorStop: () => ipcRenderer.invoke('mirror:stop'),
   mirrorInput: (msg) => ipcRenderer.invoke('mirror:input', msg),
+  cameraStart: (facing) => ipcRenderer.invoke('camera:start', facing),
   onMirrorStarted: (cb) => {
     const fn = (_e, m) => cb(m)
     ipcRenderer.on('mirror-started', fn)
