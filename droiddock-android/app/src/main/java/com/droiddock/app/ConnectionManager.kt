@@ -254,13 +254,10 @@ object ConnectionManager {
                         )
                     }
                     "mirror-stop", "camera-stop" -> {
-                        val inst = MirrorService.instance
-                        // Auto mode keeps a screen session alive (no re-consent next time).
-                        if (inst != null && Prefs.autoMirror(appCtx) && inst.isScreenAlive()) {
-                            inst.pauseStreaming()
-                        } else {
-                            MirrorService.stop(appCtx)
-                        }
+                        // Always fully stop so the phone clears its cast/screen-share
+                        // notification. In Auto mode the next mirror-start will re-show
+                        // the system consent dialog directly (no notification needed).
+                        MirrorService.stop(appCtx)
                     }
                     "camera-start" -> {
                         val facing = if (msg.optString("facing") == "front")
