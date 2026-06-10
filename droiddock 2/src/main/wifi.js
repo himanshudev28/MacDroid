@@ -42,6 +42,7 @@ export function loadConfig() {
   }
   if (!config.port) config.port = PORT
   if (typeof config.notifications !== 'boolean') config.notifications = true
+  if (typeof config.nativeNotifs !== 'boolean') config.nativeNotifs = true
   return config
 }
 
@@ -134,7 +135,7 @@ export function pairingPayload() {
 }
 
 function showNotification(msg) {
-  if (!config.notifications) return
+  if (!config.notifications || !config.nativeNotifs) return
   const key = String(msg.key || randomUUID())
   const hash = `${msg.title}|${msg.text}`
 
@@ -202,13 +203,19 @@ function showCall(msg) {
   callNotif = null
   if (msg.state !== 'ringing') return
   const who = msg.name || msg.number || 'Unknown'
-  callNotif = new Notification({
-    title: 'Incoming call',
-    subtitle: who,
-    body: msg.number && msg.name ? msg.number : 'on your phone',
-    silent: false
-  })
-  callNotif.show()
+
+  // Always forward to the in-app panel (NOTIFS tab)
+  onForward('call', { ...msg, key: `call-${Date.now()}`, time: Date.now() })
+
+  if (config.nativeNotifs) {
+    callNotif = new Notification({
+      title: 'Incoming Call',
+      subtitle: who,
+      body: msg.number && msg.name ? msg.number : 'on your phone',
+      silent: false
+    })
+    callNotif.show()
+  }
   onEvent({ kind: 'info', text: `Incoming call — ${who}` })
 }
 

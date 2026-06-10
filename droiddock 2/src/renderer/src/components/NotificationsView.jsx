@@ -1,7 +1,26 @@
 import { useEffect, useState } from 'react'
-import { Bell, Wifi, CornerUpLeft, X, Send } from 'lucide-react'
+import { Bell, Wifi, CornerUpLeft, X, Send, Monitor, Phone, AlertCircle } from 'lucide-react'
 
 export default function NotificationsView({ linked, items, onClear, onDismiss, onToast }) {
+  const [nativeOn, setNativeOn] = useState(true)
+  const [perm, setPerm] = useState(null) // 'authorized'|'denied'|'not-determined'|null
+
+  useEffect(() => {
+    window.droid.notifsGetNative().then(setNativeOn)
+    window.droid.notifsCheckPerm().then(setPerm)
+  }, [])
+
+  const toggleNative = async () => {
+    const next = !nativeOn
+    await window.droid.notifsSetNative(next)
+    setNativeOn(next)
+    if (next) {
+      // re-check permission after enabling
+      const p = await window.droid.notifsCheckPerm()
+      setPerm(p)
+    }
+  }
+
   if (!linked) {
     return (
       <Empty
@@ -12,33 +31,106 @@ export default function NotificationsView({ linked, items, onClear, onDismiss, o
     )
   }
 
-  if (items.length === 0) {
-    return (
-      <Empty
-        icon={Bell}
-        title="NO NOTIFICATIONS YET"
-        body="New phone notifications land here as they arrive. They also pop up as macOS notifications."
-      />
-    )
-  }
-
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {/* ── header ── */}
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-line px-5">
         <span className="font-mono text-[10px] tracking-[0.25em] text-dim">
-          NOTIFICATIONS · {items.length}
+          NOTIFICATIONS{items.length ? ` · ${items.length}` : ''}
         </span>
-        <button
-          onClick={onClear}
-          className="border border-line px-3 py-1 font-display text-[10px] font-semibold tracking-[0.2em] text-dim transition-colors hover:border-amber/40 hover:text-amber"
-        >
-          CLEAR
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Show on Mac toggle */}
+          <button
+            onClick={toggleNative}
+            title={nativeOn ? 'Showing on Mac — click to disable' : 'Click to show on Mac'}
+            className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 font-mono text-[10px] tracking-wider transition-colors ${
+              nativeOn
+                ? 'border-amber/40 bg-amber/8 text-amber'
+                : 'border-line text-dim hover:border-amber/30 hover:text-amber'
+            }`}
+          >
+            <Monitor size={11} />
+            {nativeOn ? 'ON MAC' : 'SHOW ON MAC'}
+          </button>
+          <button
+            onClick={onClear}
+            className="border border-line px-3 py-1 font-display text-[10px] font-semibold tracking-[0.2em] text-dim transition-colors hover:border-amber/40 hover:text-amber"
+          >
+            CLEAR
+          </button>
+        </div>
       </div>
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-4">
-        {items.map((n, i) => (
-          <NotifCard key={n.key + i} n={n} onDismiss={onDismiss} onToast={onToast} index={i} />
-        ))}
+
+      {/* macOS permission denied warning */}
+      {nativeOn && perm === 'denied' && (
+        <div className="flex shrink-0 items-start gap-2.5 border-b border-line bg-amber/5 px-5 py-3">
+          <AlertCircle size={14} className="mt-0.5 shrink-0 text-amber" />
+          <p className="text-[11px] leading-relaxed text-dim">
+            macOS notification permission is <b className="text-amber">denied</b> for DroidDock.
+            Go to <b className="text-fg">System Settings → Notifications → DroidDock</b> and
+            turn it on, then restart the app.
+          </p>
+        </div>
+      )}
+
+      {items.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center p-8">
+          <div className="max-w-sm border border-line bg-panel p-8 text-center">
+            <Bell size={22} strokeWidth={1.5} className="mx-auto text-amber" />
+            <p className="mt-4 font-display text-sm font-semibold tracking-[0.25em]">
+              NO NOTIFICATIONS YET
+            </p>
+            <p className="mt-2 text-[12px] leading-relaxed text-dim">
+              Phone notifications appear here as they arrive.
+              {nativeOn
+                ? ' They also pop up as macOS notifications — reply without opening this app.'
+                : ' Enable "Show on Mac" above to also get macOS pop-ups with reply.'}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-4">
+          {items.map((n, i) =>
+            n.type === 'call' ? (
+              <CallCard key={n.key + i} n={n} onDismiss={onDismiss} index={i} />
+            ) : (
+              <NotifCard key={n.key + i} n={n} onDismiss={onDismiss} onToast={onToast} index={i} />
+            )
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CallCard({ n, onDismiss, index }) {
+  return (
+    <div
+      className="rise group border border-line bg-panel2 p-3.5"
+      style={{ animationDelay: `${Math.min(index, 15) * 20}ms` }}
+    >
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-sm bg-ok/10">
+          <Phone size={14} className="text-ok" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="truncate font-mono text-[9px] uppercase tracking-wider text-ok/80">
+              Incoming Call
+            </span>
+            <span className="shrink-0 font-mono text-[9px] text-dim/70">{fmt(n.time)}</span>
+          </div>
+          <p className="mt-0.5 truncate text-[13px] font-semibold">{n.title}</p>
+          {n.text && <p className="mt-0.5 text-[12px] text-dim">{n.text}</p>}
+          <div className="mt-2 flex items-center gap-3 opacity-0 transition-opacity group-hover:opacity-100">
+            <button
+              onClick={() => onDismiss(n.key)}
+              className="flex items-center gap-1 font-mono text-[10px] text-dim transition-colors hover:text-bad"
+            >
+              <X size={11} /> dismiss
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   )

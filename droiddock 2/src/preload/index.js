@@ -101,6 +101,14 @@ contextBridge.exposeInMainWorld('droid', {
   },
   notifReply: (key, text) => ipcRenderer.invoke('notif:reply', key, text),
   notifDismiss: (key) => ipcRenderer.invoke('notif:dismiss', key),
+  notifsGetNative: () => ipcRenderer.invoke('notifs:getNative'),
+  notifsSetNative: (v) => ipcRenderer.invoke('notifs:setNative', v),
+  notifsCheckPerm: () => ipcRenderer.invoke('notifs:checkPerm'),
+  onCallIncoming: (cb) => {
+    const fn = (_e, m) => cb(m)
+    ipcRenderer.on('call-incoming', fn)
+    return () => ipcRenderer.removeListener('call-incoming', fn)
+  },
   // device-info pushed by the companion (app-link transport)
   onDeviceInfo: (cb) => {
     const fn = (_e, info) => cb(info)

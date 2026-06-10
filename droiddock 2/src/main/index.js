@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, nativeImage } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, nativeImage, systemPreferences } from 'electron'
 import { join } from 'node:path'
 import { mkdirSync } from 'node:fs'
 import * as adb from './adb'
@@ -330,6 +330,11 @@ app.whenReady().then(async () => {
         channel === 'mirror-error'
       ) {
         if (mirrorWin && !mirrorWin.isDestroyed()) mirrorWin.webContents.send(channel, payload)
+      }
+      // 'call' = incoming call from phone, forward to NOTIFS panel
+      if (channel === 'call') {
+        if (win && !win.isDestroyed()) win.webContents.send('call-incoming', payload)
+        return
       }
       if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
     }
@@ -737,6 +742,21 @@ ipcMain.handle('notif:reply', (_e, key, text) => {
 })
 
 ipcMain.handle('notif:dismiss', (_e, key) => ok(wifi.push({ type: 'dismiss', key })))
+
+ipcMain.handle('notifs:getNative', () => wifi.getCfg('nativeNotifs') !== false)
+
+ipcMain.handle('notifs:setNative', (_e, v) => {
+  wifi.setCfg('nativeNotifs', !!v)
+  return ok(true)
+})
+
+ipcMain.handle('notifs:checkPerm', () => {
+  try {
+    return systemPreferences.getAuthorizationStatus('notifications')
+  } catch {
+    return 'authorized' // non-macOS platforms always ok
+  }
+})
 
 /* ---- Settings ---- */
 

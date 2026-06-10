@@ -82,6 +82,18 @@ export default function App() {
         return { state, serial, number: prev?.number ?? '', name: prev?.name ?? '' }
       })
     })
+    const offCallIncoming = window.droid.onCallIncoming((m) => {
+      const item = {
+        key: m.key || `call-${Date.now()}`,
+        type: 'call',
+        app: 'Phone',
+        title: m.name || m.number || 'Unknown caller',
+        text: m.number && m.name ? m.number : 'Incoming call on your phone',
+        replyable: false,
+        time: m.time || Date.now()
+      }
+      setNotifs((list) => [item, ...list.filter((x) => x.key !== item.key)].slice(0, 100))
+    })
     return () => {
       offTools()
       offDevices()
@@ -93,6 +105,7 @@ export default function App() {
       offInfo()
       offProg()
       offCallState()
+      offCallIncoming()
     }
   }, [toast])
 
