@@ -45,7 +45,8 @@ It's two apps that talk to each other:
 | 👤 | **Contacts** | Browse and search your phone's contacts. |
 | 📞 | **Phone calls** | Place calls from the Mac; incoming‑call alerts with caller ID. |
 | 🎵 | **Media remote** | Now‑Playing card with transport + volume control. |
-| 🪞 | **Screen mirroring** | Mirror and control your phone (via scrcpy over ADB). |
+| 🪞 | **Screen mirroring** | Mirror **and control** your phone over the Wi‑Fi app link (MediaProjection + H.264) — tap, swipe, scroll, type and use the nav bar from your Mac. Pops out into a phone‑shaped, always‑on‑top window (scrcpy‑style). No ADB, no scrcpy, no Developer Options. |
+| 📷 | **Phone camera** | Use your phone's camera as a Mac webcam‑style feed over the app link — front/back switch, no ADB. |
 | 🔌 | **Smart pairing** | QR or manual IP, auto‑reconnect, "forget this Mac", and a **Pause** mode (1h / 8h / until you resume). |
 
 ---
@@ -92,14 +93,19 @@ Grab the prebuilt apps from the [**Releases**](../../releases) page:
 3. Open the Mac app → **Pair Device** → scan the QR with the phone app. **Done** —
    clipboard, notifications, messages, contacts, calls, files and photos all work.
 
-> ✅ **No ADB, no scrcpy, no Developer Options** for any of that — it's all over the Wi‑Fi
-> app link. `adb` even **auto‑installs** the first time it's needed.
+> ✅ **No ADB, no scrcpy, no Developer Options needed for anything** — including
+> **screen mirroring and phone camera**. It's all over the Wi‑Fi app link. `adb` is
+> still **auto‑installed** the first time it's needed as a power‑user fallback.
 
-### 📺 Optional: screen mirroring
+### 📺 Screen mirroring & phone camera — over the app link
 
-Mirroring (and phone camera) use `scrcpy`. If it's missing, the app shows a one‑click
-**Install with Homebrew** button. This is the *only* feature that needs ADB +
-Developer Options on the phone today — see [Roadmap](#-roadmap) for where that's headed.
+Tap **Mirror Screen** on the Mac → accept the one‑time **"Allow screen capture"** prompt
+on the phone → your phone screen pops out into a phone‑shaped, always‑on‑top window. You
+can **tap, swipe, scroll, type and use the nav bar** from the Mac — input is injected
+through the accessibility service. The phone camera works the same way over the link.
+
+> 🛠️ The legacy `scrcpy` over ADB path is still bundled as a power‑user fallback. If
+> `scrcpy` is missing the app shows a one‑click **Install with Homebrew** button.
 
 ---
 
@@ -164,8 +170,9 @@ DroidDock/
   phone → Mac auto‑clipboard is done through the accessibility service: it reads the
   copied text straight from accessibility events and sends it the moment a "copied" toast
   confirms a real copy — no clipboard access required.
-- Screen mirroring currently uses `scrcpy` over ADB, so it needs Developer Options +
-  USB/Wi‑Fi debugging on the phone (see Roadmap to remove that).
+- Screen mirroring & remote input run over the app link using **MediaProjection** (one
+  on‑phone "Allow screen capture" tap) — no ADB or Developer Options needed. The
+  `scrcpy`‑over‑ADB path remains as an optional power‑user fallback.
 
 ---
 
@@ -177,15 +184,15 @@ Toward a **zero‑setup** experience — install the two apps, scan a QR, done:
 - [x] `adb` **auto‑downloads** on first run (no manual platform‑tools install)
 - [x] One‑click **scrcpy install** via Homebrew from the Setup modal
 - [x] Prebuilt **`.app` + `.apk`** published by CI on each tag
-- [ ] **Screen mirroring over the app link via MediaProjection** — the Android app captures
+- [x] **Screen mirroring over the app link via MediaProjection** — the Android app captures
       its own screen (MediaCodec H.264) and streams it to the Mac over the existing
-      WebSocket; control (tap/type) is injected back through the accessibility service.
-      This removes ADB, scrcpy **and** Developer Options for mirroring too — leaving the
-      current ADB/scrcpy path as a power‑user fallback.
-
-Android can't let an app enable Developer Options or USB/Wireless debugging itself (a
-security restriction), which is exactly why the MediaProjection route — a one‑time
-on‑phone "Allow screen capture" tap — is the right long‑term fix.
+      WebSocket; control (tap / swipe / scroll / nav) is injected back through the
+      accessibility service. **No ADB, no scrcpy, no Developer Options.** The legacy
+      ADB/scrcpy path stays as a power‑user fallback.
+- [x] **Phone camera over the app link** — front/back camera streamed to the Mac with no ADB
+- [x] **Pop‑out, phone‑shaped mirror window** (always‑on‑top, scrcpy‑style)
+- [ ] TLS on the LAN link (currently a token‑gated plain WebSocket)
+- [ ] Audio streaming (Mac ↔ phone)
 
 ---
 
