@@ -58,8 +58,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
+import android.content.pm.PackageManager
 import org.json.JSONObject
 
 private val Ink = Color(0xFF0B0D10)
@@ -112,6 +111,14 @@ private fun Screen() {
     var showManual by remember { mutableStateOf(false) }
     var showGuide by remember { mutableStateOf(false) }
     var showPause by remember { mutableStateOf(false) }
+    var showScan by remember { mutableStateOf(false) }
+
+    val cameraPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) showScan = true
+        else Toast.makeText(ctx, "Camera permission needed to scan QR", Toast.LENGTH_SHORT).show()
+    }
 
     // Shared "we have a pairing now" path — used by both QR scan and manual entry.
     val applyPairing: (Pairing) -> Unit = { pairing ->
@@ -132,6 +139,22 @@ private fun Screen() {
         }
     }
 
+    // Shared QR parse + pairing — used by both scan screen and manual entry
+    val handleQr: (String) -> Unit = { qrText ->
+        runCatching {
+            val o = JSONObject(qrText)
+            val ips = mutableListOf<String>()
+            val arr = o.optJSONArray("ips")
+            if (arr != null) for (i in 0 until arr.length()) ips.add(arr.getString(i))
+            require(ips.isNotEmpty() && o.has("token"))
+            Pairing(ips, o.optInt("port", 48484), o.getString("token"), o.optString("name", "Mac"))
+        }.onSuccess { pairing ->
+            applyPairing(pairing)
+        }.onFailure {
+            Toast.makeText(ctx, "Not a DroidDock QR code", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     val permLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { phonePerms = phonePermsGranted(ctx) }
@@ -146,20 +169,14 @@ private fun Screen() {
         }
     }
 
-    val scanner = rememberLauncherForActivityResult(ScanContract()) { result ->
-        val contents = result.contents ?: return@rememberLauncherForActivityResult
-        runCatching {
-            val o = JSONObject(contents)
-            val ips = mutableListOf<String>()
-            val arr = o.optJSONArray("ips")
-            if (arr != null) for (i in 0 until arr.length()) ips.add(arr.getString(i))
-            require(ips.isNotEmpty() && o.has("token"))
-            Pairing(ips, o.optInt("port", 48484), o.getString("token"), o.optString("name", "Mac"))
-        }.onSuccess { pairing ->
-            applyPairing(pairing)
-        }.onFailure {
-            Toast.makeText(ctx, "Not a DroidDock QR code", Toast.LENGTH_SHORT).show()
-        }
+    if (showScan) {
+        ScanScreen(
+            onResult = { qrText -> showScan = false; handleQr(qrText) },
+            onManual = { showScan = false; showManual = true },
+            onBack   = { showScan = false },
+            onHelp   = { showScan = false; showGuide = true }
+        )
+        return
     }
 
     if (showGuide) {
@@ -287,13 +304,10 @@ private fun Screen() {
             // ---- primary action ----
             Button(
                 onClick = {
-                    scanner.launch(
-                        ScanOptions()
-                            .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                            .setPrompt("Scan the QR shown in DroidDock on your Mac")
-                            .setBeepEnabled(false)
-                            .setOrientationLocked(true)
-                    )
+                    val hasCam = ctx.checkSelfPermission(Manifest.permission.CAMERA) ==
+                        PackageManager.PERMISSION_GRANTED
+                    if (hasCam) showScan = true
+                    else cameraPermLauncher.launch(Manifest.permission.CAMERA)
                 },
                 Modifier.fillMaxWidth().height(54.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Amber),
