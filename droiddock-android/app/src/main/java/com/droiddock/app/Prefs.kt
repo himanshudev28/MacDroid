@@ -46,4 +46,13 @@ object Prefs {
 
     fun clipboardAuto(ctx: Context): Boolean =
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).getBoolean("clipAuto", true)
+
+    /** When true, the Mac can start mirroring/camera without a per-time prompt on the
+     *  phone (needs the "Display over other apps" permission to launch in the background). */
+    fun setAutoMirror(ctx: Context, v: Boolean) {
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putBoolean("autoMirror", v).apply()
+    }
+
+    fun autoMirror(ctx: Context): Boolean =
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).getBoolean("autoMirror", false)
 }

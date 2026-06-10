@@ -246,14 +246,28 @@ object ConnectionManager {
                         }
                     }
                     "media-cmd" -> MediaRemote.command(msg.optString("cmd"), msg.optInt("value"))
-                    "mirror-start" -> MirrorPermissionActivity.request(appCtx, "screen")
-                    "mirror-stop", "camera-stop" -> MirrorService.stop(appCtx)
+                    "mirror-start" -> {
+                        val inst = MirrorService.instance
+                        if (inst != null && inst.isScreenAlive()) inst.resumeStreaming()
+                        else launchMirror(
+                            "screen", android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
+                        )
+                    }
+                    "mirror-stop", "camera-stop" -> {
+                        val inst = MirrorService.instance
+                        // Auto mode keeps a screen session alive (no re-consent next time).
+                        if (inst != null && Prefs.autoMirror(appCtx) && inst.isScreenAlive()) {
+                            inst.pauseStreaming()
+                        } else {
+                            MirrorService.stop(appCtx)
+                        }
+                    }
                     "camera-start" -> {
                         val facing = if (msg.optString("facing") == "front")
                             android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT
                         else
                             android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
-                        MirrorPermissionActivity.request(appCtx, "camera", facing)
+                        launchMirror("camera", facing)
                     }
                     "camera-flip" -> {
                         val facing = if (msg.optString("facing") == "front")
@@ -303,6 +317,14 @@ object ConnectionManager {
             lastEvent.value = "disconnected"
             TransferManager.detach() // abort transfers; JSON features recover on reconnect
         }
+    }
+
+    /** Auto mode (+ "Display over other apps") launches the consent flow directly with no
+     *  tap on the phone; otherwise it posts a tappable notification. */
+    private fun launchMirror(source: String, facing: Int) {
+        val auto = Prefs.autoMirror(appCtx) && android.provider.Settings.canDrawOverlays(appCtx)
+        if (auto) MirrorPermissionActivity.start(appCtx, source, facing)
+        else MirrorPermissionActivity.request(appCtx, source, facing)
     }
 
     fun send(obj: JSONObject): Boolean = ws?.send(obj.toString()) ?: false

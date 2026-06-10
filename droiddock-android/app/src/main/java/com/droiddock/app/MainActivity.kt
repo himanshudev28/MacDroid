@@ -107,6 +107,8 @@ private fun Screen() {
     var allFiles by remember { mutableStateOf(FileRepo.hasAllFiles()) }
     var clipA11y by remember { mutableStateOf(clipAccessibilityEnabled(ctx)) }
     var clipAuto by remember { mutableStateOf(Prefs.clipboardAuto(ctx)) }
+    var overlayOk by remember { mutableStateOf(Settings.canDrawOverlays(ctx)) }
+    var autoMirror by remember { mutableStateOf(Prefs.autoMirror(ctx)) }
     var showManual by remember { mutableStateOf(false) }
     var showGuide by remember { mutableStateOf(false) }
     var showPause by remember { mutableStateOf(false) }
@@ -125,6 +127,7 @@ private fun Screen() {
             phonePerms = phonePermsGranted(ctx)
             allFiles = FileRepo.hasAllFiles()
             clipA11y = clipAccessibilityEnabled(ctx)
+            overlayOk = Settings.canDrawOverlays(ctx)
             kotlinx.coroutines.delay(2000)
         }
     }
@@ -342,6 +345,29 @@ private fun Screen() {
                     }
                 )
                 RowDivider()
+                AutoMirrorRow(
+                    overlayOk = overlayOk,
+                    auto = autoMirror,
+                    onEnable = {
+                        runCatching {
+                            ctx.startActivity(
+                                Intent(
+                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                    Uri.parse("package:${ctx.packageName}")
+                                )
+                            )
+                        }
+                        Toast.makeText(
+                            ctx, "Allow DroidDock to display over other apps", Toast.LENGTH_LONG
+                        ).show()
+                    },
+                    onToggle = { v ->
+                        autoMirror = v
+                        Prefs.setAutoMirror(ctx, v)
+                        if (!v) MirrorService.stop(ctx) // release any kept-alive session
+                    }
+                )
+                RowDivider()
                 ServiceRow(
                     "🔔", Blue, "Notification Access",
                     "Show phone notifications on your Mac",
@@ -482,6 +508,60 @@ private fun AutoClipRow(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 elevation = null
             ) { Text("Enable", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Medium) }
+        } else {
+            Switch(
+                checked = auto,
+                onCheckedChange = onToggle,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color(0xFF1A1206),
+                    checkedTrackColor = Amber,
+                    uncheckedThumbColor = Dim,
+                    uncheckedTrackColor = Panel,
+                    uncheckedBorderColor = Dim.copy(alpha = 0.5f)
+                )
+            )
+        }
+    }
+}
+
+/** Auto mirroring/camera: grant "Display over other apps", then a switch. When on, the
+ *  Mac can start screen/camera without a per-time prompt on the phone. */
+@Composable
+private fun AutoMirrorRow(
+    overlayOk: Boolean,
+    auto: Boolean,
+    onEnable: () -> Unit,
+    onToggle: (Boolean) -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier.size(40.dp).background(Blue.copy(alpha = 0.15f), RoundedCornerShape(11.dp)),
+            contentAlignment = Alignment.Center
+        ) { Text("🖥️", fontSize = 17.sp) }
+        Spacer(Modifier.width(13.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Auto Screen / Camera", color = Fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(
+                when {
+                    !overlayOk -> "Allow 'Display over other apps' to start without a prompt"
+                    auto -> "On — camera starts instantly; screen asks once, then reuses"
+                    else -> "Off — tap a prompt on the phone each time"
+                },
+                color = Dim, fontSize = 11.sp, lineHeight = 14.sp
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        if (!overlayOk) {
+            Button(
+                onClick = onEnable,
+                colors = ButtonDefaults.buttonColors(containerColor = Blue.copy(alpha = 0.16f)),
+                shape = RoundedCornerShape(9.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                elevation = null
+            ) { Text("Enable", color = Blue, fontSize = 12.sp, fontWeight = FontWeight.Medium) }
         } else {
             Switch(
                 checked = auto,

@@ -21,6 +21,7 @@ import android.media.MediaFormat
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
@@ -49,7 +50,10 @@ class MirrorService : Service() {
     private var virtualDisplay: VirtualDisplay? = null
     private var drainThread: Thread? = null
     @Volatile private var running = false
+    @Volatile private var streaming = true // gated off while paused (Auto-mode keep-alive)
     private var configBytes: ByteArray? = null
+    private var startedJson: JSONObject? = null
+    private var source = "screen"
 
     // camera
     private var cameraDevice: CameraDevice? = null
@@ -108,6 +112,8 @@ class MirrorService : Service() {
         enc.start()
         encoder = enc
         running = true
+        streaming = true
+        this.source = source
         drainThread = thread(name = "mirror-drain") { drain(enc, w, h, source) }
         return surface
     }
@@ -241,22 +247,22 @@ class MirrorService : Service() {
                 if (isConfig) {
                     configBytes = bytes
                     if (!announced) {
-                        ConnectionManager.send(
-                            JSONObject().put("type", "mirror-started")
-                                .put("width", w).put("height", h)
-                                .put("codec", avcCodecString(bytes))
-                                .put("source", source)
-                                .put(
-                                    "facing",
-                                    if (curFacing == CameraCharacteristics.LENS_FACING_FRONT) "front" else "back"
-                                )
-                        )
+                        val started = JSONObject().put("type", "mirror-started")
+                            .put("width", w).put("height", h)
+                            .put("codec", avcCodecString(bytes))
+                            .put("source", source)
+                            .put(
+                                "facing",
+                                if (curFacing == CameraCharacteristics.LENS_FACING_FRONT) "front" else "back"
+                            )
+                        startedJson = started
+                        if (streaming) ConnectionManager.send(started)
                         announced = true
                     }
                 } else {
                     val payload =
                         if (isKey && configBytes != null) configBytes!! + bytes else bytes
-                    ConnectionManager.sendVideo(if (isKey) 1 else 0, payload)
+                    if (streaming) ConnectionManager.sendVideo(if (isKey) 1 else 0, payload)
                 }
                 enc.releaseOutputBuffer(idx, false)
             } else if (idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
@@ -318,8 +324,28 @@ class MirrorService : Service() {
         }
     }
 
+    /** Auto-mode keep-alive: a live screen session whose projection we can reuse. */
+    fun isScreenAlive(): Boolean = source == "screen" && projection != null && encoder != null
+
+    /** Stop transmitting but keep the projection + encoder alive (no re-consent later). */
+    fun pauseStreaming() {
+        streaming = false
+    }
+
+    /** Resume transmitting: re-announce so the Mac reconfigures, and force a keyframe. */
+    fun resumeStreaming() {
+        streaming = true
+        startedJson?.let { ConnectionManager.send(it) }
+        runCatching {
+            encoder?.setParameters(Bundle().apply {
+                putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0)
+            })
+        }
+    }
+
     override fun onDestroy() {
         if (instance === this) instance = null
+        startedJson = null
         running = false
         runCatching { drainThread?.join(300) }
         runCatching { captureSession?.close() }

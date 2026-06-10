@@ -87,10 +87,13 @@ class MirrorPermissionActivity : ComponentActivity() {
         private const val CHANNEL = "mirror-req"
         private const val NOTIF_ID = 8
 
-        /** Launch the consent flow directly (only allowed when our app is foreground). */
-        fun start(ctx: Context) {
+        /** Launch the consent flow directly (allowed in the background only with the
+         *  "Display over other apps" permission — used by Auto mode). */
+        fun start(ctx: Context, source: String, facing: Int = CameraCharacteristics.LENS_FACING_BACK) {
             val i = Intent(ctx, MirrorPermissionActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra(MirrorService.EXTRA_SOURCE, source)
+                .putExtra(MirrorService.EXTRA_FACING, facing)
             runCatching { ctx.startActivity(i) }
         }
 
