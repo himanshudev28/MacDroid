@@ -5,18 +5,25 @@ import android.accessibilityservice.GestureDescription
 import android.content.Context
 import android.graphics.Path
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.DisplayMetrics
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityNodeInfo
 
 /**
- * Injects taps / swipes / nav actions onto the phone for the Mac-side screen control.
- * Uses the already-enabled accessibility service's gesture dispatch — no ADB. Input
- * coordinates arrive as 0..1 fractions of the screen so they're resolution-independent.
+ * Injects taps / swipes / typing / nav actions onto the phone for the Mac-side screen
+ * control. Uses the already-enabled accessibility service — no ADB. Coordinates arrive as
+ * 0..1 fractions so they're resolution-independent.
+ *
+ * Everything runs on the main thread: `dispatchGesture` and node actions (ACTION_SET_TEXT)
+ * silently do nothing when called off the main thread, and the control messages arrive on
+ * the WebSocket reader thread.
  */
 object AccessibilityControl {
 
     @Volatile var service: AccessibilityService? = null
+    private val main = Handler(Looper.getMainLooper())
 
     private fun realSize(svc: AccessibilityService): Pair<Int, Int> {
         val wm = svc.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -27,8 +34,8 @@ object AccessibilityControl {
 
     private fun frac(v: Double) = v.coerceIn(0.0, 1.0)
 
-    fun tap(xFrac: Double, yFrac: Double) {
-        val svc = service ?: return
+    fun tap(xFrac: Double, yFrac: Double) = main.post {
+        val svc = service ?: return@post
         val (w, h) = realSize(svc)
         val x = (frac(xFrac) * w).toFloat()
         val y = (frac(yFrac) * h).toFloat()
@@ -39,8 +46,8 @@ object AccessibilityControl {
         runCatching { svc.dispatchGesture(g, null, null) }
     }
 
-    fun swipe(x1: Double, y1: Double, x2: Double, y2: Double, durMs: Int) {
-        val svc = service ?: return
+    fun swipe(x1: Double, y1: Double, x2: Double, y2: Double, durMs: Int) = main.post {
+        val svc = service ?: return@post
         val (w, h) = realSize(svc)
         val path = Path().apply {
             moveTo((frac(x1) * w).toFloat(), (frac(y1) * h).toFloat())
@@ -53,18 +60,33 @@ object AccessibilityControl {
         runCatching { svc.dispatchGesture(g, null, null) }
     }
 
-    /** Type [text] into the currently-focused input field (append at the end). */
-    fun typeText(text: String) {
-        val node = service?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return
-        setNodeText(node, (node.text?.toString() ?: "") + text)
+    // We track what we've typed rather than trusting the node's text: some apps (WhatsApp)
+    // report their placeholder ("Message") as the field's text, which would get prepended.
+    private var typed = StringBuilder()
+    private var lastSet: String? = null
+
+    /** If the field's text isn't what we last wrote, it's a fresh field (new focus,
+     *  placeholder, or edited on the phone) — start empty so the next write replaces it. */
+    private fun syncField(node: AccessibilityNodeInfo) {
+        if (node.text?.toString() != lastSet) typed = StringBuilder()
     }
 
-    /** Delete the last character of the focused input field. */
-    fun backspace() {
-        val node = service?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return
-        val cur = node.text?.toString() ?: return
-        if (cur.isEmpty()) return
-        setNodeText(node, cur.dropLast(1))
+    /** Type [text] into the currently-focused input field. */
+    fun typeText(text: String) = main.post {
+        val node = service?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return@post
+        syncField(node)
+        typed.append(text)
+        setNodeText(node, typed.toString())
+        lastSet = typed.toString()
+    }
+
+    /** Delete the last character we typed in the focused input field. */
+    fun backspace() = main.post {
+        val node = service?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return@post
+        syncField(node)
+        if (typed.isNotEmpty()) typed.deleteCharAt(typed.length - 1)
+        setNodeText(node, typed.toString())
+        lastSet = typed.toString()
     }
 
     private fun setNodeText(node: AccessibilityNodeInfo, text: String) {
@@ -80,13 +102,13 @@ object AccessibilityControl {
     }
 
     /** Hardware-key equivalents via global accessibility actions. */
-    fun key(name: String) {
-        val svc = service ?: return
+    fun key(name: String) = main.post {
+        val svc = service ?: return@post
         val action = when (name) {
             "back" -> AccessibilityService.GLOBAL_ACTION_BACK
             "home" -> AccessibilityService.GLOBAL_ACTION_HOME
             "recents" -> AccessibilityService.GLOBAL_ACTION_RECENTS
-            else -> return
+            else -> return@post
         }
         runCatching { svc.performGlobalAction(action) }
     }
