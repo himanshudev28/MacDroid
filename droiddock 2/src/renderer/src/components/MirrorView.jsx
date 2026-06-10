@@ -12,7 +12,11 @@ export default function MirrorView({ linked, onToast }) {
   const tsRef = useRef(0)
   const waitingKeyRef = useRef(true)
   const downRef = useRef(null) // pointer-down origin for tap-vs-swipe
+  const rxRef = useRef(0)
+  const decRef = useRef(0)
+  const errRef = useRef('')
   const [state, setState] = useState('idle') // idle | requesting | live
+  const [diag, setDiag] = useState({ rx: 0, dec: 0, err: '', st: '' })
 
   const teardown = useCallback(() => {
     const d = decoderRef.current
@@ -29,10 +33,12 @@ export default function MirrorView({ linked, onToast }) {
   const setupDecoder = useCallback(
     (codec) => {
       teardown()
-      const canvas = canvasRef.current
-      const ctx = canvas?.getContext('2d')
       const dec = new VideoDecoder({
         output: (frame) => {
+          decRef.current++
+          // Read the canvas at draw time — it isn't mounted yet when we configure.
+          const canvas = canvasRef.current
+          const ctx = canvas?.getContext('2d')
           if (canvas && ctx) {
             if (canvas.width !== frame.displayWidth) canvas.width = frame.displayWidth
             if (canvas.height !== frame.displayHeight) canvas.height = frame.displayHeight
@@ -40,19 +46,24 @@ export default function MirrorView({ linked, onToast }) {
           }
           frame.close()
         },
-        error: (e) => onToast('bad', `Decode error: ${e.message}`)
+        error: (e) => {
+          errRef.current = String(e?.message || e)
+        }
       })
       // Annex-B stream (no description) — keyframes carry SPS/PPS inline.
       try {
-        dec.configure({ codec, optimizeForLatency: true, hardwareAcceleration: 'prefer-hardware' })
-      } catch {
         dec.configure({ codec: codec || 'avc1.42E01E', optimizeForLatency: true })
+      } catch (e) {
+        errRef.current = `configure: ${e.message}`
       }
       decoderRef.current = dec
       tsRef.current = 0
       waitingKeyRef.current = true
+      rxRef.current = 0
+      decRef.current = 0
+      errRef.current = ''
     },
-    [onToast, teardown]
+    [teardown]
   )
 
   useEffect(() => {
@@ -61,6 +72,7 @@ export default function MirrorView({ linked, onToast }) {
       setupDecoder(m.codec)
     })
     const offFrame = window.droid.onMirrorFrame(({ key, data }) => {
+      rxRef.current++
       const dec = decoderRef.current
       if (!dec || dec.state !== 'configured') return
       if (waitingKeyRef.current && !key) return // start clean on a keyframe
@@ -73,8 +85,8 @@ export default function MirrorView({ linked, onToast }) {
             data
           })
         )
-      } catch {
-        /* drop a bad chunk; next keyframe recovers */
+      } catch (e) {
+        errRef.current = `decode: ${e.message}`
       }
     })
     const offStopped = window.droid.onMirrorStopped(() => {
@@ -94,6 +106,22 @@ export default function MirrorView({ linked, onToast }) {
       teardown()
     }
   }, [onToast, setupDecoder, teardown])
+
+  // refresh the on-screen diagnostic a couple of times a second while live
+  useEffect(() => {
+    if (state !== 'live') return undefined
+    const id = setInterval(
+      () =>
+        setDiag({
+          rx: rxRef.current,
+          dec: decRef.current,
+          err: errRef.current,
+          st: decoderRef.current?.state || '-'
+        }),
+      500
+    )
+    return () => clearInterval(id)
+  }, [state])
 
   const start = async () => {
     setState('requesting')
@@ -199,7 +227,7 @@ export default function MirrorView({ linked, onToast }) {
           </button>
         </div>
       </div>
-      <div className="flex min-h-0 flex-1 items-center justify-center bg-ink p-4">
+      <div className="relative flex min-h-0 flex-1 items-center justify-center bg-ink p-4">
         <canvas
           ref={canvasRef}
           onPointerDown={onDown}
@@ -207,6 +235,10 @@ export default function MirrorView({ linked, onToast }) {
           onWheel={onWheel}
           className="max-h-full max-w-full cursor-pointer touch-none border border-line"
         />
+        <div className="pointer-events-none absolute left-3 top-3 rounded bg-ink/80 px-2 py-1 font-mono text-[10px] text-dim">
+          rx {diag.rx} · decoded {diag.dec} · {diag.st}
+          {diag.err ? <span className="text-bad"> · {diag.err}</span> : null}
+        </div>
       </div>
     </div>
   )
