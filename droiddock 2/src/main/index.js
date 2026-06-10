@@ -168,7 +168,7 @@ function createWindow() {
     minWidth: 920,
     minHeight: 600,
     show: false,
-    backgroundColor: '#0b0d10',
+    backgroundColor: '#0d0d12',
     titleBarStyle: 'hiddenInset',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js')
@@ -197,7 +197,7 @@ function openMirrorWindow() {
     minHeight: 240,
     show: false,
     frame: false,
-    backgroundColor: '#0b0d10',
+    backgroundColor: '#0d0d12',
     fullscreenable: false,
     title: 'DroidDock — Mirror',
     webPreferences: { preload: join(__dirname, '../preload/index.js') }

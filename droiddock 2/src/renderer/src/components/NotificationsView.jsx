@@ -3,7 +3,7 @@ import { Bell, Wifi, CornerUpLeft, X, Send, Monitor, Phone, AlertCircle } from '
 
 export default function NotificationsView({ linked, items, onClear, onDismiss, onToast }) {
   const [nativeOn, setNativeOn] = useState(true)
-  const [perm, setPerm] = useState(null) // 'authorized'|'denied'|'not-determined'|null
+  const [perm, setPerm] = useState(null)
 
   useEffect(() => {
     window.droid.notifsGetNative().then(setNativeOn)
@@ -15,7 +15,6 @@ export default function NotificationsView({ linked, items, onClear, onDismiss, o
     await window.droid.notifsSetNative(next)
     setNativeOn(next)
     if (next) {
-      // re-check permission after enabling
       const p = await window.droid.notifsCheckPerm()
       setPerm(p)
     }
@@ -23,9 +22,9 @@ export default function NotificationsView({ linked, items, onClear, onDismiss, o
 
   if (!linked) {
     return (
-      <Empty
+      <EmptyState
         icon={Wifi}
-        title="PHONE NOT LINKED"
+        title="Phone not linked"
         body="Notifications need the Wi-Fi link. Pair your phone from the sidebar, then come back."
       />
     )
@@ -33,63 +32,57 @@ export default function NotificationsView({ linked, items, onClear, onDismiss, o
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* ── header ── */}
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-line px-5">
-        <span className="font-mono text-[10px] tracking-[0.25em] text-dim">
-          NOTIFICATIONS{items.length ? ` · ${items.length}` : ''}
+      {/* ── Header ── */}
+      <div className="flex h-12 shrink-0 items-center justify-between border-b border-line px-4">
+        <span className="font-mono text-[10px] tracking-[0.12em] text-dim/70">
+          Notifications{items.length ? ` · ${items.length}` : ''}
         </span>
-        <div className="flex items-center gap-3">
-          {/* Show on Mac toggle */}
+        <div className="flex items-center gap-2">
           <button
             onClick={toggleNative}
             title={nativeOn ? 'Showing on Mac — click to disable' : 'Click to show on Mac'}
-            className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 font-mono text-[10px] tracking-wider transition-colors ${
+            className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 font-mono text-[9.5px] tracking-[0.04em] transition-all duration-150 ${
               nativeOn
-                ? 'border-amber/40 bg-amber/8 text-amber'
-                : 'border-line text-dim hover:border-amber/30 hover:text-amber'
+                ? 'border-amber/30 bg-amber/8 text-amber hover:bg-amber/14'
+                : 'border-line text-dim/60 hover:border-amber/25 hover:text-amber/80'
             }`}
           >
             <Monitor size={11} />
-            {nativeOn ? 'ON MAC' : 'SHOW ON MAC'}
+            {nativeOn ? 'On Mac' : 'Show on Mac'}
           </button>
           <button
             onClick={onClear}
-            className="border border-line px-3 py-1 font-display text-[10px] font-semibold tracking-[0.2em] text-dim transition-colors hover:border-amber/40 hover:text-amber"
+            className="rounded-lg border border-line px-2.5 py-1 font-mono text-[9.5px] text-dim/60 transition-all hover:border-line hover:bg-panel2 hover:text-fg/70"
           >
-            CLEAR
+            Clear
           </button>
         </div>
       </div>
 
-      {/* macOS permission denied warning */}
+      {/* ── Permission warning ── */}
       {nativeOn && perm === 'denied' && (
-        <div className="flex shrink-0 items-start gap-2.5 border-b border-line bg-amber/5 px-5 py-3">
-          <AlertCircle size={14} className="mt-0.5 shrink-0 text-amber" />
-          <p className="text-[11px] leading-relaxed text-dim">
-            macOS notification permission is <b className="text-amber">denied</b> for DroidDock.
-            Go to <b className="text-fg">System Settings → Notifications → DroidDock</b> and
-            turn it on, then restart the app.
+        <div className="flex shrink-0 items-start gap-2.5 border-b border-line bg-amber/5 px-4 py-3">
+          <AlertCircle size={13} className="mt-0.5 shrink-0 text-amber" />
+          <p className="text-[11px] leading-relaxed text-dim/80">
+            macOS notifications are <span className="font-medium text-amber">denied</span> for DroidDock.
+            Go to <span className="font-medium text-fg/80">System Settings → Notifications → DroidDock</span> and turn it on, then restart.
           </p>
         </div>
       )}
 
+      {/* ── Content ── */}
       {items.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center p-8">
-          <div className="max-w-sm border border-line bg-panel p-8 text-center">
-            <Bell size={22} strokeWidth={1.5} className="mx-auto text-amber" />
-            <p className="mt-4 font-display text-sm font-semibold tracking-[0.25em]">
-              NO NOTIFICATIONS YET
-            </p>
-            <p className="mt-2 text-[12px] leading-relaxed text-dim">
-              Phone notifications appear here as they arrive.
-              {nativeOn
-                ? ' They also pop up as macOS notifications — reply without opening this app.'
-                : ' Enable "Show on Mac" above to also get macOS pop-ups with reply.'}
-            </p>
-          </div>
-        </div>
+        <EmptyState
+          icon={Bell}
+          title="No notifications yet"
+          body={
+            nativeOn
+              ? 'Phone notifications appear here and as macOS pop-ups with inline reply.'
+              : 'Phone notifications appear here. Enable "Show on Mac" to also get macOS pop-ups.'
+          }
+        />
       ) : (
-        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-4">
+        <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-3">
           {items.map((n, i) =>
             n.type === 'call' ? (
               <CallCard key={n.key + i} n={n} onDismiss={onDismiss} index={i} />
@@ -103,31 +96,32 @@ export default function NotificationsView({ linked, items, onClear, onDismiss, o
   )
 }
 
+/* ── Call card ─────────────────────────────────────────────────────── */
 function CallCard({ n, onDismiss, index }) {
   return (
     <div
-      className="rise group border border-line bg-panel2 p-3.5"
-      style={{ animationDelay: `${Math.min(index, 15) * 20}ms` }}
+      className="rise group rounded-xl border border-ok/15 bg-ok/5 p-3.5 luminous-sm"
+      style={{ animationDelay: `${Math.min(index, 15) * 18}ms` }}
     >
       <div className="flex items-start gap-3">
-        <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-sm bg-ok/10">
+        <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-ok/12 border border-ok/20">
           <Phone size={14} className="text-ok" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline justify-between gap-2">
-            <span className="truncate font-mono text-[9px] uppercase tracking-wider text-ok/80">
+            <span className="font-mono text-[9.5px] tracking-[0.06em] text-ok/70 uppercase">
               Incoming Call
             </span>
-            <span className="shrink-0 font-mono text-[9px] text-dim/70">{fmt(n.time)}</span>
+            <span className="shrink-0 font-mono text-[9px] text-dim/50">{fmt(n.time)}</span>
           </div>
-          <p className="mt-0.5 truncate text-[13px] font-semibold">{n.title}</p>
-          {n.text && <p className="mt-0.5 text-[12px] text-dim">{n.text}</p>}
-          <div className="mt-2 flex items-center gap-3 opacity-0 transition-opacity group-hover:opacity-100">
+          <p className="mt-0.5 truncate text-[13px] font-semibold text-fg/90">{n.title}</p>
+          {n.text && <p className="mt-0.5 text-[11.5px] text-dim/70">{n.text}</p>}
+          <div className="mt-2 flex items-center opacity-0 transition-opacity group-hover:opacity-100">
             <button
               onClick={() => onDismiss(n.key)}
-              className="flex items-center gap-1 font-mono text-[10px] text-dim transition-colors hover:text-bad"
+              className="flex items-center gap-1 font-mono text-[9.5px] text-dim/50 transition-colors hover:text-bad"
             >
-              <X size={11} /> dismiss
+              <X size={10} /> dismiss
             </button>
           </div>
         </div>
@@ -136,6 +130,7 @@ function CallCard({ n, onDismiss, index }) {
   )
 }
 
+/* ── Notification card ─────────────────────────────────────────────── */
 function NotifCard({ n, onDismiss, onToast, index }) {
   const [replying, setReplying] = useState(false)
   const [draft, setDraft] = useState('')
@@ -156,39 +151,45 @@ function NotifCard({ n, onDismiss, onToast, index }) {
     }
   }
 
+  const initials = (n.app || '?').slice(0, 2).toUpperCase()
+
   return (
     <div
-      className="rise group border border-line bg-panel2 p-3.5"
-      style={{ animationDelay: `${Math.min(index, 15) * 20}ms` }}
+      className="rise group rounded-xl border border-line bg-panel2 p-3.5 luminous-sm transition-colors hover:border-line"
+      style={{ animationDelay: `${Math.min(index, 15) * 18}ms` }}
     >
       <div className="flex items-start gap-3">
-        <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-sm bg-amber/10 font-display text-[11px] font-bold text-amber">
-          {(n.app || '?').slice(0, 2).toUpperCase()}
+        <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber/10 border border-amber/15 font-mono text-[10px] font-bold text-amber">
+          {initials}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline justify-between gap-2">
-            <span className="truncate font-mono text-[9px] uppercase tracking-wider text-amber/80">
+            <span className="font-mono text-[9.5px] tracking-[0.06em] text-amber/70 uppercase">
               {n.app || 'app'}
             </span>
-            <span className="shrink-0 font-mono text-[9px] text-dim/70">{fmt(n.time)}</span>
+            <span className="shrink-0 font-mono text-[9px] text-dim/50">{fmt(n.time)}</span>
           </div>
-          {n.title && <p className="mt-0.5 truncate text-[13px] font-semibold">{n.title}</p>}
-          {n.text && <p className="mt-0.5 text-[12px] leading-relaxed text-dim">{n.text}</p>}
+          {n.title && (
+            <p className="mt-0.5 truncate text-[13px] font-semibold text-fg/90">{n.title}</p>
+          )}
+          {n.text && (
+            <p className="mt-0.5 text-[11.5px] leading-snug text-dim/80">{n.text}</p>
+          )}
 
           {replying ? (
-            <div className="mt-2 flex items-center gap-2">
+            <div className="mt-2.5 flex items-center gap-2">
               <input
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && send()}
                 autoFocus
                 placeholder="Reply…"
-                className="min-w-0 flex-1 border border-line bg-ink px-2.5 py-1.5 text-[12px] text-fg outline-none focus:border-amber/50"
+                className="min-w-0 flex-1 rounded-lg border border-line bg-panel3 px-2.5 py-1.5 text-[12px] text-fg/90 outline-none placeholder:text-dim/40 focus:border-amber/35 transition-colors"
               />
               <button
                 onClick={send}
                 disabled={sending || !draft.trim()}
-                className="border border-amber/40 p-1.5 text-amber transition-colors hover:bg-amber/10 disabled:opacity-35"
+                className="rounded-lg border border-amber/35 bg-amber/8 p-1.5 text-amber transition-all hover:bg-amber/15 disabled:opacity-30"
               >
                 <Send size={12} className={sending ? 'spinner' : ''} />
               </button>
@@ -198,16 +199,16 @@ function NotifCard({ n, onDismiss, onToast, index }) {
               {n.replyable && (
                 <button
                   onClick={() => setReplying(true)}
-                  className="flex items-center gap-1 font-mono text-[10px] text-dim transition-colors hover:text-amber"
+                  className="flex items-center gap-1 font-mono text-[9.5px] text-dim/50 transition-colors hover:text-amber"
                 >
-                  <CornerUpLeft size={11} /> reply
+                  <CornerUpLeft size={10} /> reply
                 </button>
               )}
               <button
                 onClick={() => onDismiss(n.key)}
-                className="flex items-center gap-1 font-mono text-[10px] text-dim transition-colors hover:text-bad"
+                className="flex items-center gap-1 font-mono text-[9.5px] text-dim/50 transition-colors hover:text-bad"
               >
-                <X size={11} /> dismiss
+                <X size={10} /> dismiss
               </button>
             </div>
           )}
@@ -217,22 +218,26 @@ function NotifCard({ n, onDismiss, onToast, index }) {
   )
 }
 
-function Empty({ icon: Icon, title, body }) {
+/* ── Empty state ───────────────────────────────────────────────────── */
+function EmptyState({ icon: Icon, title, body }) {
   return (
     <div className="flex h-full flex-1 items-center justify-center p-8">
-      <div className="max-w-sm border border-line bg-panel p-8 text-center">
-        <Icon size={22} strokeWidth={1.5} className="mx-auto text-amber" />
-        <p className="mt-4 font-display text-sm font-semibold tracking-[0.25em]">{title}</p>
-        <p className="mt-2 text-[12px] leading-relaxed text-dim">{body}</p>
+      <div className="rise max-w-72 rounded-2xl border border-line bg-panel2 p-8 luminous-sm text-center">
+        <div className="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-amber/8 border border-amber/15">
+          <Icon size={18} strokeWidth={1.5} className="text-amber" />
+        </div>
+        <p className="text-[13px] font-semibold text-fg/80">{title}</p>
+        <p className="mt-2 text-[11.5px] leading-relaxed text-dim/70">{body}</p>
       </div>
     </div>
   )
 }
 
+/* ── Time formatter ────────────────────────────────────────────────── */
 function fmt(d) {
   if (!d) return ''
   const date = new Date(Number(d))
-  const now = new Date()
+  const now  = new Date()
   return date.toDateString() === now.toDateString()
     ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : date.toLocaleDateString([], { day: 'numeric', month: 'short' })

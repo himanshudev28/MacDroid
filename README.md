@@ -38,17 +38,43 @@ It's two apps that talk to each other:
 | | Feature | What it does |
 |:--:|---|---|
 | 📋 | **Clipboard sync** | Mac → phone automatically; phone → Mac automatically or manually — **Auto / Manual** toggle. Works on Android 13+ / Samsung (uses accessibility events, not clipboard reads). |
-| 🔔 | **Notification mirroring** | Phone notifications on your Mac with **inline reply** and dismiss. |
+| 🔔 | **Notification mirroring** | Phone notifications on your Mac as native macOS alerts with **inline reply** and dismiss. Incoming calls shown with caller ID. |
 | 📁 | **File transfer & browser** | Drag-and-drop both ways with live progress; browse, download, upload, **rename**, **delete** and **search** phone storage. |
 | 🖼️ | **Photos & Videos** | Browse thumbnails, open full-res in Preview / QuickTime, download originals. |
-| 💬 | **Messages** | Polished 2-pane SMS chat — conversation list with avatar initials, search, day dividers, amber/grey bubbles, composer. Threads sync live. |
+| 💬 | **Messages** | Polished 2-pane SMS chat — conversation list with avatar initials, search, day dividers, composer. Threads sync live. |
 | 👤 | **Contacts** | Browse and search your phone's contacts. |
 | 📞 | **Phone calls** | Place calls from the Mac; incoming-call alerts with caller ID. |
 | 🎵 | **Media remote** | Now-Playing card with transport + volume control. |
 | 🪞 | **Screen mirroring** | Mirror **and control** your phone over Wi-Fi (MediaProjection + H.264) — tap, swipe, scroll, type and use the nav bar from your Mac. Pops out into a phone-shaped, always-on-top window. **No ADB, no scrcpy, no Developer Options.** |
 | 📷 | **Phone camera** | Use your phone's back or front camera as a Mac webcam-style feed — live, switchable, no ADB. |
 | 🤖 | **Auto Mirror mode** | Grant "Display over other apps" once — after that the Mac can start screen/camera instantly with no per-session tap on the phone. |
-| 🔌 | **Smart pairing** | **Custom QR scan screen** (glowing corner brackets, animated status pill) or manual IP entry; auto-reconnect; "Forget this Mac"; **Pause** mode (1h / 8h / until resume). |
+| 🔌 | **Smart pairing** | **Custom QR scan screen** (glowing amber corner brackets, animated status pill) or manual IP entry; auto-reconnect; "Forget this Mac"; **Pause** mode (1h / 8h / until resume). |
+
+---
+
+## 🎨 Design
+
+### Mac app — Apple HIG + Liquid Glass
+
+The Mac client follows **Apple Human Interface Guidelines** and the latest **Liquid Glass**
+design language:
+
+- Deep graphite palette (`#0D0D12` ink, `#14141B` panels) with Geist + JetBrains Mono typography
+- Glassmorphism toasts and modals with `backdrop-filter: blur(20px)` and translucent tints
+- Layered depth via inner-highlight box shadows and elevation classes (`.luminous`, `.float-md`)
+- Traffic-light drag region with `hiddenInset` title bar; amber LED status indicator
+- Spring-animated tab indicator, content-first layout, macOS-native thin scrollbar
+
+### Android app — Material Design 3
+
+The Android companion follows **Material Design 3** throughout:
+
+- Same graphite palette aligned with the Mac — `#0D0D12` ink, `#F5A623` amber, `#34C759` green
+- All-vector icons from **Material Icons Extended** — zero emoji anywhere in the UI
+- Animated connection hero card with `AnimatedContent` transitions and ambient gradient glow
+- MD3 `Switch`, `Card`, `Button`, `AlertDialog`, `FilledTonalButton`, `Surface` — native look and feel
+- Collapsible feature guide with `AnimatedVisibility` step lists
+- Amber scan-to-connect screen with glowing corner brackets and pulsing green dot
 
 ---
 
@@ -109,6 +135,14 @@ Tap **Screen** or **Camera** in the Mac's Mirror tab.
   app's settings. After that the capture dialog pops up directly with no notification
   tap, and camera starts instantly. Stopping from the Mac clears the phone's cast
   indicator completely.
+
+### 🔔 Mac notifications
+
+Phone notifications appear as native macOS alerts. To enable:
+
+1. Open DroidDock on both devices and connect.
+2. Grant **Notification Access** in the Android app.
+3. On macOS, go to **System Settings → Notifications → DroidDock** and enable Allow Notifications.
 
 ---
 
@@ -208,7 +242,9 @@ DroidDock/
 - [x] Auto Mirror mode — no per-session prompt with overlay permission
 - [x] Custom QR scan screen with glowing corner brackets
 - [x] Polished Messages UI — 2-pane chat with avatars, search, day dividers
-- [x] Redesigned pairing modal — "Connect Your Android" with scanner brackets + IP fallback
+- [x] Native macOS notifications with inline reply + incoming call alerts
+- [x] **Mac UI redesign** — Apple HIG + Liquid Glass (glassmorphism, Geist font, layered depth)
+- [x] **Android UI redesign** — Material Design 3 (all-vector icons, MD3 components, dynamic palette)
 - [ ] TLS on the LAN link
 - [ ] Audio streaming (Mac ↔ phone)
 

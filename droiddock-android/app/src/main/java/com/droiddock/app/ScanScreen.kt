@@ -7,6 +7,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
@@ -34,22 +41,22 @@ import com.journeyapps.barcodescanner.BarcodeView
 import com.journeyapps.barcodescanner.DefaultDecoderFactory
 import java.util.concurrent.atomic.AtomicBoolean
 
-private val ScanInk = Color(0xFF080A0D)
-private val ScanPanel = Color(0xFF141820)
-private val ScanFg = Color(0xFFE9E6DF)
-private val ScanDim = Color(0xFF8B909A)
-private val ScanOk = Color(0xFF79D68B)
-private val BracketBlue = Color(0xFF6B9FFF)
+private val ScanInk    = Color(0xFF0D0D12)
+private val ScanPanel  = Color(0xFF14141B)
+private val ScanFg     = Color(0xFFF0EFE9)
+private val ScanDim    = Color(0xFF72728A)
+private val ScanOk     = Color(0xFF34C759)
+private val BracketAmber = Color(0xFFF5A623)
 
 @Composable
 fun ScanScreen(
     onResult: (String) -> Unit,
     onManual: () -> Unit,
-    onBack: () -> Unit,
-    onHelp: () -> Unit = {}
+    onBack:   () -> Unit,
+    onHelp:   () -> Unit = {}
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
-    val bvRef = remember { mutableStateOf<BarcodeView?>(null) }
+    val bvRef  = remember { mutableStateOf<BarcodeView?>(null) }
     val decoded = remember { AtomicBoolean(false) }
 
     DisposableEffect(lifecycleOwner) {
@@ -69,7 +76,7 @@ fun ScanScreen(
 
     Box(Modifier.fillMaxSize().background(ScanInk)) {
 
-        // ── camera preview ──
+        // ── Camera preview ──
         AndroidView(
             factory = { ctx ->
                 BarcodeView(ctx).apply {
@@ -96,73 +103,104 @@ fun ScanScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // ── dark overlay + glowing corner brackets ──
+        // ── Dark overlay + glowing corner brackets ──
         ScannerOverlay()
 
-        // ── top bar ──
+        // ── Top bar ──
         Row(
-            Modifier
+            modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
                 .padding(horizontal = 4.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            TextButton(onClick = onBack) {
-                Text("←", color = ScanFg, fontSize = 22.sp)
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = ScanFg)
             }
             Spacer(Modifier.weight(1f))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("📱", fontSize = 17.sp)
-                Spacer(Modifier.width(5.dp))
-                Text("DroidDock", color = ScanFg, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector        = Icons.Default.PhoneAndroid,
+                    contentDescription = null,
+                    tint               = BracketAmber,
+                    modifier           = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "DroidDock",
+                    color      = ScanFg,
+                    fontSize   = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.3).sp
+                )
             }
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = onHelp) {
-                Text("Help", color = ScanFg.copy(alpha = 0.65f), fontSize = 14.sp)
+            IconButton(onClick = onHelp) {
+                Icon(Icons.Default.HelpOutline, contentDescription = "Help",
+                    tint = ScanFg.copy(alpha = 0.55f), modifier = Modifier.size(22.dp))
             }
         }
 
-        // ── bottom: title + subtitle + status pill ──
+        // ── Bottom: title + subtitle + status pill ──
         Column(
-            Modifier
+            modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(start = 28.dp, end = 28.dp, bottom = 32.dp),
+                .padding(start = 28.dp, end = 28.dp, bottom = 36.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
                 "Scan to Connect",
-                color = ScanFg, fontSize = 26.sp, fontWeight = FontWeight.Bold
+                color      = ScanFg,
+                fontSize   = 26.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.5).sp
             )
             Spacer(Modifier.height(10.dp))
             Text(
                 "Point your camera at the DroidDock QR code on\nyour Mac to pair instantly.",
-                color = ScanDim, fontSize = 14.sp,
-                textAlign = TextAlign.Center, lineHeight = 21.sp
+                color     = ScanDim,
+                fontSize  = 14.sp,
+                textAlign = TextAlign.Center,
+                lineHeight = 21.sp
             )
             Spacer(Modifier.height(28.dp))
 
-            // pill
+            // Status pill
             Box(
-                Modifier
+                modifier = Modifier
                     .background(ScanPanel, RoundedCornerShape(50.dp))
-                    .padding(horizontal = 22.dp, vertical = 14.dp),
+                    .padding(horizontal = 24.dp, vertical = 14.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         PulsingDot()
                         Spacer(Modifier.width(8.dp))
-                        Text("Looking for Mac", color = ScanFg,
-                            fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text(
+                            "Looking for QR code",
+                            color      = ScanFg,
+                            fontSize   = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
                     }
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(4.dp))
                     TextButton(
-                        onClick = onManual,
+                        onClick        = onManual,
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                     ) {
-                        Text("⌨  Pair Manually", color = ScanDim, fontSize = 13.sp)
+                        Icon(
+                            imageVector        = Icons.Default.Keyboard,
+                            contentDescription = null,
+                            tint               = ScanDim,
+                            modifier           = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text("Pair manually", color = ScanDim, fontSize = 13.sp)
                     }
                 }
             }
@@ -174,17 +212,17 @@ fun ScanScreen(
 private fun ScannerOverlay() {
     val density = LocalDensity.current
     Canvas(Modifier.fillMaxSize()) {
-        val scanW    = size.width * 0.76f
-        val left     = (size.width - scanW) / 2f
-        val top      = size.height * 0.15f
-        val right    = left + scanW
-        val bottom   = top + scanW   // square
-        val cR       = with(density) { 20.dp.toPx() }
-        val arm      = with(density) { 34.dp.toPx() }
-        val thin     = with(density) { 2.8.dp.toPx() }
-        val overlay  = Color(0xCC080A0D)
+        val scanW   = size.width * 0.76f
+        val left    = (size.width - scanW) / 2f
+        val top     = size.height * 0.15f
+        val right   = left + scanW
+        val bottom  = top + scanW
+        val cR      = with(density) { 20.dp.toPx() }
+        val arm     = with(density) { 34.dp.toPx() }
+        val thin    = with(density) { 2.8.dp.toPx() }
+        val overlay = Color(0xCC0D0D12)
 
-        // ── mask panels around viewfinder ──
+        // mask panels around viewfinder
         drawRect(overlay, Offset.Zero, Size(size.width, top))
         drawRect(overlay, Offset(0f, bottom), Size(size.width, size.height - bottom))
         drawRect(overlay, Offset(0f, top), Size(left, scanW))
@@ -192,54 +230,47 @@ private fun ScannerOverlay() {
 
         val paths = cornerPaths(left, top, right, bottom, arm, cR)
 
-        // ── glow layers (no BlurMaskFilter → works on all hw-accel configs) ──
+        // glow halos
         val glowLayers = listOf(
-            Pair(with(density) { 22.dp.toPx() }, 0.04f),
-            Pair(with(density) { 14.dp.toPx() }, 0.07f),
-            Pair(with(density) { 8.dp.toPx()  }, 0.12f),
-            Pair(with(density) { 4.dp.toPx()  }, 0.22f),
+            22f to 0.04f, 14f to 0.07f, 8f to 0.13f, 4f to 0.24f
         )
-        for ((w, a) in glowLayers) {
+        for ((dpW, a) in glowLayers) {
+            val px = with(density) { dpW.dp.toPx() }
             paths.forEach { path ->
-                drawPath(path, BracketBlue.copy(alpha = a),
-                    style = Stroke(width = w, cap = StrokeCap.Round))
+                drawPath(path, BracketAmber.copy(alpha = a),
+                    style = Stroke(width = px, cap = StrokeCap.Round))
             }
         }
 
-        // ── sharp bracket lines ──
+        // sharp bracket lines
         paths.forEach { path ->
-            drawPath(path, BracketBlue, style = Stroke(width = thin, cap = StrokeCap.Round))
+            drawPath(path, BracketAmber, style = Stroke(width = thin, cap = StrokeCap.Round))
         }
     }
 }
 
-/** Four L-shaped corner bracket Paths that follow the viewfinder's rounded corners. */
 private fun cornerPaths(
     left: Float, top: Float, right: Float, bottom: Float,
     arm: Float, cR: Float
 ): List<Path> = listOf(
-    // top-left
     Path().apply {
         moveTo(left, top + arm)
         lineTo(left, top + cR)
         arcTo(Rect(left, top, left + cR * 2, top + cR * 2), 180f, 90f, false)
         lineTo(left + arm, top)
     },
-    // top-right
     Path().apply {
         moveTo(right - arm, top)
         lineTo(right - cR, top)
         arcTo(Rect(right - cR * 2, top, right, top + cR * 2), 270f, 90f, false)
         lineTo(right, top + arm)
     },
-    // bottom-left
     Path().apply {
         moveTo(left, bottom - arm)
         lineTo(left, bottom - cR)
         arcTo(Rect(left, bottom - cR * 2, left + cR * 2, bottom), 180f, -90f, false)
         lineTo(left + arm, bottom)
     },
-    // bottom-right
     Path().apply {
         moveTo(right - arm, bottom)
         lineTo(right - cR, bottom)
@@ -252,14 +283,13 @@ private fun cornerPaths(
 private fun PulsingDot() {
     val inf = rememberInfiniteTransition(label = "dot")
     val alpha by inf.animateFloat(
-        initialValue = 0.45f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            tween(800, easing = LinearEasing), RepeatMode.Reverse
-        ),
-        label = "alpha"
+        initialValue  = 0.45f,
+        targetValue   = 1f,
+        animationSpec = infiniteRepeatable(tween(800, easing = LinearEasing), RepeatMode.Reverse),
+        label         = "alpha"
     )
     Box(Modifier.size(10.dp), contentAlignment = Alignment.Center) {
-        Box(Modifier.size(10.dp).background(ScanOk.copy(alpha = alpha * 0.3f), CircleShape))
+        Box(Modifier.size(10.dp).background(ScanOk.copy(alpha = alpha * 0.30f), CircleShape))
         Box(Modifier.size(7.dp).background(ScanOk.copy(alpha = alpha), CircleShape))
     }
 }

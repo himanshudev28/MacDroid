@@ -12,106 +12,104 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.*
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.content.pm.PackageManager
 import org.json.JSONObject
 
-private val Ink = Color(0xFF0B0D10)
-private val Panel = Color(0xFF12151A)
-private val Amber = Color(0xFFFFB454)
-private val Ok = Color(0xFF79D68B)
-private val Dim = Color(0xFF8B909A)
-private val Fg = Color(0xFFE9E6DF)
-private val Blue = Color(0xFF5B9BFF)
-private val Purple = Color(0xFFB78BFF)
-private val Orange = Color(0xFFF0A35E)
-private val Line = Color(0xFF20242C)
+// ── Palette (aligned with the Mac app) ───────────────────────────────────
+private val Ink        = Color(0xFF0D0D12)
+private val Surface1   = Color(0xFF14141B)
+private val Surface2   = Color(0xFF1C1C26)
+private val Surface3   = Color(0xFF222230)
+private val Amber      = Color(0xFFF5A623)
+private val AmberDim   = Color(0xFFCC7B0E)
+private val Ok         = Color(0xFF34C759)
+private val Bad        = Color(0xFFFF453A)
+private val Fg         = Color(0xFFF0EFE9)
+private val Dim        = Color(0xFF72728A)
+private val LineColor  = Color(0xFF22222F)
+private val Purple     = Color(0xFFAA84FF)
+private val Blue       = Color(0xFF5B8FFF)
+private val Orange     = Color(0xFFF0934C)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
+        enableEdgeToEdge()
         if (Prefs.load(this) != null) BridgeService.start(this)
-
         setContent {
             MaterialTheme(
                 colorScheme = darkColorScheme(
-                    background = Ink, surface = Panel,
-                    primary = Amber, onPrimary = Color(0xFF1A1206),
-                    onBackground = Fg, onSurface = Fg
+                    background      = Ink,
+                    surface         = Surface1,
+                    surfaceVariant  = Surface2,
+                    primary         = Amber,
+                    onPrimary       = Color(0xFF1A0E00),
+                    secondary       = Ok,
+                    onSecondary     = Color(0xFF002210),
+                    onBackground    = Fg,
+                    onSurface       = Fg,
+                    outline         = LineColor,
+                    outlineVariant  = LineColor.copy(alpha = 0.6f),
                 )
-            ) {
-                Screen()
-            }
+            ) { DroidDockScreen() }
         }
     }
 }
 
 @Composable
-private fun Screen() {
-    val ctx = androidx.compose.ui.platform.LocalContext.current
-    val connected by ConnectionManager.connected.collectAsState()
-    val macName by ConnectionManager.macName.collectAsState()
-    val event by ConnectionManager.lastEvent.collectAsState()
+private fun DroidDockScreen() {
+    val ctx         = LocalContext.current
+    val connected   by ConnectionManager.connected.collectAsState()
+    val macName     by ConnectionManager.macName.collectAsState()
+    val event       by ConnectionManager.lastEvent.collectAsState()
     val pausedUntil by ConnectionManager.pausedUntil.collectAsState()
-    val isPaused = pausedUntil != 0L
-    var paired by remember { mutableStateOf(Prefs.load(ctx) != null) }
+    val isPaused    = pausedUntil != 0L
+
+    var paired      by remember { mutableStateOf(Prefs.load(ctx) != null) }
     var notifAccess by remember { mutableStateOf(notifAccessGranted(ctx)) }
-    var phonePerms by remember { mutableStateOf(phonePermsGranted(ctx)) }
-    var allFiles by remember { mutableStateOf(FileRepo.hasAllFiles()) }
-    var clipA11y by remember { mutableStateOf(clipAccessibilityEnabled(ctx)) }
-    var clipAuto by remember { mutableStateOf(Prefs.clipboardAuto(ctx)) }
-    var overlayOk by remember { mutableStateOf(Settings.canDrawOverlays(ctx)) }
-    var autoMirror by remember { mutableStateOf(Prefs.autoMirror(ctx)) }
-    var showManual by remember { mutableStateOf(false) }
-    var showGuide by remember { mutableStateOf(false) }
-    var showPause by remember { mutableStateOf(false) }
-    var showScan by remember { mutableStateOf(false) }
+    var phonePerms  by remember { mutableStateOf(phonePermsGranted(ctx)) }
+    var allFiles    by remember { mutableStateOf(FileRepo.hasAllFiles()) }
+    var clipA11y    by remember { mutableStateOf(clipAccessibilityEnabled(ctx)) }
+    var clipAuto    by remember { mutableStateOf(Prefs.clipboardAuto(ctx)) }
+    var overlayOk   by remember { mutableStateOf(Settings.canDrawOverlays(ctx)) }
+    var autoMirror  by remember { mutableStateOf(Prefs.autoMirror(ctx)) }
+    var showManual  by remember { mutableStateOf(false) }
+    var showGuide   by remember { mutableStateOf(false) }
+    var showPause   by remember { mutableStateOf(false) }
+    var showScan    by remember { mutableStateOf(false) }
 
     val cameraPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -120,7 +118,6 @@ private fun Screen() {
         else Toast.makeText(ctx, "Camera permission needed to scan QR", Toast.LENGTH_SHORT).show()
     }
 
-    // Shared "we have a pairing now" path — used by both QR scan and manual entry.
     val applyPairing: (Pairing) -> Unit = { pairing ->
         Prefs.save(ctx, pairing)
         paired = true
@@ -131,18 +128,17 @@ private fun Screen() {
     LaunchedEffect(Unit) {
         while (true) {
             notifAccess = notifAccessGranted(ctx)
-            phonePerms = phonePermsGranted(ctx)
-            allFiles = FileRepo.hasAllFiles()
-            clipA11y = clipAccessibilityEnabled(ctx)
-            overlayOk = Settings.canDrawOverlays(ctx)
+            phonePerms  = phonePermsGranted(ctx)
+            allFiles    = FileRepo.hasAllFiles()
+            clipA11y    = clipAccessibilityEnabled(ctx)
+            overlayOk   = Settings.canDrawOverlays(ctx)
             kotlinx.coroutines.delay(2000)
         }
     }
 
-    // Shared QR parse + pairing — used by both scan screen and manual entry
     val handleQr: (String) -> Unit = { qrText ->
         runCatching {
-            val o = JSONObject(qrText)
+            val o   = JSONObject(qrText)
             val ips = mutableListOf<String>()
             val arr = o.optJSONArray("ips")
             if (arr != null) for (i in 0 until arr.length()) ips.add(arr.getString(i))
@@ -169,6 +165,7 @@ private fun Screen() {
         }
     }
 
+    // ── Full-screen overlays take priority ───────────────────────────
     if (showScan) {
         ScanScreen(
             onResult = { qrText -> showScan = false; handleQr(qrText) },
@@ -185,140 +182,76 @@ private fun Screen() {
     }
 
     if (showManual) {
-        ManualPairDialog(
-            onDismiss = { showManual = false },
-            onPair = { pairing ->
-                showManual = false
-                applyPairing(pairing)
-            }
-        )
+        ManualPairDialog(onDismiss = { showManual = false }) { pairing ->
+            showManual = false; applyPairing(pairing)
+        }
     }
 
     if (showPause) {
-        PauseDialog(
-            onDismiss = { showPause = false },
-            onPause = { durationMs ->
-                showPause = false
-                ConnectionManager.pause(ctx, durationMs)
-            }
-        )
+        PauseDialog(onDismiss = { showPause = false }) { durationMs ->
+            showPause = false; ConnectionManager.pause(ctx, durationMs)
+        }
     }
 
-    Surface(Modifier.fillMaxSize(), color = Ink) {
+    // ── Main screen ───────────────────────────────────────────────────
+    Surface(modifier = Modifier.fillMaxSize(), color = Ink) {
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .windowInsetsPadding(WindowInsets.systemBars)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(12.dp))
 
-            // ---- branded header ----
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(38.dp)
-                        .background(Amber.copy(alpha = 0.14f), RoundedCornerShape(11.dp)),
-                    contentAlignment = Alignment.Center
-                ) { Text("🔗", fontSize = 18.sp) }
-                Spacer(Modifier.width(12.dp))
-                Column {
-                    Text("DroidDock", color = Fg, fontSize = 21.sp, fontWeight = FontWeight.Bold)
-                    Text("Phone ↔ Mac bridge", color = Dim, fontSize = 11.sp)
-                }
-            }
+            // ── App bar ──────────────────────────────────────────────
+            AppHeader()
 
             Spacer(Modifier.height(20.dp))
 
-            // ---- connection hero ----
-            val stateColor = when {
-                isPaused -> Amber
-                connected -> Ok
-                paired -> Amber
-                else -> Dim
-            }
-            val stateEmoji = when {
-                isPaused -> "⏸"
-                connected -> "✓"
-                paired -> "📡"
-                else -> "📱"
-            }
-            Card(
-                Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Panel),
-                shape = RoundedCornerShape(18.dp)
-            ) {
-                Row(
-                    Modifier.fillMaxWidth().padding(18.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        Modifier.size(52.dp).background(stateColor.copy(alpha = 0.16f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) { Text(stateEmoji, fontSize = 22.sp, color = stateColor) }
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            when {
-                                isPaused -> "Paused"
-                                connected -> macName ?: "Mac"
-                                paired -> "Searching for Mac…"
-                                else -> "Not paired"
-                            },
-                            color = if (isPaused) Amber else Fg,
-                            fontSize = 17.sp, fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            when {
-                                isPaused -> pauseSubtitle(pausedUntil)
-                                connected -> "Connected • $event"
-                                paired -> event
-                                else -> "Pair with your Mac to get started"
-                            },
-                            color = Dim, fontSize = 12.sp, lineHeight = 15.sp
-                        )
-                    }
-                    // Power toggle: pause when active, resume when paused.
-                    if (paired) {
-                        Spacer(Modifier.width(8.dp))
-                        if (isPaused) {
-                            Button(
-                                onClick = { ConnectionManager.resume(ctx) },
-                                colors = ButtonDefaults.buttonColors(containerColor = Amber),
-                                shape = RoundedCornerShape(20.dp),
-                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
-                            ) {
-                                Text("Resume", color = Color(0xFF1A1206),
-                                    fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            }
-                        } else {
-                            OutlinedButton(
-                                onClick = { showPause = true },
-                                shape = CircleShape,
-                                modifier = Modifier.size(44.dp),
-                                contentPadding = PaddingValues(0.dp)
-                            ) { Text("⏻", color = Dim, fontSize = 18.sp) }
-                        }
-                    }
-                }
-            }
+            // ── Connection status card ────────────────────────────────
+            ConnectionCard(
+                connected   = connected,
+                isPaused    = isPaused,
+                paired      = paired,
+                macName     = macName,
+                event       = event,
+                pausedUntil = pausedUntil,
+                onPause     = { showPause = true },
+                onResume    = { ConnectionManager.resume(ctx) }
+            )
 
             Spacer(Modifier.height(16.dp))
 
-            // ---- primary action ----
+            // ── Pair / re-pair button ─────────────────────────────────
             Button(
                 onClick = {
                     val hasCam = ctx.checkSelfPermission(Manifest.permission.CAMERA) ==
-                        PackageManager.PERMISSION_GRANTED
+                            PackageManager.PERMISSION_GRANTED
                     if (hasCam) showScan = true
                     else cameraPermLauncher.launch(Manifest.permission.CAMERA)
                 },
-                Modifier.fillMaxWidth().height(54.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Amber),
-                shape = RoundedCornerShape(13.dp)
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                colors   = ButtonDefaults.buttonColors(containerColor = Amber),
+                shape    = RoundedCornerShape(14.dp),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
             ) {
-                Text(if (paired) "Re-pair with Mac" else "Pair with Mac",
-                    fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Icon(
+                    imageVector = Icons.Default.QrCodeScanner,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text       = if (paired) "Re-pair with Mac" else "Pair with Mac",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize   = 15.sp,
+                    color      = Color(0xFF1A0E00)
+                )
             }
 
             Row(
-                Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -338,70 +271,65 @@ private fun Screen() {
                 }
             }
 
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(8.dp))
 
-            // ---- essential services ----
-            SectionCard("ESSENTIAL SERVICES") {
+            // ── Permissions / services ────────────────────────────────
+            SectionCard("Essential Services") {
                 AutoClipRow(
-                    a11yOn = clipA11y,
-                    auto = clipAuto,
+                    a11yOn   = clipA11y,
+                    auto     = clipAuto,
                     onEnable = {
-                        runCatching {
-                            ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                        }
-                        Toast.makeText(
-                            ctx, "Find “DroidDock Clipboard” and turn it on", Toast.LENGTH_LONG
-                        ).show()
+                        runCatching { ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                        Toast.makeText(ctx, "Find DroidDock Clipboard and turn it on", Toast.LENGTH_LONG).show()
                     },
-                    onToggle = { v ->
-                        clipAuto = v
-                        Prefs.setClipboardAuto(ctx, v)
-                    }
+                    onToggle = { v -> clipAuto = v; Prefs.setClipboardAuto(ctx, v) }
                 )
                 RowDivider()
                 AutoMirrorRow(
                     overlayOk = overlayOk,
-                    auto = autoMirror,
-                    onEnable = {
+                    auto      = autoMirror,
+                    onEnable  = {
                         runCatching {
                             ctx.startActivity(
-                                Intent(
-                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                    Uri.parse("package:${ctx.packageName}")
-                                )
+                                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                    Uri.parse("package:${ctx.packageName}"))
                             )
                         }
-                        Toast.makeText(
-                            ctx, "Allow DroidDock to display over other apps", Toast.LENGTH_LONG
-                        ).show()
+                        Toast.makeText(ctx, "Allow DroidDock to display over other apps", Toast.LENGTH_LONG).show()
                     },
                     onToggle = { v ->
-                        autoMirror = v
-                        Prefs.setAutoMirror(ctx, v)
-                        if (!v) MirrorService.stop(ctx) // release any kept-alive session
+                        autoMirror = v; Prefs.setAutoMirror(ctx, v)
+                        if (!v) MirrorService.stop(ctx)
                     }
                 )
                 RowDivider()
                 ServiceRow(
-                    "🔔", Blue, "Notification Access",
-                    "Show phone notifications on your Mac",
-                    notifAccess, "Enable"
+                    icon     = Icons.Outlined.Notifications,
+                    tint     = Blue,
+                    title    = "Notification Access",
+                    subtitle = "Show phone notifications on your Mac",
+                    granted  = notifAccess,
+                    action   = "Enable"
                 ) {
-                    runCatching {
-                        ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                    }
+                    runCatching { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
                 }
                 RowDivider()
                 ServiceRow(
-                    "💬", Ok, "SMS · Contacts · Calls",
-                    "Texts, contacts and call alerts on Mac",
-                    phonePerms, "Grant"
+                    icon     = Icons.Outlined.Message,
+                    tint     = Ok,
+                    title    = "SMS · Contacts · Calls",
+                    subtitle = "Texts, contacts and call alerts on Mac",
+                    granted  = phonePerms,
+                    action   = "Grant"
                 ) { permLauncher.launch(PHONE_PERMS) }
                 RowDivider()
                 ServiceRow(
-                    "📁", Orange, "All-files Access",
-                    "Browse and transfer your phone's files",
-                    allFiles, "Grant"
+                    icon     = Icons.Outlined.FolderOpen,
+                    tint     = Orange,
+                    title    = "All-files Access",
+                    subtitle = "Browse and transfer your phone's files",
+                    granted  = allFiles,
+                    action   = "Grant"
                 ) {
                     runCatching {
                         if (Build.VERSION.SDK_INT >= 30) {
@@ -414,9 +342,12 @@ private fun Screen() {
                 }
                 RowDivider()
                 ServiceRow(
-                    "🔋", Dim, "Background (Battery)",
-                    "Keep the link alive when the screen is off",
-                    null, "Allow"
+                    icon     = Icons.Outlined.BatteryChargingFull,
+                    tint     = Dim,
+                    title    = "Background (Battery)",
+                    subtitle = "Keep the link alive when screen is off",
+                    granted  = null,
+                    action   = "Allow"
                 ) {
                     runCatching {
                         ctx.startActivity(
@@ -427,16 +358,19 @@ private fun Screen() {
                 }
             }
 
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(12.dp))
 
-            // ---- quick actions ----
-            SectionCard("QUICK ACTIONS") {
+            // ── Quick actions ─────────────────────────────────────────
+            SectionCard("Quick Actions") {
                 ServiceRow(
-                    "📋", Purple, "Send Clipboard to Mac",
-                    "Push whatever you copied right now",
-                    null, "Send"
+                    icon     = Icons.Default.ContentCopy,
+                    tint     = Purple,
+                    title    = "Send Clipboard to Mac",
+                    subtitle = "Push whatever you copied right now",
+                    granted  = null,
+                    action   = "Send"
                 ) {
-                    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val cm   = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     val text = cm.primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
                     val sent = text.isNotEmpty() && ConnectionManager.sendClipboardText(text)
                     Toast.makeText(
@@ -451,17 +385,551 @@ private fun Screen() {
                 }
                 RowDivider()
                 ServiceRow(
-                    "📖", Amber, "Feature Guide",
-                    "Step-by-step help for every feature",
-                    null, "Open"
+                    icon     = Icons.Outlined.LibraryBooks,
+                    tint     = Amber,
+                    title    = "Feature Guide",
+                    subtitle = "Step-by-step help for every feature",
+                    granted  = null,
+                    action   = "Open"
                 ) { showGuide = true }
             }
 
+            Spacer(Modifier.height(32.dp))
+        }
+    }
+}
+
+// ── App header ────────────────────────────────────────────────────────────
+@Composable
+private fun AppHeader() {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .background(Amber.copy(alpha = 0.14f), RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector        = Icons.Default.PhoneAndroid,
+                contentDescription = null,
+                tint               = Amber,
+                modifier           = Modifier.size(22.dp)
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text("DroidDock", color = Fg, fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.3).sp)
+            Text("Phone ↔ Mac bridge", color = Dim, fontSize = 11.sp)
+        }
+    }
+}
+
+// ── Connection status card ─────────────────────────────────────────────────
+@Composable
+private fun ConnectionCard(
+    connected:   Boolean,
+    isPaused:    Boolean,
+    paired:      Boolean,
+    macName:     String?,
+    event:       String?,
+    pausedUntil: Long,
+    onPause:     () -> Unit,
+    onResume:    () -> Unit,
+) {
+    val stateColor: Color
+    val stateIcon:  ImageVector
+    val headline:   String
+    val subline:    String
+
+    when {
+        isPaused -> {
+            stateColor = Amber
+            stateIcon  = Icons.Default.PauseCircle
+            headline   = "Paused"
+            subline    = pauseSubtitle(pausedUntil)
+        }
+        connected -> {
+            stateColor = Ok
+            stateIcon  = Icons.Default.CheckCircle
+            headline   = macName ?: "Mac"
+            subline    = if (event.isNullOrBlank()) "Connected" else "Connected · $event"
+        }
+        paired -> {
+            stateColor = Amber
+            stateIcon  = Icons.Outlined.Wifi
+            headline   = "Searching for Mac…"
+            subline    = event ?: "Waiting for Mac to come online"
+        }
+        else -> {
+            stateColor = Dim
+            stateIcon  = Icons.Outlined.PhoneAndroid
+            headline   = "Not paired"
+            subline    = "Pair with your Mac to get started"
+        }
+    }
+
+    // Ambient glow animation when connected
+    val glowAlpha by if (connected && !isPaused) {
+        rememberInfiniteTransition(label = "glow").animateFloat(
+            initialValue   = 0.10f,
+            targetValue    = 0.20f,
+            animationSpec  = infiniteRepeatable(tween(1600, easing = EaseInOutSine), RepeatMode.Reverse),
+            label          = "glowAlpha"
+        )
+    } else remember { mutableFloatStateOf(0f) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape    = RoundedCornerShape(18.dp),
+        colors   = CardDefaults.cardColors(containerColor = Surface1),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Box {
+            // Ambient top-edge color bar
+            if (glowAlpha > 0f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    stateColor.copy(alpha = glowAlpha),
+                                    Color.Transparent
+                                )
+                            )
+                        )
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 18.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // State icon badge
+                AnimatedContent(
+                    targetState = stateIcon,
+                    transitionSpec = { fadeIn() togetherWith fadeOut() },
+                    label = "stateIcon"
+                ) { icon ->
+                    Box(
+                        modifier = Modifier
+                            .size(50.dp)
+                            .background(stateColor.copy(alpha = 0.14f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(icon, contentDescription = null, tint = stateColor,
+                            modifier = Modifier.size(26.dp))
+                    }
+                }
+
+                Spacer(Modifier.width(14.dp))
+
+                Column(Modifier.weight(1f)) {
+                    AnimatedContent(
+                        targetState = headline,
+                        transitionSpec = {
+                            slideInVertically { -it / 2 } + fadeIn() togetherWith
+                                    slideOutVertically { it / 2 } + fadeOut()
+                        },
+                        label = "headline"
+                    ) { text ->
+                        Text(text, color = if (isPaused) Amber else Fg,
+                            fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Text(subline, color = Dim, fontSize = 12.sp,
+                        lineHeight = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+
+                if (paired) {
+                    Spacer(Modifier.width(8.dp))
+                    if (isPaused) {
+                        FilledTonalButton(
+                            onClick = onResume,
+                            colors  = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = Amber.copy(alpha = 0.18f),
+                                contentColor   = Amber
+                            ),
+                            shape           = RoundedCornerShape(10.dp),
+                            contentPadding  = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                            elevation       = ButtonDefaults.filledTonalButtonElevation(0.dp)
+                        ) {
+                            Text("Resume", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    } else {
+                        IconButton(onClick = onPause) {
+                            Icon(Icons.Default.PowerSettingsNew,
+                                contentDescription = "Pause",
+                                tint = Dim, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Section card wrapper ───────────────────────────────────────────────────
+@Composable
+private fun SectionCard(title: String, content: @Composable () -> Unit) {
+    Column {
+        Text(
+            text          = title.uppercase(),
+            color         = Dim,
+            fontSize      = 10.sp,
+            letterSpacing = 1.2.sp,
+            fontWeight    = FontWeight.Medium,
+            modifier      = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 6.dp)
+        )
+        Surface(
+            modifier  = Modifier.fillMaxWidth(),
+            shape     = RoundedCornerShape(18.dp),
+            color     = Surface1,
+            tonalElevation = 0.dp
+        ) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) { content() }
+        }
+    }
+}
+
+// ── Auto clipboard row ────────────────────────────────────────────────────
+@Composable
+private fun AutoClipRow(
+    a11yOn:   Boolean,
+    auto:     Boolean,
+    onEnable: () -> Unit,
+    onToggle: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconBadge(Icons.Default.ContentCopy, Purple)
+        Spacer(Modifier.width(13.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Auto Clipboard", color = Fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(
+                when {
+                    !a11yOn -> "Enable accessibility to auto-send copies to Mac"
+                    auto    -> "On — copies on this phone appear on Mac instantly"
+                    else    -> "Manual — use share sheet to push copies"
+                },
+                color = Dim, fontSize = 11.sp, lineHeight = 15.sp,
+                maxLines = 2, overflow = TextOverflow.Ellipsis
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        if (!a11yOn) {
+            TonalChip("Enable", Purple, onEnable)
+        } else {
+            DroidSwitch(checked = auto, onCheckedChange = onToggle)
+        }
+    }
+}
+
+// ── Auto mirror row ───────────────────────────────────────────────────────
+@Composable
+private fun AutoMirrorRow(
+    overlayOk: Boolean,
+    auto:      Boolean,
+    onEnable:  () -> Unit,
+    onToggle:  (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconBadge(Icons.Default.ScreenShare, Blue)
+        Spacer(Modifier.width(13.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Auto Screen / Camera", color = Fg, fontSize = 14.sp,
+                fontWeight = FontWeight.Medium)
+            Text(
+                when {
+                    !overlayOk -> "Allow 'Display over other apps' to start without a prompt"
+                    auto       -> "On — camera instant; screen reuses existing permission"
+                    else       -> "Off — phone prompt required each time"
+                },
+                color = Dim, fontSize = 11.sp, lineHeight = 15.sp,
+                maxLines = 2, overflow = TextOverflow.Ellipsis
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        if (!overlayOk) {
+            TonalChip("Enable", Blue, onEnable)
+        } else {
+            DroidSwitch(checked = auto, onCheckedChange = onToggle)
+        }
+    }
+}
+
+// ── Generic service row ───────────────────────────────────────────────────
+@Composable
+private fun ServiceRow(
+    icon:     ImageVector,
+    tint:     Color,
+    title:    String,
+    subtitle: String,
+    granted:  Boolean?,
+    action:   String,
+    onClick:  () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconBadge(icon, tint)
+        Spacer(Modifier.width(13.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = Fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(subtitle, color = Dim, fontSize = 11.sp, lineHeight = 15.sp,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.width(10.dp))
+        if (granted == true) {
+            Box(
+                modifier = Modifier
+                    .background(Ok.copy(alpha = 0.12f), RoundedCornerShape(9.dp))
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Check, contentDescription = null, tint = Ok,
+                        modifier = Modifier.size(12.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("On", color = Ok, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+        } else {
+            TonalChip(action, tint, onClick)
+        }
+    }
+}
+
+// ── Small components ──────────────────────────────────────────────────────
+@Composable
+private fun IconBadge(icon: ImageVector, tint: Color) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .background(tint.copy(alpha = 0.14f), RoundedCornerShape(11.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(19.dp))
+    }
+}
+
+@Composable
+private fun TonalChip(label: String, tint: Color, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(9.dp))
+            .background(tint.copy(alpha = 0.14f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 7.dp)
+    ) {
+        Text(label, color = tint, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun DroidSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Switch(
+        checked         = checked,
+        onCheckedChange = onCheckedChange,
+        colors          = SwitchDefaults.colors(
+            checkedThumbColor     = Color(0xFF1A0E00),
+            checkedTrackColor     = Amber,
+            uncheckedThumbColor   = Dim,
+            uncheckedTrackColor   = Surface3,
+            uncheckedBorderColor  = Dim.copy(alpha = 0.4f)
+        )
+    )
+}
+
+@Composable
+private fun RowDivider() {
+    HorizontalDivider(color = LineColor, thickness = 0.5.dp)
+}
+
+// ── Manual pair dialog ─────────────────────────────────────────────────────
+@Composable
+private fun ManualPairDialog(onDismiss: () -> Unit, onPair: (Pairing) -> Unit) {
+    val ctx   = LocalContext.current
+    var ip    by remember { mutableStateOf("") }
+    var port  by remember { mutableStateOf("48484") }
+    var token by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest  = onDismiss,
+        containerColor    = Surface2,
+        shape             = RoundedCornerShape(20.dp),
+        title             = { Text("Pair manually", color = Fg, fontWeight = FontWeight.SemiBold) },
+        text = {
+            Column {
+                Text(
+                    "Open Pair Device on the Mac and read the IP, port and token it shows.",
+                    color = Dim, fontSize = 13.sp, lineHeight = 18.sp
+                )
+                Spacer(Modifier.height(14.dp))
+                OutlinedTextField(value = ip, onValueChange = { ip = it }, singleLine = true,
+                    label = { Text("Mac IP (e.g. 192.168.0.108)") },
+                    modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(value = port, onValueChange = { port = it }, singleLine = true,
+                    label = { Text("Port") }, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(value = token, onValueChange = { token = it }, singleLine = true,
+                    label = { Text("Token") }, modifier = Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val ipt = ip.trim(); val tok = token.trim()
+                val p   = port.trim().toIntOrNull() ?: 48484
+                if (ipt.isEmpty() || tok.isEmpty()) {
+                    Toast.makeText(ctx, "Enter the IP and token shown on the Mac", Toast.LENGTH_SHORT).show()
+                } else {
+                    onPair(Pairing(listOf(ipt), p, tok, "Mac"))
+                }
+            }) { Text("Pair", color = Amber, fontWeight = FontWeight.SemiBold) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel", color = Dim) }
+        }
+    )
+}
+
+// ── Pause dialog ───────────────────────────────────────────────────────────
+@Composable
+private fun PauseDialog(onDismiss: () -> Unit, onPause: (Long?) -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor   = Surface2,
+        shape            = RoundedCornerShape(20.dp),
+        title = {
+            Text("Pause DroidDock", color = Fg, fontWeight = FontWeight.SemiBold)
+        },
+        text = {
+            Column {
+                Text(
+                    "Stops auto-reconnect and tells your Mac to stop trying. " +
+                            "The persistent notification stays silent.",
+                    color = Dim, fontSize = 13.sp, lineHeight = 18.sp
+                )
+                Spacer(Modifier.height(16.dp))
+                PauseOption("Pause for 1 hour")     { onPause(60L * 60 * 1000) }
+                Spacer(Modifier.height(8.dp))
+                PauseOption("Pause for 8 hours")    { onPause(8L * 60 * 60 * 1000) }
+                Spacer(Modifier.height(8.dp))
+                PauseOption("Until I resume")        { onPause(null) }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel", color = Dim) }
+        }
+    )
+}
+
+@Composable
+private fun PauseOption(label: String, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick   = onClick,
+        modifier  = Modifier.fillMaxWidth().height(48.dp),
+        shape     = RoundedCornerShape(12.dp),
+        colors    = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+        border    = androidx.compose.foundation.BorderStroke(0.5.dp, Amber.copy(alpha = 0.4f))
+    ) { Text(label, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
+}
+
+// ── Feature guide ──────────────────────────────────────────────────────────
+@Composable
+private fun FeatureGuideScreen(onBack: () -> Unit) {
+    Surface(Modifier.fillMaxSize(), color = Ink) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .windowInsetsPadding(WindowInsets.systemBars)
+                .padding(horizontal = 16.dp)
+        ) {
+            Spacer(Modifier.height(8.dp))
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, "Back", tint = Fg)
+            }
+            Spacer(Modifier.height(4.dp))
+            Text("Feature Guide", color = Fg, fontSize = 22.sp,
+                fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp)
+            Text("Tap any card for step-by-step help.", color = Dim, fontSize = 13.sp)
+            Spacer(Modifier.height(16.dp))
+            GUIDE_SECTIONS.forEach { section ->
+                GuideCard(section)
+                Spacer(Modifier.height(8.dp))
+            }
             Spacer(Modifier.height(24.dp))
         }
     }
 }
 
+@Composable
+private fun GuideCard(section: GuideSection) {
+    var open by remember { mutableStateOf(false) }
+    Surface(
+        modifier  = Modifier.fillMaxWidth(),
+        shape     = RoundedCornerShape(16.dp),
+        color     = Surface1,
+        tonalElevation = 0.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { open = !open }
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(section.title, color = Fg, fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold)
+                    Text(section.subtitle, color = Dim, fontSize = 12.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Icon(
+                    imageVector        = if (open) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    tint               = Amber,
+                    modifier           = Modifier.size(20.dp)
+                )
+            }
+            AnimatedVisibility(visible = open) {
+                Column(Modifier.padding(top = 12.dp)) {
+                    section.steps.forEachIndexed { i, step ->
+                        Row(
+                            modifier = Modifier.padding(vertical = 3.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Text(
+                                "${i + 1}.",
+                                color    = Amber,
+                                fontSize = 12.sp,
+                                modifier = Modifier.width(22.dp)
+                            )
+                            Text(step, color = Dim, fontSize = 12.sp, lineHeight = 17.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
 private val PHONE_PERMS = arrayOf(
     Manifest.permission.READ_SMS,
     Manifest.permission.SEND_SMS,
@@ -472,9 +940,7 @@ private val PHONE_PERMS = arrayOf(
 )
 
 private fun phonePermsGranted(ctx: Context): Boolean =
-    PHONE_PERMS.all {
-        ctx.checkSelfPermission(it) == android.content.pm.PackageManager.PERMISSION_GRANTED
-    }
+    PHONE_PERMS.all { ctx.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
 
 private fun notifAccessGranted(ctx: Context): Boolean =
     Settings.Secure.getString(ctx.contentResolver, "enabled_notification_listeners")
@@ -484,441 +950,56 @@ private fun clipAccessibilityEnabled(ctx: Context): Boolean =
     Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
         ?.contains(ClipAccessibilityService::class.java.name) == true
 
-/** Clipboard auto/manual control: Enable button until the Accessibility service is on,
- *  then an Auto/Manual switch. (Manual mode keeps the existing "Send" / share-sheet paths.) */
-@Composable
-private fun AutoClipRow(
-    a11yOn: Boolean,
-    auto: Boolean,
-    onEnable: () -> Unit,
-    onToggle: (Boolean) -> Unit
-) {
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            Modifier.size(40.dp).background(Purple.copy(alpha = 0.15f), RoundedCornerShape(11.dp)),
-            contentAlignment = Alignment.Center
-        ) { Text("📋", fontSize = 17.sp) }
-        Spacer(Modifier.width(13.dp))
-        Column(Modifier.weight(1f)) {
-            Text("Auto Clipboard", color = Fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            Text(
-                when {
-                    !a11yOn -> "Enable accessibility to auto-send copies to Mac"
-                    auto -> "On — copies on this phone appear on Mac instantly"
-                    else -> "Manual — use Send / share sheet to push copies"
-                },
-                color = Dim, fontSize = 11.sp, lineHeight = 14.sp
-            )
-        }
-        Spacer(Modifier.width(10.dp))
-        if (!a11yOn) {
-            Button(
-                onClick = onEnable,
-                colors = ButtonDefaults.buttonColors(containerColor = Purple.copy(alpha = 0.16f)),
-                shape = RoundedCornerShape(9.dp),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                elevation = null
-            ) { Text("Enable", color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Medium) }
-        } else {
-            Switch(
-                checked = auto,
-                onCheckedChange = onToggle,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color(0xFF1A1206),
-                    checkedTrackColor = Amber,
-                    uncheckedThumbColor = Dim,
-                    uncheckedTrackColor = Panel,
-                    uncheckedBorderColor = Dim.copy(alpha = 0.5f)
-                )
-            )
-        }
-    }
-}
-
-/** Auto mirroring/camera: grant "Display over other apps", then a switch. When on, the
- *  Mac can start screen/camera without a per-time prompt on the phone. */
-@Composable
-private fun AutoMirrorRow(
-    overlayOk: Boolean,
-    auto: Boolean,
-    onEnable: () -> Unit,
-    onToggle: (Boolean) -> Unit
-) {
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            Modifier.size(40.dp).background(Blue.copy(alpha = 0.15f), RoundedCornerShape(11.dp)),
-            contentAlignment = Alignment.Center
-        ) { Text("🖥️", fontSize = 17.sp) }
-        Spacer(Modifier.width(13.dp))
-        Column(Modifier.weight(1f)) {
-            Text("Auto Screen / Camera", color = Fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            Text(
-                when {
-                    !overlayOk -> "Allow 'Display over other apps' to start without a prompt"
-                    auto -> "On — camera starts instantly; screen asks once, then reuses"
-                    else -> "Off — tap a prompt on the phone each time"
-                },
-                color = Dim, fontSize = 11.sp, lineHeight = 14.sp
-            )
-        }
-        Spacer(Modifier.width(10.dp))
-        if (!overlayOk) {
-            Button(
-                onClick = onEnable,
-                colors = ButtonDefaults.buttonColors(containerColor = Blue.copy(alpha = 0.16f)),
-                shape = RoundedCornerShape(9.dp),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                elevation = null
-            ) { Text("Enable", color = Blue, fontSize = 12.sp, fontWeight = FontWeight.Medium) }
-        } else {
-            Switch(
-                checked = auto,
-                onCheckedChange = onToggle,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color(0xFF1A1206),
-                    checkedTrackColor = Amber,
-                    uncheckedThumbColor = Dim,
-                    uncheckedTrackColor = Panel,
-                    uncheckedBorderColor = Dim.copy(alpha = 0.5f)
-                )
-            )
-        }
-    }
-}
-
-/** A titled rounded card that groups related rows. */
-@Composable
-private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Card(
-        Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Panel),
-        shape = RoundedCornerShape(18.dp)
-    ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
-            Text(
-                title, color = Dim, fontSize = 10.sp, letterSpacing = 1.5.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(top = 10.dp, bottom = 2.dp)
-            )
-            content()
-        }
-    }
-}
-
-/** One row: icon badge + title/subtitle, and either a "✓ On" pill (when [granted]
- *  is true) or an accent action button. Pass [granted] = null for pure actions. */
-@Composable
-private fun ServiceRow(
-    emoji: String,
-    accent: Color,
-    title: String,
-    subtitle: String,
-    granted: Boolean?,
-    action: String,
-    onClick: () -> Unit
-) {
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            Modifier.size(40.dp).background(accent.copy(alpha = 0.15f), RoundedCornerShape(11.dp)),
-            contentAlignment = Alignment.Center
-        ) { Text(emoji, fontSize = 17.sp) }
-        Spacer(Modifier.width(13.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, color = Fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            Text(subtitle, color = Dim, fontSize = 11.sp, lineHeight = 14.sp)
-        }
-        Spacer(Modifier.width(10.dp))
-        if (granted == true) {
-            Box(
-                Modifier.background(Ok.copy(alpha = 0.14f), RoundedCornerShape(9.dp))
-                    .padding(horizontal = 13.dp, vertical = 7.dp)
-            ) { Text("✓ On", color = Ok, fontSize = 12.sp, fontWeight = FontWeight.Medium) }
-        } else {
-            Button(
-                onClick = onClick,
-                colors = ButtonDefaults.buttonColors(containerColor = accent.copy(alpha = 0.16f)),
-                shape = RoundedCornerShape(9.dp),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                elevation = null
-            ) { Text(action, color = accent, fontSize = 12.sp, fontWeight = FontWeight.Medium) }
-        }
-    }
-}
-
-@Composable
-private fun RowDivider() {
-    Box(Modifier.fillMaxWidth().height(1.dp).background(Line))
-}
-
-/** Manual pairing — type the IP / port / token shown by "Pair Device" on the Mac.
- *  An alternative to QR for networks where the camera scan is awkward. */
-@Composable
-private fun ManualPairDialog(onDismiss: () -> Unit, onPair: (Pairing) -> Unit) {
-    val ctx = androidx.compose.ui.platform.LocalContext.current
-    var ip by remember { mutableStateOf("") }
-    var port by remember { mutableStateOf("48484") }
-    var token by remember { mutableStateOf("") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {
-            TextButton(onClick = {
-                val ipt = ip.trim()
-                val tok = token.trim()
-                val p = port.trim().toIntOrNull() ?: 48484
-                if (ipt.isEmpty() || tok.isEmpty()) {
-                    Toast.makeText(
-                        ctx, "Enter the IP and token shown on the Mac", Toast.LENGTH_SHORT
-                    ).show()
-                } else {
-                    onPair(Pairing(listOf(ipt), p, tok, "Mac"))
-                }
-            }) { Text("PAIR", color = Amber) }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("CANCEL", color = Dim) } },
-        title = { Text("Pair manually", color = Fg) },
-        text = {
-            Column {
-                Text(
-                    "Open Pair Device on the Mac and read the IP, port and token it shows.",
-                    color = Dim, fontSize = 12.sp
-                )
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = ip, onValueChange = { ip = it }, singleLine = true,
-                    label = { Text("Mac IP (e.g. 192.168.0.108)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = port, onValueChange = { port = it }, singleLine = true,
-                    label = { Text("Port") }, modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = token, onValueChange = { token = it }, singleLine = true,
-                    label = { Text("Token") }, modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        containerColor = Panel
-    )
-}
-
-/** Subtitle shown under "Paused": either the resume time or "Until you resume". */
 private fun pauseSubtitle(until: Long): String =
     if (until == Long.MAX_VALUE) "Until you resume"
     else "Resumes " + java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault())
         .format(java.util.Date(until))
 
-/** Pause sheet — stop reconnecting for a while (and tell the Mac to stop too). */
-@Composable
-private fun PauseDialog(onDismiss: () -> Unit, onPause: (Long?) -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("CANCEL", color = Dim) } },
-        title = { Text("Pause DroidDock", color = Fg) },
-        text = {
-            Column {
-                Text(
-                    "Stops auto-reconnect and mDNS scanning, and tells your Mac to stop trying. " +
-                        "DroidDock keeps its persistent notification (it stays silent).",
-                    color = Dim, fontSize = 12.sp
-                )
-                Spacer(Modifier.height(16.dp))
-                PauseOption("Pause for 1 hour") { onPause(60L * 60 * 1000) }
-                Spacer(Modifier.height(8.dp))
-                PauseOption("Pause for 8 hours") { onPause(8L * 60 * 60 * 1000) }
-                Spacer(Modifier.height(8.dp))
-                PauseOption("Until I resume") { onPause(null) }
-            }
-        },
-        containerColor = Panel
-    )
-}
-
-@Composable
-private fun PauseOption(label: String, onClick: () -> Unit) {
-    OutlinedButton(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth().height(48.dp),
-        shape = RoundedCornerShape(4.dp)
-    ) { Text(label, color = Amber, fontSize = 13.sp) }
-}
-
 private data class GuideSection(val title: String, val subtitle: String, val steps: List<String>)
 
 private val GUIDE_SECTIONS = listOf(
-    GuideSection(
-        "Quick Start", "The fastest way to get DroidDock working and keep it reliable.",
-        listOf(
-            "Open DroidDock on your Mac first, then keep this app open on Android while you pair.",
-            "Use QR for the first setup, or connect USB for the fastest detection and charging at the same time.",
-            "After pairing, set Battery to Unrestricted on Android so reconnects, notifications and clipboard stay ready.",
-            "Turn on Notification Access for alerts on Mac, and the SMS · Contacts · Calls permission for the full link.",
-            "From the home screen, use Pair, Send Clipboard, or the Mac's tabs depending on what you want to do."
-        )
-    ),
-    GuideSection(
-        "Pairing & Connection", "Connect your phone and Mac over Wi-Fi or USB.",
-        listOf(
-            "Install DroidDock on your Mac and this app on your Android.",
+    GuideSection("Quick Start", "The fastest way to get DroidDock working.",
+        listOf("Open DroidDock on your Mac first, then keep this app open while you pair.",
+            "Use QR for the first setup, or USB for the fastest detection.",
+            "After pairing, set Battery to Unrestricted so reconnects stay reliable.",
+            "Turn on Notification Access for alerts on Mac, and SMS · Contacts for the full link.",
+            "From the home screen, use Pair, Send Clipboard, or the Mac's tabs.")),
+    GuideSection("Pairing & Connection", "Connect your phone and Mac over Wi-Fi or USB.",
+        listOf("Install DroidDock on your Mac and this app on Android.",
             "Use the same Wi-Fi network, or plug in a USB cable for the wired path.",
-            "Open Pair Device on the Mac. It shows a QR code and the manual IP / token.",
-            "On Android, tap Pair With Mac and scan the QR, or choose Enter IP manually and type what the Mac shows.",
-            "Once paired, your devices auto-connect whenever both apps are open."
-        )
-    ),
-    GuideSection(
-        "File Transfer", "Send files between your phone and Mac.",
-        listOf(
-            "Make sure both devices are connected.",
-            "On Mac: drag a file onto the DroidDock window, or use Send To Phone in the Files tab.",
-            "On Android: share from any app, or use the Send Clipboard / share-sheet actions.",
-            "Transfer progress shows on both devices in real time.",
-            "Received files appear in your Downloads folder."
-        )
-    ),
-    GuideSection(
-        "Photos & Videos", "Browse and download your phone's photos and videos.",
-        listOf(
-            "Connect both devices and grant All-files (or media) access on Android.",
+            "Open Pair Device on the Mac — it shows a QR code and manual IP/token.",
+            "On Android, tap Pair With Mac and scan the QR, or choose Enter IP manually.",
+            "Once paired, both devices auto-connect whenever both apps are open.")),
+    GuideSection("File Transfer", "Send files between your phone and Mac.",
+        listOf("Make sure both devices are connected.",
+            "On Mac: drag a file onto DroidDock, or use Send To Phone in the Files tab.",
+            "On Android: share from any app or use Send Clipboard/share-sheet actions.",
+            "Progress shows on both devices in real time.",
+            "Received files appear in your Downloads folder.")),
+    GuideSection("Photos & Videos", "Browse and download your phone's photos.",
+        listOf("Connect both devices and grant All-files access on Android.",
             "Open the Photos tab on Mac — thumbnails load automatically.",
-            "Click any photo to preview it; videos show a play badge and a download button.",
-            "Use the download button on a tile to save the original to your Mac."
-        )
-    ),
-    GuideSection(
-        "File Browser", "Browse your phone's storage from your Mac.",
-        listOf(
-            "Connect both devices and grant All-files access on Android.",
-            "Open the Files tab on Mac.",
-            "Navigate folders just like on your phone, and filter the current folder with the search box.",
-            "Download a file, rename it, or delete it right from the row."
-        )
-    ),
-    GuideSection(
-        "Clipboard Sharing", "Copy on one device, paste on the other.",
-        listOf(
-            "Connect both devices.",
+            "Click any photo to preview; videos show a play badge.",
+            "Use the download button to save the original to your Mac.")),
+    GuideSection("Clipboard Sharing", "Copy on one device, paste on the other.",
+        listOf("Connect both devices.",
             "Copy any text on your Mac — it's automatically available on Android.",
-            "Android → Mac: use Send Clipboard Now, the Quick Settings tile, or select text → ⋮ → Send to Mac.",
-            "Works with text content. Images and files use the file transfer feature."
-        )
-    ),
-    GuideSection(
-        "Notifications", "See your phone notifications on your Mac.",
-        listOf(
-            "Grant Notification Access on Android (Enable Notification Access button).",
+            "Android → Mac: use Send Clipboard Now, the Quick Settings tile, or text → ⋮ → Send to Mac.",
+            "Works with text content. Images use the file transfer feature.")),
+    GuideSection("Notifications", "See phone notifications on your Mac.",
+        listOf("Grant Notification Access on Android.",
             "Connect both devices.",
             "Phone notifications appear on your Mac as they arrive.",
-            "Reply or dismiss right from the Mac for apps that support it.",
-            "The NOTIFS tab badge shows the unread count."
-        )
-    ),
-    GuideSection(
-        "SMS & Messages", "Read and reply to texts from your Mac.",
-        listOf(
-            "Connect both devices and grant the SMS permission on Android.",
+            "Reply or dismiss right from the Mac for supported apps.",
+            "The NOTIFS tab badge shows the unread count.")),
+    GuideSection("SMS & Messages", "Read and reply to texts from your Mac.",
+        listOf("Connect both devices and grant the SMS permission.",
             "Open the Messages tab on Mac to see your conversations.",
             "Click a conversation to see the full thread.",
-            "Type at the bottom and press Enter to send a reply.",
-            "New messages sync in real time."
-        )
-    ),
-    GuideSection(
-        "Contacts", "Browse your phone contacts on your Mac.",
-        listOf(
-            "Connect both devices and grant the Contacts permission on Android.",
-            "Open the Contacts tab on Mac.",
-            "Search or scroll to find a contact.",
-            "Start a call or open Messages straight from a contact."
-        )
-    ),
-    GuideSection(
-        "Phone Calls", "Make calls from your Mac using your phone.",
-        listOf(
-            "Connect both devices and grant the Phone permission on Android.",
-            "On Mac, use the Contacts tab to find a contact.",
-            "Click the phone icon to start a call.",
-            "The call is placed through your Android phone — audio stays on your phone."
-        )
-    ),
-    GuideSection(
-        "Screen Mirroring", "Mirror and control your phone from your Mac.",
-        listOf(
-            "Connect both devices over USB (or wireless ADB).",
+            "Type at the bottom and press Enter to send a reply.")),
+    GuideSection("Screen Mirroring", "Mirror and control your phone from your Mac.",
+        listOf("Connect both devices over USB or wireless ADB.",
             "Tap Mirror in the Mac sidebar.",
             "Your phone screen appears on your Mac — you can click, scroll and type.",
-            "Close the mirror window on the Mac to stop."
-        )
-    )
+            "Close the mirror window on the Mac to stop."))
 )
-
-@Composable
-private fun FeatureGuideScreen(onBack: () -> Unit) {
-    Surface(Modifier.fillMaxSize(), color = Ink) {
-        Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)
-        ) {
-            Spacer(Modifier.height(16.dp))
-            TextButton(onClick = onBack) { Text("← Back", color = Amber, fontSize = 14.sp) }
-            Spacer(Modifier.height(8.dp))
-            Text("FEATURE GUIDE", color = Fg, fontSize = 18.sp,
-                fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
-            Text("Open any card for step-by-step help.", color = Dim, fontSize = 12.sp)
-            Spacer(Modifier.height(16.dp))
-            GUIDE_SECTIONS.forEach { section ->
-                GuideCard(section)
-                Spacer(Modifier.height(12.dp))
-            }
-            Spacer(Modifier.height(16.dp))
-        }
-    }
-}
-
-@Composable
-private fun GuideCard(section: GuideSection) {
-    var open by remember { mutableStateOf(false) }
-    Card(
-        Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Panel),
-        shape = RoundedCornerShape(8.dp)
-    ) {
-        Column(Modifier.fillMaxWidth().padding(16.dp)) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(section.title, color = Fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                    Text(section.subtitle, color = Dim, fontSize = 12.sp)
-                }
-                TextButton(onClick = { open = !open }) {
-                    Text(if (open) "▲" else "▼", color = Amber, fontSize = 14.sp)
-                }
-            }
-            if (open) {
-                Spacer(Modifier.height(8.dp))
-                section.steps.forEachIndexed { i, step ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                        Text("${i + 1}.", color = Amber, fontSize = 12.sp,
-                            modifier = Modifier.padding(end = 8.dp))
-                        Text(step, color = Dim, fontSize = 12.sp)
-                    }
-                }
-            }
-        }
-    }
-}
