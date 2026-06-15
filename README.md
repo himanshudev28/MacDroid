@@ -245,8 +245,23 @@ DroidDock/
 - [x] Native macOS notifications with inline reply + incoming call alerts
 - [x] **Mac UI redesign** — Apple HIG + Liquid Glass (glassmorphism, Geist font, layered depth)
 - [x] **Android UI redesign** — Material Design 3 (all-vector icons, MD3 components, dynamic palette)
+- [x] **Phone → Mac file transfer** — send files from the Android app directly to Mac Downloads with live amber progress bar
 - [ ] TLS on the LAN link
 - [ ] Audio streaming (Mac ↔ phone)
+
+---
+
+## 🤝 Collaborate
+
+Got a feature idea, a bug, or just want to make DroidDock better?
+All suggestions and contributions are welcome — open an issue or a pull request on GitHub.
+
+- **Feature request / idea** → [open an issue](../../issues/new) and describe what you'd like to see
+- **Bug report** → [open an issue](../../issues/new) with steps to reproduce and your Android / macOS versions
+- **Pull request** → fork the repo, make your change, and open a PR — even small fixes are appreciated
+
+If you want to discuss a bigger idea before coding, just start a [discussion](../../discussions) or drop a comment in an issue.
+Everyone who contributes gets credited in the release notes.
 
 ---
 
