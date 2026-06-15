@@ -82,7 +82,14 @@ export default function App() {
       setNotifs((list) => list.filter((x) => x.key !== key))
     )
     const offInfo = window.droid.onDeviceInfo(setAppInfo)
-    const offProg = window.droid.onTransferProgress((p) => setProg(p.done ? null : p))
+    const offProg = window.droid.onTransferProgress((p) => {
+      if (p.done) {
+        setProg(null)
+        if (p.dir === 'phone') toast('ok', `${p.name} received → saved to Downloads`)
+      } else {
+        setProg(p)
+      }
+    })
     const offCallState = window.droid.onCallState(({ state, serial }) => {
       setActiveCall((prev) => {
         if (state === 'IDLE') return null

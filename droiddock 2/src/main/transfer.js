@@ -244,6 +244,9 @@ function beginPhoneReceive(reqId, name, size) {
     reject: null,
     stallTimer: null,
   }
+  r.onProgress = (received, size) => {
+    io?.notifyProgress?.({ name: r.name, sent: received, total: size, dir: 'phone' })
+  }
   r.touch = () => {
     clearTimeout(r.stallTimer)
     r.stallTimer = setTimeout(() => r.fail(new Error('Transfer stalled')), STALL_MS)
