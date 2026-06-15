@@ -255,3 +255,17 @@ DroidDock/
 **Built with ❤️ for a friction-free desk.**
 
 </div>
+
+---
+
+## ☕ Support
+
+If DroidDock saves you time and you'd like to say thanks:
+
+<div align="center">
+
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com)
+
+**UPI** — `9120741461@ybl`
+
+</div>
