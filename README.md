@@ -262,15 +262,17 @@ DroidDock/
 
 <div align="center">
 
-If DroidDock saves you time, a small tip keeps the ☕ flowing. Every rupee counts. 🙏
+If DroidDock saves you time, a small tip keeps the ☕ flowing. 🙏
 
 <br>
 
-| Method | How |
-|:---:|:---|
-| 📱 **PhonePe / GPay / Paytm / BHIM** | Send to UPI ID → `9120741461@ybl` |
-| 🌐 **Razorpay** _(cards · UPI · net banking)_ | [Create a free payment page at razorpay.com/payment-pages](https://razorpay.com/payment-pages) |
-| ⭐ **Free support** | Star the repo — it really helps |
+**Scan to pay — works with any UPI app**
+
+<img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=12&data=upi%3A%2F%2Fpay%3Fpa%3D9120741461%40ybl%26pn%3DHimanshu%26cu%3DINR" alt="UPI QR Code" width="180" />
+
+`9120741461@ybl`
+
+PhonePe · GPay · Paytm · BHIM · any UPI app
 
 <br>
 
