@@ -262,26 +262,18 @@ DroidDock/
 
 <div align="center">
 
-If DroidDock saves you time and you'd like to say thanks — every coffee counts. ✨
+If DroidDock saves you time, a small tip keeps the ☕ flowing. Every rupee counts. 🙏
 
 <br>
 
-[![Ko-Fi](https://img.shields.io/badge/Ko--fi-Support%20on%20Ko--fi-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com)
-&nbsp;&nbsp;
-[![GitHub Stars](https://img.shields.io/github/stars/himanshudev28/MacDroid?style=for-the-badge&logo=github&color=F5A623&logoColor=white&label=Star%20on%20GitHub)](https://github.com/himanshudev28/MacDroid)
+| Method | How |
+|:---:|:---|
+| 📱 **PhonePe / GPay / Paytm / BHIM** | Send to UPI ID → `9120741461@ybl` |
+| 🌐 **Razorpay** _(cards · UPI · net banking)_ | [Create a free payment page at razorpay.com/payment-pages](https://razorpay.com/payment-pages) |
+| ⭐ **Free support** | Star the repo — it really helps |
 
 <br>
 
-**Pay directly via UPI** _(India)_
-
-```
-9120741461@ybl
-```
-
-> Open any UPI app (PhonePe · GPay · Paytm · BHIM) → Send to `9120741461@ybl`
-
-<br>
-
-_Ko-fi supports India — create a free page at [ko-fi.com](https://ko-fi.com) and update the badge link above._
+[![GitHub Stars](https://img.shields.io/github/stars/himanshudev28/MacDroid?style=for-the-badge&logo=github&color=F5A623&logoColor=white&label=⭐%20Star%20on%20GitHub)](https://github.com/himanshudev28/MacDroid)
 
 </div>
