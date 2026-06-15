@@ -110,6 +110,20 @@ private fun DroidDockScreen() {
     var showGuide   by remember { mutableStateOf(false) }
     var showPause   by remember { mutableStateOf(false) }
     var showScan    by remember { mutableStateOf(false) }
+    var sending     by remember { mutableStateOf(false) }
+
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        sending = true
+        ConnectionManager.sendFileToMac(uri, ctx) { ok, err ->
+            sending = false
+            Toast.makeText(
+                ctx,
+                if (ok) "File sent to Mac" else (err ?: "Send failed"),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
 
     val cameraPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -383,6 +397,15 @@ private fun DroidDockScreen() {
                         Toast.LENGTH_SHORT
                     ).show()
                 }
+                RowDivider()
+                ServiceRow(
+                    icon     = Icons.Default.UploadFile,
+                    tint     = Orange,
+                    title    = "Send File to Mac",
+                    subtitle = if (sending) "Sending…" else "Pick any file — it lands in Mac Downloads",
+                    granted  = null,
+                    action   = if (sending) "…" else "Pick"
+                ) { if (!sending) filePicker.launch("*/*") }
                 RowDivider()
                 ServiceRow(
                     icon     = Icons.Outlined.LibraryBooks,

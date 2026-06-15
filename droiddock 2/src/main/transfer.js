@@ -21,8 +21,9 @@ const CHUNK = 256 * 1024
 const MAX_INFLIGHT = 4 * 1024 * 1024 // ≤4MB on the wire (backpressure)
 const STALL_MS = 30000
 
-let io = null // { sendJson(obj), sendBinary(buf), bufferedAmount(), hasCap(cap) }
+let io = null // { sendJson(obj), sendBinary(buf), bufferedAmount(), hasCap(cap), downloadsDir, notifyProgress }
 let reqSeq = 1
+let phoneTid = 1_000_000 // Mac-generated transferIds for phone-initiated pushes
 const recv = new Map() // transferId -> incoming (pull) state
 const out = new Map() // transferId -> outgoing (push) state
 const pendingPull = new Map() // reqId -> { resolve, reject, destDir, name, onProgress, timer }
@@ -186,14 +187,14 @@ function finishReceive(transferId, declaredSize) {
   const expected = declaredSize ?? r.size
   r.stream.end(() => {
     if (r.received !== expected) {
-      // integrity failure (spec add #3): delete the partial file
-      try {
-        rmSync(r.tmp)
-      } catch {
-        /* noop */
-      }
+      try { rmSync(r.tmp) } catch { /* noop */ }
       recv.delete(transferId)
-      return r.reject(new Error(`Transfer corrupt — ${r.received}/${expected} bytes`))
+      if (r.fromPhone) {
+        io?.sendJson({ type: 'phone-push-result', transferId, ok: false, error: `size mismatch (${r.received}/${expected})` })
+      } else {
+        r.reject(new Error(`Transfer corrupt — ${r.received}/${expected} bytes`))
+      }
+      return
     }
     const dest = uniqueDest(r.destDir, r.name)
     try {
@@ -204,12 +205,59 @@ function finishReceive(transferId, declaredSize) {
         rmSync(r.tmp)
       } catch (e) {
         recv.delete(transferId)
-        return r.reject(e)
+        if (r.fromPhone) {
+          io?.sendJson({ type: 'phone-push-result', transferId, ok: false, error: e.message })
+        } else {
+          r.reject(e)
+        }
+        return
       }
     }
     recv.delete(transferId)
-    r.resolve(dest)
+    if (r.fromPhone) {
+      io?.sendJson({ type: 'phone-push-result', transferId, ok: true })
+      io?.notifyProgress?.({ name: r.name, done: true, dir: 'phone' })
+    } else {
+      r.resolve(dest)
+    }
   })
+}
+
+/* ───────────────────── phone-initiated push: phone → Mac ───────────────────── */
+
+function beginPhoneReceive(reqId, name, size) {
+  if (!io) return
+  const tid = phoneTid++
+  const destDir = io.downloadsDir
+  const tmp = join(tmpdir(), `droiddock-ph-${tid}-${Date.now()}.part`)
+  const r = {
+    transferId: tid,
+    size,
+    received: 0,
+    tmp,
+    stream: createWriteStream(tmp),
+    destDir,
+    name,
+    onProgress: null,
+    fromPhone: true,
+    resolve: null,
+    reject: null,
+    stallTimer: null,
+  }
+  r.touch = () => {
+    clearTimeout(r.stallTimer)
+    r.stallTimer = setTimeout(() => r.fail(new Error('Transfer stalled')), STALL_MS)
+  }
+  r.fail = (err) => {
+    clearTimeout(r.stallTimer)
+    try { r.stream.destroy() } catch { /* noop */ }
+    try { if (existsSync(r.tmp)) rmSync(r.tmp) } catch { /* noop */ }
+    recv.delete(tid)
+    io?.sendJson({ type: 'phone-push-result', transferId: tid, ok: false, error: err.message })
+  }
+  recv.set(tid, r)
+  r.touch()
+  io.sendJson({ type: 'phone-push', reqId, transferId: tid })
 }
 
 /* ───────────────────── push: Mac → phone ───────────────────── */
@@ -365,6 +413,12 @@ export function onControl(msg) {
       if (s) s.abort(new Error('Cancelled by phone'))
       break
     }
+    case 'phone-push-begin':
+      beginPhoneReceive(msg.reqId, msg.name || 'file', msg.size || 0)
+      break
+    case 'phone-push-done':
+      finishReceive(msg.transferId, msg.size)
+      break
     case 'photo-thumb-error': {
       const p = pendingThumb.get(msg.reqId)
       if (p) {

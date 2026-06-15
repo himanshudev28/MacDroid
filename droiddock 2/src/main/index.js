@@ -283,6 +283,7 @@ app.whenReady().then(async () => {
   scheduleMdns()
 
   wifi.start({
+    phoneFileCb: (p) => emitProgress(p),
     statusCb: (s) => {
       // phone reconnected after a pause → clear the pause and resume scanning
       if (s.connected && appLinkPaused) {
