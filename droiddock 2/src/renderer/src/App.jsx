@@ -72,7 +72,7 @@ export default function App() {
     window.droid.wifiStatus().then(setWifi)
     window.droid.pairedInfo().then((r) => r.ok && setPairedGuid(r.data.guid))
     const offDevices = window.droid.onDevices(setDevices)
-    const offWifi = window.droid.onWifi(setWifi)
+    const offWifi = window.droid.onWifi((s) => { setWifi(s); if (!s.connected) setProg(null) })
     const offWifiEvent = window.droid.onWifiEvent((ev) => toast(ev.kind, ev.text))
     const offMedia = window.droid.onMedia(setMedia)
     const offNotif = window.droid.onNotification((n) =>
