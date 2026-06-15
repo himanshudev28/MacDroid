@@ -107,7 +107,9 @@ const transferIO = {
     if (phone && phone.socket.readyState === 1) phone.socket.send(buf)
   },
   bufferedAmount: () => (phone ? phone.socket.bufferedAmount : 0),
-  hasCap
+  hasCap,
+  downloadsDir: app.getPath('downloads'),
+  notifyProgress: null, // set by wifi.start() when phoneFileCb is provided
 }
 
 // Thin re-exports so index.js drives transfers without importing the module directly.
@@ -245,10 +247,11 @@ function startClipboardWatcher() {
   }, 1000)
 }
 
-export function start({ statusCb, eventCb, forwardCb }) {
+export function start({ statusCb, eventCb, forwardCb, phoneFileCb }) {
   onStatus = statusCb
   onEvent = eventCb
   onForward = forwardCb || (() => {})
+  if (phoneFileCb) transferIO.notifyProgress = phoneFileCb
   loadConfig()
 
   wss = new WebSocketServer({ port: config.port, host: '0.0.0.0' })
@@ -350,7 +353,7 @@ export function start({ statusCb, eventCb, forwardCb }) {
         onForward('resume', {})
       } else if (
         typeof msg.type === 'string' &&
-        (msg.type.startsWith('fs-') || msg.type === 'photo-thumb-error')
+        (msg.type.startsWith('fs-') || msg.type.startsWith('phone-push') || msg.type === 'photo-thumb-error')
       ) {
         // file-transfer + thumbnail control routed to the isolated transfer manager
         transfer.onControl(msg)

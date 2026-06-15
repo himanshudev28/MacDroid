@@ -353,6 +353,9 @@ object ConnectionManager {
         socket.send(out.toString())
     }
 
+    fun sendFileToMac(uri: android.net.Uri, ctx: Context, onResult: (Boolean, String?) -> Unit) =
+        TransferManager.pushToMac(uri, ctx, onResult)
+
     fun sendClipboardText(text: String): Boolean {
         if (text.isEmpty()) return false
         if (text == lastFromMac) return true // avoid echo loops

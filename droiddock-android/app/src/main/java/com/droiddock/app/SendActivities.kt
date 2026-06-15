@@ -67,3 +67,33 @@ class ShareTextActivity : Activity() {
         finish()
     }
 }
+
+/** "Send to Mac" as a share-sheet target for any file (image, video, doc, etc.). */
+class ShareFileActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        ConnectionManager.ensureLoop(applicationContext)
+        val uri: android.net.Uri? = when {
+            intent.action == Intent.ACTION_SEND ->
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra(Intent.EXTRA_STREAM)
+            else -> null
+        }
+        if (uri == null) {
+            Toast.makeText(this, "No file to send", Toast.LENGTH_SHORT).show()
+            finish()
+            return
+        }
+        Toast.makeText(this, "Sending to Mac…", Toast.LENGTH_SHORT).show()
+        ConnectionManager.sendFileToMac(uri, applicationContext) { ok, err ->
+            Handler(android.os.Looper.getMainLooper()).post {
+                Toast.makeText(
+                    applicationContext,
+                    if (ok) "File sent to Mac" else (err ?: "Send failed"),
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+        finish()
+    }
+}
