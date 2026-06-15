@@ -108,7 +108,7 @@ const transferIO = {
   },
   bufferedAmount: () => (phone ? phone.socket.bufferedAmount : 0),
   hasCap,
-  downloadsDir: app.getPath('downloads'),
+  get downloadsDir() { return app.getPath('downloads') },
   notifyProgress: null, // set by wifi.start() when phoneFileCb is provided
 }
 

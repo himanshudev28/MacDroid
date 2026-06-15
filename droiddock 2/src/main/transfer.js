@@ -260,6 +260,7 @@ function beginPhoneReceive(reqId, name, size) {
   }
   recv.set(tid, r)
   r.touch()
+  io?.notifyProgress?.({ name, sent: 0, total: size, started: true, dir: 'phone' })
   io.sendJson({ type: 'phone-push', reqId, transferId: tid })
 }
 

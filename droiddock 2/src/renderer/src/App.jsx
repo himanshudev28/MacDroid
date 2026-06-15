@@ -85,7 +85,10 @@ export default function App() {
     const offProg = window.droid.onTransferProgress((p) => {
       if (p.done) {
         setProg(null)
-        if (p.dir === 'phone') toast('ok', `${p.name} received → saved to Downloads`)
+        if (p.dir === 'phone') toast('ok', `${p.name} saved to Downloads`)
+      } else if (p.started && p.dir === 'phone') {
+        toast('info', `Receiving ${p.name} from phone…`)
+        setProg(p)
       } else {
         setProg(p)
       }
@@ -331,6 +334,24 @@ export default function App() {
               )
             })}
           </div>
+
+          {/* Phone → Mac receive progress (visible on all tabs) */}
+          {prog && prog.dir === 'phone' && (
+            <div className="shrink-0 flex items-center gap-3 border-b border-amber/20 bg-amber/5 px-4 py-1.5">
+              <span className="shrink-0 font-mono text-[10px] text-amber/80">
+                Receiving {prog.name}
+              </span>
+              <div className="h-0.75 flex-1 overflow-hidden rounded-full bg-amber/15">
+                <div
+                  className="h-full rounded-full bg-amber/70 transition-all duration-300"
+                  style={{ width: `${prog.total ? Math.round((prog.sent / prog.total) * 100) : 0}%` }}
+                />
+              </div>
+              <span className="shrink-0 font-mono text-[10px] text-dim/60">
+                {prog.total ? `${Math.round((prog.sent / prog.total) * 100)}%` : '…'}
+              </span>
+            </div>
+          )}
 
           {/* View content */}
           <div className="min-h-0 flex-1">
