@@ -260,12 +260,28 @@ DroidDock/
 
 ## ☕ Support
 
-If DroidDock saves you time and you'd like to say thanks:
-
 <div align="center">
 
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com)
+If DroidDock saves you time and you'd like to say thanks — every coffee counts. ✨
 
-**UPI** — `9120741461@ybl`
+<br>
+
+[![Ko-Fi](https://img.shields.io/badge/Ko--fi-Support%20on%20Ko--fi-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com)
+&nbsp;&nbsp;
+[![GitHub Stars](https://img.shields.io/github/stars/himanshudev28/MacDroid?style=for-the-badge&logo=github&color=F5A623&logoColor=white&label=Star%20on%20GitHub)](https://github.com/himanshudev28/MacDroid)
+
+<br>
+
+**Pay directly via UPI** _(India)_
+
+```
+9120741461@ybl
+```
+
+> Open any UPI app (PhonePe · GPay · Paytm · BHIM) → Send to `9120741461@ybl`
+
+<br>
+
+_Ko-fi supports India — create a free page at [ko-fi.com](https://ko-fi.com) and update the badge link above._
 
 </div>
