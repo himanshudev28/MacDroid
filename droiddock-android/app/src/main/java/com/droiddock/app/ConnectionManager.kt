@@ -203,7 +203,8 @@ object ConnectionManager {
                         val newPath = FileRepo.rename(msg.optString("path"), msg.optString("newName"))
                         it.put("ok", true).put("newPath", newPath)
                     }
-                    "fs-pull", "fs-push-begin", "fs-push-done", "fs-cancel" ->
+                    "fs-pull", "fs-push-begin", "fs-push-done", "fs-cancel",
+                    "phone-push", "phone-push-result" ->
                         TransferManager.onControl(msg)
                     "photos-list" -> respond(webSocket, msg, "photos-list") {
                         it.put("items", PhotoRepo.list(appCtx, msg.optInt("offset", 0), msg.optInt("limit", 500)))
