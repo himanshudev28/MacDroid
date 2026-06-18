@@ -51,7 +51,6 @@ import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.json.JSONObject
 
-// ── Palette (aligned with the Mac app) ───────────────────────────────────
 private val Ink        = Color(0xFF0D0D12)
 private val Surface1   = Color(0xFF14141B)
 private val Surface2   = Color(0xFF1C1C26)
@@ -124,6 +123,7 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
     var showGuide   by remember { mutableStateOf(false) }
     var showPause   by remember { mutableStateOf(false) }
     var sending     by remember { mutableStateOf(false) }
+    var currentTab  by remember { mutableStateOf("home") }
 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -192,7 +192,6 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
         handleQr(pairUri)
     }
 
-    // Use ZXing's bundled CaptureActivity — avoids BarcodeView/Compose lifecycle race
     val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
         result.contents?.let { handleQr(it) }
     }
@@ -222,6 +221,17 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
         }
     }
 
+    val launchScan = {
+        val hasCam = ctx.checkSelfPermission(Manifest.permission.CAMERA) ==
+                PackageManager.PERMISSION_GRANTED
+        if (hasCam) scanLauncher.launch(ScanOptions().apply {
+            setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+            setBeepEnabled(false)
+            setOrientationLocked(false)
+        })
+        else cameraPermLauncher.launch(Manifest.permission.CAMERA)
+    }
+
     if (showGuide) {
         FeatureGuideScreen(onBack = { showGuide = false })
         return
@@ -239,106 +249,98 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
         }
     }
 
-    // ── Main screen ───────────────────────────────────────────────────
-    Surface(modifier = Modifier.fillMaxSize(), color = Ink) {
-        Column(
+    Scaffold(
+        containerColor = Ink,
+        bottomBar = {
+            NavigationBar(
+                containerColor = Surface1,
+                tonalElevation = 0.dp,
+                modifier = Modifier
+                    .navigationBarsPadding()
+            ) {
+                val navItems = listOf(
+                    Triple("home",     "Home",     Icons.Filled.Home),
+                    Triple("connect",  "Connect",  Icons.Outlined.WifiTethering),
+                    Triple("files",    "Files",    Icons.Outlined.Folder),
+                    Triple("mirror",   "Mirror",   Icons.Outlined.ScreenShare),
+                    Triple("settings", "Settings", Icons.Outlined.Settings),
+                )
+                navItems.forEach { (id, label, icon) ->
+                    NavigationBarItem(
+                        selected = currentTab == id,
+                        onClick  = { currentTab = id },
+                        icon     = { Icon(icon, contentDescription = label, modifier = Modifier.size(22.dp)) },
+                        label    = { Text(label, fontSize = 10.sp) },
+                        colors   = NavigationBarItemDefaults.colors(
+                            selectedIconColor   = Color(0xFF1A0E00),
+                            selectedTextColor   = Amber,
+                            indicatorColor      = Amber,
+                            unselectedIconColor = Dim,
+                            unselectedTextColor = Dim,
+                        )
+                    )
+                }
+            }
+        }
+    ) { innerPadding ->
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .windowInsetsPadding(WindowInsets.systemBars)
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .padding(innerPadding)
+                .background(Ink)
         ) {
-            Spacer(Modifier.height(12.dp))
-
-            // ── App bar ──────────────────────────────────────────────
-            AppHeader()
-
-            Spacer(Modifier.height(20.dp))
-
-            // ── Connection status card ────────────────────────────────
-            ConnectionCard(
-                connected   = connected,
-                isPaused    = isPaused,
-                paired      = paired,
-                macName     = macName,
-                event       = event,
-                pausedUntil = pausedUntil,
-                onPause     = { showPause = true },
-                onResume    = { ConnectionManager.resume(ctx) }
-            )
-
-            Spacer(Modifier.height(16.dp))
-
-            // ── Pair / re-pair button ─────────────────────────────────
-            Button(
-                onClick = {
-                    val hasCam = ctx.checkSelfPermission(Manifest.permission.CAMERA) ==
-                            PackageManager.PERMISSION_GRANTED
-                    if (hasCam) scanLauncher.launch(ScanOptions().apply {
-                        setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                        setBeepEnabled(false)
-                        setOrientationLocked(false)
-                    })
-                    else cameraPermLauncher.launch(Manifest.permission.CAMERA)
-                },
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                colors   = ButtonDefaults.buttonColors(containerColor = Amber),
-                shape    = RoundedCornerShape(14.dp),
-                elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.QrCodeScanner,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
+            when (currentTab) {
+                "home" -> HomeTab(
+                    connected   = connected,
+                    isPaused    = isPaused,
+                    paired      = paired,
+                    macName     = macName,
+                    event       = event,
+                    pausedUntil = pausedUntil,
+                    onPause     = { showPause = true },
+                    onResume    = { ConnectionManager.resume(ctx) },
+                    onGoToConnect = { currentTab = "connect" },
+                    onGoToMirror  = { currentTab = "mirror" },
+                    onGoToFiles   = { currentTab = "files" },
                 )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text       = if (paired) "Re-pair with Mac" else "Pair with Mac",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize   = 15.sp,
-                    color      = Color(0xFF1A0E00)
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TextButton(onClick = { showManual = true }) {
-                    Text("Enter IP manually", color = Amber, fontSize = 12.sp)
-                }
-                if (paired) {
-                    TextButton(onClick = {
+                "connect" -> ConnectTab(
+                    connected   = connected,
+                    paired      = paired,
+                    macName     = macName,
+                    onScan      = launchScan,
+                    onManual    = { showManual = true },
+                    onForget    = {
                         Prefs.clear(ctx)
                         ConnectionManager.shutdown()
                         BridgeService.stop(ctx)
                         paired = false
                         Toast.makeText(ctx, "Forgot this Mac", Toast.LENGTH_SHORT).show()
-                    }) {
-                        Text("Forget this Mac", color = Dim, fontSize = 12.sp)
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            // ── Permissions / services ────────────────────────────────
-            SectionCard("Essential Services") {
-                AutoClipRow(
-                    a11yOn   = clipA11y,
-                    auto     = clipAuto,
-                    onEnable = {
-                        runCatching { ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-                        Toast.makeText(ctx, "Find DroidDock Clipboard and turn it on", Toast.LENGTH_LONG).show()
                     },
-                    onToggle = { v -> clipAuto = v; Prefs.setClipboardAuto(ctx, v) }
                 )
-                RowDivider()
-                AutoMirrorRow(
-                    overlayOk = overlayOk,
-                    auto      = autoMirror,
-                    onEnable  = {
+                "files" -> FilesTab(
+                    connected = connected,
+                    sending   = sending,
+                    onSendFile = { if (!sending) filePicker.launch("*/*") },
+                    onSendClipboard = {
+                        val cm   = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        val text = cm.primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
+                        val sent = text.isNotEmpty() && ConnectionManager.sendClipboardText(text)
+                        Toast.makeText(
+                            ctx,
+                            when {
+                                text.isEmpty() -> "Clipboard is empty"
+                                sent -> "Sent to Mac"
+                                else -> "Not connected to Mac"
+                            },
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    },
+                )
+                "mirror" -> MirrorTab(
+                    connected   = connected,
+                    overlayOk   = overlayOk,
+                    autoMirror  = autoMirror,
+                    onEnableOverlay = {
                         runCatching {
                             ctx.startActivity(
                                 Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
@@ -347,146 +349,181 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
                         }
                         Toast.makeText(ctx, "Allow DroidDock to display over other apps", Toast.LENGTH_LONG).show()
                     },
-                    onToggle = { v ->
+                    onToggleAutoMirror = { v ->
                         autoMirror = v; Prefs.setAutoMirror(ctx, v)
                         if (!v) MirrorService.stop(ctx)
-                    }
+                    },
                 )
-                RowDivider()
-                ServiceRow(
-                    icon     = Icons.Outlined.Notifications,
-                    tint     = Blue,
-                    title    = "Notification Access",
-                    subtitle = "Show phone notifications on your Mac",
-                    granted  = notifAccess,
-                    action   = "Enable"
-                ) {
-                    runCatching { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
-                }
-                RowDivider()
-                ServiceRow(
-                    icon     = Icons.Outlined.Message,
-                    tint     = Ok,
-                    title    = "SMS · Contacts · Calls",
-                    subtitle = "Texts, contacts and call alerts on Mac",
-                    granted  = phonePerms,
-                    action   = "Grant"
-                ) { permLauncher.launch(PHONE_PERMS) }
-                RowDivider()
-                ServiceRow(
-                    icon     = Icons.Outlined.FolderOpen,
-                    tint     = Orange,
-                    title    = "All-files Access",
-                    subtitle = "Browse and transfer your phone's files",
-                    granted  = allFiles,
-                    action   = "Grant"
-                ) {
-                    runCatching {
-                        if (Build.VERSION.SDK_INT >= 30) {
+                "settings" -> SettingsTab(
+                    clipA11y    = clipA11y,
+                    clipAuto    = clipAuto,
+                    notifAccess = notifAccess,
+                    phonePerms  = phonePerms,
+                    allFiles    = allFiles,
+                    onEnableClip = {
+                        runCatching { ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                        Toast.makeText(ctx, "Find DroidDock Clipboard and turn it on", Toast.LENGTH_LONG).show()
+                    },
+                    onToggleClipAuto = { v -> clipAuto = v; Prefs.setClipboardAuto(ctx, v) },
+                    onEnableNotif = {
+                        runCatching { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+                    },
+                    onGrantPhonePerms = { permLauncher.launch(PHONE_PERMS) },
+                    onGrantFiles = {
+                        runCatching {
+                            if (Build.VERSION.SDK_INT >= 30) {
+                                ctx.startActivity(
+                                    Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                                        .setData(Uri.parse("package:${ctx.packageName}"))
+                                )
+                            }
+                        }
+                    },
+                    onBattery = {
+                        runCatching {
                             ctx.startActivity(
-                                Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
                                     .setData(Uri.parse("package:${ctx.packageName}"))
                             )
                         }
-                    }
-                }
-                RowDivider()
-                ServiceRow(
-                    icon     = Icons.Outlined.BatteryChargingFull,
-                    tint     = Dim,
-                    title    = "Background (Battery)",
-                    subtitle = "Keep the link alive when screen is off",
-                    granted  = null,
-                    action   = "Allow"
-                ) {
-                    runCatching {
-                        ctx.startActivity(
-                            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                                .setData(Uri.parse("package:${ctx.packageName}"))
-                        )
-                    }
-                }
+                    },
+                    onOpenGuide = { showGuide = true },
+                )
             }
-
-            Spacer(Modifier.height(12.dp))
-
-            // ── Quick actions ─────────────────────────────────────────
-            SectionCard("Quick Actions") {
-                ServiceRow(
-                    icon     = Icons.Default.ContentCopy,
-                    tint     = Purple,
-                    title    = "Send Clipboard to Mac",
-                    subtitle = "Push whatever you copied right now",
-                    granted  = null,
-                    action   = "Send"
-                ) {
-                    val cm   = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    val text = cm.primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
-                    val sent = text.isNotEmpty() && ConnectionManager.sendClipboardText(text)
-                    Toast.makeText(
-                        ctx,
-                        when {
-                            text.isEmpty() -> "Clipboard is empty"
-                            sent -> "Sent to Mac"
-                            else -> "Not connected to Mac"
-                        },
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
-                RowDivider()
-                ServiceRow(
-                    icon     = Icons.Default.UploadFile,
-                    tint     = Orange,
-                    title    = "Send File to Mac",
-                    subtitle = if (sending) "Sending…" else "Pick any file — it lands in Mac Downloads",
-                    granted  = null,
-                    action   = if (sending) "…" else "Pick"
-                ) { if (!sending) filePicker.launch("*/*") }
-                RowDivider()
-                ServiceRow(
-                    icon     = Icons.Outlined.LibraryBooks,
-                    tint     = Amber,
-                    title    = "Feature Guide",
-                    subtitle = "Step-by-step help for every feature",
-                    granted  = null,
-                    action   = "Open"
-                ) { showGuide = true }
-            }
-
-            Spacer(Modifier.height(32.dp))
         }
     }
 }
 
-// ── App header ────────────────────────────────────────────────────────────
+// ── Home tab ──────────────────────────────────────────────────────────────
+
 @Composable
-private fun AppHeader() {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .background(Amber.copy(alpha = 0.14f), RoundedCornerShape(12.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector        = Icons.Default.PhoneAndroid,
-                contentDescription = null,
-                tint               = Amber,
-                modifier           = Modifier.size(22.dp)
+private fun HomeTab(
+    connected:    Boolean,
+    isPaused:     Boolean,
+    paired:       Boolean,
+    macName:      String?,
+    event:        String?,
+    pausedUntil:  Long,
+    onPause:      () -> Unit,
+    onResume:     () -> Unit,
+    onGoToConnect: () -> Unit,
+    onGoToMirror:  () -> Unit,
+    onGoToFiles:   () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Spacer(Modifier.height(12.dp))
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .background(
+                        Brush.linearGradient(listOf(Amber, Orange)),
+                        RoundedCornerShape(10.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.PhoneAndroid, null, tint = Color(0xFF2A1900),
+                    modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.width(10.dp))
+            Text("DroidDock", color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.3).sp)
+        }
+
+        Spacer(Modifier.height(18.dp))
+
+        ConnectionHeroCard(
+            connected    = connected,
+            isPaused     = isPaused,
+            paired       = paired,
+            macName      = macName,
+            event        = event,
+            pausedUntil  = pausedUntil,
+            onPause      = onPause,
+            onResume     = onResume,
+            onGoConnect  = onGoToConnect,
+        )
+
+        Spacer(Modifier.height(14.dp))
+
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            QuickActionBtn(
+                icon      = Icons.Outlined.ScreenShare,
+                label     = "Mirror",
+                tint      = Purple,
+                modifier  = Modifier.weight(1f),
+                onClick   = onGoToMirror,
+            )
+            QuickActionBtn(
+                icon      = Icons.Outlined.UploadFile,
+                label     = "Send File",
+                tint      = Orange,
+                modifier  = Modifier.weight(1f),
+                onClick   = onGoToFiles,
+            )
+            QuickActionBtn(
+                icon      = Icons.Outlined.Videocam,
+                label     = "Camera",
+                tint      = Blue,
+                modifier  = Modifier.weight(1f),
+                onClick   = onGoToMirror,
             )
         }
-        Spacer(Modifier.width(12.dp))
-        Column {
-            Text("DroidDock", color = Fg, fontSize = 20.sp, fontWeight = FontWeight.Bold,
-                letterSpacing = (-0.3).sp)
-            Text("Phone ↔ Mac bridge", color = Dim, fontSize = 11.sp)
+
+        Spacer(Modifier.height(16.dp))
+
+        Text(
+            text          = "SYNC & SHARING",
+            color         = Dim,
+            fontSize      = 10.sp,
+            letterSpacing = 1.2.sp,
+            fontWeight    = FontWeight.SemiBold,
+            modifier      = Modifier.padding(start = 4.dp, bottom = 8.dp)
+        )
+
+        val features = listOf(
+            FeatureTile("Notifications", "Phone alerts on Mac", Icons.Outlined.Notifications, Blue, connected),
+            FeatureTile("Messages",      "SMS from your Mac",   Icons.Outlined.Message,       Ok,   connected),
+            FeatureTile("Calls",         "Call log & alerts",   Icons.Outlined.Call,          Ok,   connected),
+            FeatureTile("Clipboard",     "Copy between devices",Icons.Outlined.ContentCopy,   Purple, connected),
+            FeatureTile("Files",         "Transfer anything",   Icons.Outlined.Folder,        Orange, true),
+            FeatureTile("Photos",        "Browse phone gallery",Icons.Outlined.Photo,         Blue, connected),
+            FeatureTile("Camera",        "Use phone as webcam", Icons.Outlined.Videocam,      Orange, true),
+            FeatureTile("Screen Mirror", "Project to Mac",      Icons.Outlined.ScreenShare,   Purple, true),
+        )
+
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            features.chunked(2).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    row.forEach { tile ->
+                        FeatureTileCard(tile = tile, modifier = Modifier.weight(1f))
+                    }
+                    if (row.size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
         }
+
+        Spacer(Modifier.height(24.dp))
     }
 }
 
-// ── Connection status card ─────────────────────────────────────────────────
+private data class FeatureTile(
+    val title:   String,
+    val status:  String,
+    val icon:    ImageVector,
+    val tint:    Color,
+    val active:  Boolean,
+)
+
 @Composable
-private fun ConnectionCard(
+private fun ConnectionHeroCard(
     connected:   Boolean,
     isPaused:    Boolean,
     paired:      Boolean,
@@ -495,136 +532,100 @@ private fun ConnectionCard(
     pausedUntil: Long,
     onPause:     () -> Unit,
     onResume:    () -> Unit,
+    onGoConnect: () -> Unit,
 ) {
-    val stateColor: Color
-    val stateIcon:  ImageVector
-    val headline:   String
-    val subline:    String
-
-    when {
-        isPaused -> {
-            stateColor = Amber
-            stateIcon  = Icons.Default.PauseCircle
-            headline   = "Paused"
-            subline    = pauseSubtitle(pausedUntil)
-        }
-        connected -> {
-            stateColor = Ok
-            stateIcon  = Icons.Default.CheckCircle
-            headline   = macName ?: "Mac"
-            subline    = if (event.isNullOrBlank()) "Connected" else "Connected · $event"
-        }
-        paired -> {
-            stateColor = Amber
-            stateIcon  = Icons.Outlined.Wifi
-            headline   = "Searching for Mac…"
-            subline    = event ?: "Waiting for Mac to come online"
-        }
-        else -> {
-            stateColor = Dim
-            stateIcon  = Icons.Outlined.PhoneAndroid
-            headline   = "Not paired"
-            subline    = "Pair with your Mac to get started"
-        }
+    val dotColor = when {
+        isPaused  -> Amber
+        connected -> Ok
+        else      -> Dim
+    }
+    val headline = when {
+        isPaused  -> "Paused"
+        connected -> macName ?: "Mac"
+        paired    -> "Searching…"
+        else      -> "Not paired"
+    }
+    val subline = when {
+        isPaused  -> pauseSubtitle(pausedUntil)
+        connected -> if (event.isNullOrBlank()) "Connected · Wi-Fi" else "Connected · $event"
+        paired    -> "Waiting for Mac to come online"
+        else      -> "Pair with your Mac to get started"
     }
 
-    // Ambient glow animation when connected
-    val glowAlpha by if (connected && !isPaused) {
-        rememberInfiniteTransition(label = "glow").animateFloat(
-            initialValue   = 0.10f,
-            targetValue    = 0.20f,
-            animationSpec  = infiniteRepeatable(tween(1600, easing = EaseInOutSine), RepeatMode.Reverse),
-            label          = "glowAlpha"
-        )
-    } else remember { mutableFloatStateOf(0f) }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape    = RoundedCornerShape(18.dp),
-        colors   = CardDefaults.cardColors(containerColor = Surface1),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    Surface(
+        modifier  = Modifier.fillMaxWidth(),
+        shape     = RoundedCornerShape(24.dp),
+        color     = Surface1,
+        tonalElevation = 0.dp
     ) {
         Box {
-            // Ambient top-edge color bar
-            if (glowAlpha > 0f) {
+            if (connected && !isPaused) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(56.dp)
+                        .height(60.dp)
                         .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    stateColor.copy(alpha = glowAlpha),
-                                    Color.Transparent
-                                )
-                            )
+                            Brush.verticalGradient(listOf(Ok.copy(alpha = 0.12f), Color.Transparent))
                         )
                 )
             }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 18.dp, vertical = 18.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // State icon badge
-                AnimatedContent(
-                    targetState = stateIcon,
-                    transitionSpec = { fadeIn() togetherWith fadeOut() },
-                    label = "stateIcon"
-                ) { icon ->
+            Column(modifier = Modifier.padding(18.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
-                            .size(50.dp)
-                            .background(stateColor.copy(alpha = 0.14f), CircleShape),
+                            .size(48.dp)
+                            .background(dotColor.copy(alpha = 0.14f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(icon, contentDescription = null, tint = stateColor,
-                            modifier = Modifier.size(26.dp))
+                        Icon(
+                            imageVector        = if (connected) Icons.Default.CheckCircle else if (isPaused) Icons.Default.PauseCircle else Icons.Outlined.Wifi,
+                            contentDescription = null,
+                            tint               = dotColor,
+                            modifier           = Modifier.size(26.dp)
+                        )
                     }
-                }
-
-                Spacer(Modifier.width(14.dp))
-
-                Column(Modifier.weight(1f)) {
-                    AnimatedContent(
-                        targetState = headline,
-                        transitionSpec = {
-                            slideInVertically { -it / 2 } + fadeIn() togetherWith
-                                    slideOutVertically { it / 2 } + fadeOut()
-                        },
-                        label = "headline"
-                    ) { text ->
-                        Text(text, color = if (isPaused) Amber else Fg,
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(headline, color = if (isPaused) Amber else Fg,
                             fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(subline, color = Dim, fontSize = 12.sp,
+                            lineHeight = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
-                    Text(subline, color = Dim, fontSize = 12.sp,
-                        lineHeight = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (paired) {
+                        Spacer(Modifier.width(8.dp))
+                        if (isPaused) {
+                            FilledTonalButton(
+                                onClick = onResume,
+                                colors  = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = Amber.copy(alpha = 0.18f),
+                                    contentColor   = Amber
+                                ),
+                                shape          = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                                elevation      = ButtonDefaults.filledTonalButtonElevation(0.dp)
+                            ) { Text("Resume", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
+                        } else {
+                            IconButton(onClick = onPause) {
+                                Icon(Icons.Default.PowerSettingsNew, "Pause",
+                                    tint = Dim, modifier = Modifier.size(20.dp))
+                            }
+                        }
+                    }
                 }
-
-                if (paired) {
-                    Spacer(Modifier.width(8.dp))
-                    if (isPaused) {
-                        FilledTonalButton(
-                            onClick = onResume,
-                            colors  = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = Amber.copy(alpha = 0.18f),
-                                contentColor   = Amber
-                            ),
-                            shape           = RoundedCornerShape(10.dp),
-                            contentPadding  = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-                            elevation       = ButtonDefaults.filledTonalButtonElevation(0.dp)
-                        ) {
-                            Text("Resume", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    } else {
-                        IconButton(onClick = onPause) {
-                            Icon(Icons.Default.PowerSettingsNew,
-                                contentDescription = "Pause",
-                                tint = Dim, modifier = Modifier.size(20.dp))
-                        }
+                if (!paired) {
+                    Spacer(Modifier.height(14.dp))
+                    Button(
+                        onClick   = onGoConnect,
+                        modifier  = Modifier.fillMaxWidth().height(46.dp),
+                        colors    = ButtonDefaults.buttonColors(containerColor = Amber),
+                        shape     = RoundedCornerShape(12.dp),
+                        elevation = ButtonDefaults.buttonElevation(0.dp)
+                    ) {
+                        Icon(Icons.Default.QrCodeScanner, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Pair with Mac", fontWeight = FontWeight.SemiBold, fontSize = 15.sp,
+                            color = Color(0xFF1A0E00))
                     }
                 }
             }
@@ -632,12 +633,594 @@ private fun ConnectionCard(
     }
 }
 
-// ── Section card wrapper ───────────────────────────────────────────────────
+@Composable
+private fun QuickActionBtn(
+    icon:     ImageVector,
+    label:    String,
+    tint:     Color,
+    modifier: Modifier = Modifier,
+    onClick:  () -> Unit,
+) {
+    Surface(
+        onClick    = onClick,
+        modifier   = modifier,
+        shape      = RoundedCornerShape(18.dp),
+        color      = Surface2,
+        tonalElevation = 0.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 14.dp, horizontal = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(7.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .background(tint.copy(alpha = 0.14f), RoundedCornerShape(14.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
+            }
+            Text(label, color = Fg, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+@Composable
+private fun FeatureTileCard(tile: FeatureTile, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape    = RoundedCornerShape(22.dp),
+        color    = Surface1,
+        tonalElevation = 0.dp
+    ) {
+        Column(modifier = Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(tile.tint.copy(alpha = 0.14f), RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(tile.icon, null, tint = tile.tint, modifier = Modifier.size(20.dp))
+                }
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(if (tile.active) Ok else Dim.copy(alpha = 0.3f), CircleShape)
+                )
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(tile.title, color = Fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text(tile.status, color = Dim, fontSize = 12.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+// ── Connect tab ────────────────────────────────────────────────────────────
+
+@Composable
+private fun ConnectTab(
+    connected: Boolean,
+    paired:    Boolean,
+    macName:   String?,
+    onScan:    () -> Unit,
+    onManual:  () -> Unit,
+    onForget:  () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Spacer(Modifier.height(12.dp))
+        Text("Connection", color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+            letterSpacing = (-0.3).sp)
+        Spacer(Modifier.height(4.dp))
+        Text("Pair or manage your Mac link", color = Dim, fontSize = 13.sp)
+
+        Spacer(Modifier.height(20.dp))
+
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape    = RoundedCornerShape(24.dp),
+            color    = Surface1,
+            tonalElevation = 0.dp
+        ) {
+            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(if (connected) Ok else Dim.copy(alpha = 0.3f), CircleShape)
+                    )
+                    Text(
+                        text       = if (connected) "Connected to ${macName ?: "Mac"}" else if (paired) "Searching for Mac…" else "Not paired",
+                        color      = if (connected) Ok else Dim,
+                        fontSize   = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                Button(
+                    onClick   = onScan,
+                    modifier  = Modifier.fillMaxWidth().height(50.dp),
+                    colors    = ButtonDefaults.buttonColors(containerColor = Amber),
+                    shape     = RoundedCornerShape(14.dp),
+                    elevation = ButtonDefaults.buttonElevation(0.dp)
+                ) {
+                    Icon(Icons.Default.QrCodeScanner, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text       = if (paired) "Re-pair with Mac" else "Scan QR code",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize   = 15.sp,
+                        color      = Color(0xFF1A0E00)
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onManual) {
+                        Text("Enter IP manually", color = Amber, fontSize = 13.sp)
+                    }
+                    if (paired) {
+                        TextButton(onClick = onForget) {
+                            Text("Forget this Mac", color = Dim, fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        Text(
+            text          = "HOW TO PAIR",
+            color         = Dim,
+            fontSize      = 10.sp,
+            letterSpacing = 1.2.sp,
+            fontWeight    = FontWeight.SemiBold,
+            modifier      = Modifier.padding(start = 4.dp, bottom = 8.dp)
+        )
+
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape    = RoundedCornerShape(20.dp),
+            color    = Surface1,
+            tonalElevation = 0.dp
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                val steps = listOf(
+                    "Open DroidDock on your Mac",
+                    "Click 'Pair Device' or the QR icon in the sidebar",
+                    "Tap 'Scan QR code' above and scan the code on screen",
+                    "Both devices join the same Wi-Fi network automatically",
+                )
+                steps.forEachIndexed { i, step ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 13.dp),
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(13.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .background(Amber.copy(alpha = 0.14f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("${i + 1}", color = Amber, fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold)
+                        }
+                        Text(step, color = Dim, fontSize = 13.sp, lineHeight = 18.sp,
+                            modifier = Modifier.weight(1f))
+                    }
+                    if (i < steps.lastIndex) HorizontalDivider(color = LineColor, thickness = 0.5.dp)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+// ── Files tab ──────────────────────────────────────────────────────────────
+
+@Composable
+private fun FilesTab(
+    connected:      Boolean,
+    sending:        Boolean,
+    onSendFile:     () -> Unit,
+    onSendClipboard: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Spacer(Modifier.height(12.dp))
+        Text("File Sharing", color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+            letterSpacing = (-0.3).sp)
+        Spacer(Modifier.height(4.dp))
+        Text("Send files and clipboard between devices", color = Dim, fontSize = 13.sp)
+
+        Spacer(Modifier.height(20.dp))
+
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape    = RoundedCornerShape(24.dp),
+            color    = Surface1,
+            tonalElevation = 0.dp
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                ServiceRow(
+                    icon     = Icons.Default.UploadFile,
+                    tint     = Orange,
+                    title    = "Send File to Mac",
+                    subtitle = if (sending) "Sending…" else "Pick any file — it lands in Mac Downloads",
+                    granted  = null,
+                    action   = if (sending) "…" else "Pick"
+                ) { onSendFile() }
+                RowDivider()
+                ServiceRow(
+                    icon     = Icons.Default.ContentCopy,
+                    tint     = Purple,
+                    title    = "Send Clipboard to Mac",
+                    subtitle = "Push whatever you copied right now",
+                    granted  = null,
+                    action   = "Send"
+                ) { onSendClipboard() }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        Text(
+            text          = "TIPS",
+            color         = Dim,
+            fontSize      = 10.sp,
+            letterSpacing = 1.2.sp,
+            fontWeight    = FontWeight.SemiBold,
+            modifier      = Modifier.padding(start = 4.dp, bottom = 8.dp)
+        )
+
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape    = RoundedCornerShape(20.dp),
+            color    = Surface1,
+            tonalElevation = 0.dp
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                listOf(
+                    "Share from any app using the Android share sheet — tap 'Send to Mac'",
+                    "Long-press any text and choose 'Send to Mac' from the selection menu",
+                    "On Mac, drag files onto the DroidDock window to send to your phone",
+                    "Received files appear in your Downloads folder on both devices",
+                ).forEach { tip ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
+                        Box(
+                            modifier = Modifier
+                                .padding(top = 5.dp)
+                                .size(6.dp)
+                                .background(Amber.copy(alpha = 0.6f), CircleShape)
+                        )
+                        Text(tip, color = Dim, fontSize = 13.sp, lineHeight = 18.sp)
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+// ── Mirror tab ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun MirrorTab(
+    connected:          Boolean,
+    overlayOk:          Boolean,
+    autoMirror:         Boolean,
+    onEnableOverlay:    () -> Unit,
+    onToggleAutoMirror: (Boolean) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Spacer(Modifier.height(12.dp))
+        Text("Mirror & Camera", color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+            letterSpacing = (-0.3).sp)
+        Spacer(Modifier.height(4.dp))
+        Text("Two ways to project your screen or camera", color = Dim, fontSize = 13.sp)
+
+        Spacer(Modifier.height(20.dp))
+
+        Text(
+            text          = "SCREEN MIRROR",
+            color         = Dim,
+            fontSize      = 10.sp,
+            letterSpacing = 1.2.sp,
+            fontWeight    = FontWeight.SemiBold,
+            modifier      = Modifier.padding(start = 4.dp, bottom = 8.dp)
+        )
+
+        MirrorModeCard(
+            title       = "Mirror via Wi-Fi",
+            badge       = "Wi-Fi",
+            badgeColor  = Ok,
+            icon        = Icons.Outlined.ScreenShare,
+            description = "Stream your screen over local Wi-Fi. No USB or Developer Options needed. Start from Mac's 'Screen Mirror' tab.",
+            tint        = Ok,
+            extra = {
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text("Auto-accept mirror", color = Fg, fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium)
+                        Text("Start instantly, no per-session tap", color = Dim, fontSize = 11.sp)
+                    }
+                    if (!overlayOk) {
+                        TonalChip("Enable", Blue, onEnableOverlay)
+                    } else {
+                        DroidSwitch(checked = autoMirror, onCheckedChange = onToggleAutoMirror)
+                    }
+                }
+            }
+        )
+
+        Spacer(Modifier.height(10.dp))
+
+        MirrorModeCard(
+            title       = "Mirror via ADB",
+            badge       = "ADB",
+            badgeColor  = Amber,
+            icon        = Icons.Outlined.Usb,
+            description = "Higher quality, lower latency mirror using scrcpy over USB. Requires Developer Options enabled on this phone.",
+            tint        = Amber,
+            extra = {
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Surface3, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(Icons.Outlined.Info, null, tint = Dim, modifier = Modifier.size(16.dp))
+                    Text(
+                        "Connect USB cable, then click 'Mirror via ADB' in the Mac app's Screen Mirror tab.",
+                        color = Dim, fontSize = 12.sp, lineHeight = 16.sp
+                    )
+                }
+            }
+        )
+
+        Spacer(Modifier.height(20.dp))
+
+        Text(
+            text          = "CAMERA STREAMING",
+            color         = Dim,
+            fontSize      = 10.sp,
+            letterSpacing = 1.2.sp,
+            fontWeight    = FontWeight.SemiBold,
+            modifier      = Modifier.padding(start = 4.dp, bottom = 8.dp)
+        )
+
+        MirrorModeCard(
+            title       = "Camera via Wi-Fi",
+            badge       = "Wi-Fi",
+            badgeColor  = Ok,
+            icon        = Icons.Outlined.Videocam,
+            description = "Stream your phone camera over local Wi-Fi — use it as a webcam on your Mac. Start from Mac's 'Camera' tab.",
+            tint        = Ok,
+        )
+
+        Spacer(Modifier.height(10.dp))
+
+        MirrorModeCard(
+            title       = "Camera via ADB",
+            badge       = "ADB",
+            badgeColor  = Amber,
+            icon        = Icons.Outlined.CameraAlt,
+            description = "Higher quality camera stream using scrcpy over USB. Requires Developer Options and USB cable.",
+            tint        = Amber,
+            extra = {
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Surface3, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(Icons.Outlined.Info, null, tint = Dim, modifier = Modifier.size(16.dp))
+                    Text(
+                        "Connect USB cable, then click 'Start Camera (ADB)' in the Mac app's Camera tab.",
+                        color = Dim, fontSize = 12.sp, lineHeight = 16.sp
+                    )
+                }
+            }
+        )
+
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun MirrorModeCard(
+    title:       String,
+    badge:       String,
+    badgeColor:  Color,
+    icon:        ImageVector,
+    description: String,
+    tint:        Color,
+    extra:       (@Composable () -> Unit)? = null,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape    = RoundedCornerShape(20.dp),
+        color    = Surface1,
+        tonalElevation = 0.dp
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(13.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .background(tint.copy(alpha = 0.14f), RoundedCornerShape(13.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(icon, null, tint = tint, modifier = Modifier.size(22.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(title, color = Fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        Box(
+                            modifier = Modifier
+                                .background(badgeColor.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 7.dp, vertical = 2.dp)
+                        ) {
+                            Text(badge, color = badgeColor, fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold, letterSpacing = 0.3.sp)
+                        }
+                    }
+                    Text(description, color = Dim, fontSize = 12.sp, lineHeight = 16.sp)
+                }
+            }
+            extra?.invoke()
+        }
+    }
+}
+
+// ── Settings tab ───────────────────────────────────────────────────────────
+
+@Composable
+private fun SettingsTab(
+    clipA11y:         Boolean,
+    clipAuto:         Boolean,
+    notifAccess:      Boolean,
+    phonePerms:       Boolean,
+    allFiles:         Boolean,
+    onEnableClip:     () -> Unit,
+    onToggleClipAuto: (Boolean) -> Unit,
+    onEnableNotif:    () -> Unit,
+    onGrantPhonePerms: () -> Unit,
+    onGrantFiles:     () -> Unit,
+    onBattery:        () -> Unit,
+    onOpenGuide:      () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Spacer(Modifier.height(12.dp))
+        Text("Settings", color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+            letterSpacing = (-0.3).sp)
+
+        Spacer(Modifier.height(20.dp))
+
+        SectionCard("PERMISSIONS") {
+            AutoClipRow(
+                a11yOn   = clipA11y,
+                auto     = clipAuto,
+                onEnable = onEnableClip,
+                onToggle = onToggleClipAuto,
+            )
+            RowDivider()
+            ServiceRow(
+                icon     = Icons.Outlined.Notifications,
+                tint     = Blue,
+                title    = "Notification Access",
+                subtitle = "Show phone notifications on your Mac",
+                granted  = notifAccess,
+                action   = "Enable"
+            ) { onEnableNotif() }
+            RowDivider()
+            ServiceRow(
+                icon     = Icons.Outlined.Message,
+                tint     = Ok,
+                title    = "SMS · Contacts · Calls",
+                subtitle = "Texts, contacts and call alerts on Mac",
+                granted  = phonePerms,
+                action   = "Grant"
+            ) { onGrantPhonePerms() }
+            RowDivider()
+            ServiceRow(
+                icon     = Icons.Outlined.FolderOpen,
+                tint     = Orange,
+                title    = "All-files Access",
+                subtitle = "Browse and transfer your phone's files",
+                granted  = allFiles,
+                action   = "Grant"
+            ) { onGrantFiles() }
+            RowDivider()
+            ServiceRow(
+                icon     = Icons.Outlined.BatteryChargingFull,
+                tint     = Dim,
+                title    = "Background (Battery)",
+                subtitle = "Keep the link alive when screen is off",
+                granted  = null,
+                action   = "Allow"
+            ) { onBattery() }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        SectionCard("HELP") {
+            ServiceRow(
+                icon     = Icons.Outlined.LibraryBooks,
+                tint     = Amber,
+                title    = "Feature Guide",
+                subtitle = "Step-by-step help for every feature",
+                granted  = null,
+                action   = "Open"
+            ) { onOpenGuide() }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Text(
+            text     = "DroidDock · 0.9.1",
+            color    = Dim.copy(alpha = 0.5f),
+            fontSize = 11.sp,
+            modifier = Modifier.padding(start = 4.dp)
+        )
+
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+// ── Shared composables ────────────────────────────────────────────────────
+
 @Composable
 private fun SectionCard(title: String, content: @Composable () -> Unit) {
     Column {
         Text(
-            text          = title.uppercase(),
+            text          = title,
             color         = Dim,
             fontSize      = 10.sp,
             letterSpacing = 1.2.sp,
@@ -655,7 +1238,6 @@ private fun SectionCard(title: String, content: @Composable () -> Unit) {
     }
 }
 
-// ── Auto clipboard row ────────────────────────────────────────────────────
 @Composable
 private fun AutoClipRow(
     a11yOn:   Boolean,
@@ -690,43 +1272,6 @@ private fun AutoClipRow(
     }
 }
 
-// ── Auto mirror row ───────────────────────────────────────────────────────
-@Composable
-private fun AutoMirrorRow(
-    overlayOk: Boolean,
-    auto:      Boolean,
-    onEnable:  () -> Unit,
-    onToggle:  (Boolean) -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 13.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        IconBadge(Icons.Default.ScreenShare, Blue)
-        Spacer(Modifier.width(13.dp))
-        Column(Modifier.weight(1f)) {
-            Text("Auto Screen / Camera", color = Fg, fontSize = 14.sp,
-                fontWeight = FontWeight.Medium)
-            Text(
-                when {
-                    !overlayOk -> "Allow 'Display over other apps' to start without a prompt"
-                    auto       -> "On — camera instant; screen reuses existing permission"
-                    else       -> "Off — phone prompt required each time"
-                },
-                color = Dim, fontSize = 11.sp, lineHeight = 15.sp,
-                maxLines = 2, overflow = TextOverflow.Ellipsis
-            )
-        }
-        Spacer(Modifier.width(10.dp))
-        if (!overlayOk) {
-            TonalChip("Enable", Blue, onEnable)
-        } else {
-            DroidSwitch(checked = auto, onCheckedChange = onToggle)
-        }
-    }
-}
-
-// ── Generic service row ───────────────────────────────────────────────────
 @Composable
 private fun ServiceRow(
     icon:     ImageVector,
@@ -756,8 +1301,7 @@ private fun ServiceRow(
                     .padding(horizontal = 12.dp, vertical = 6.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Check, contentDescription = null, tint = Ok,
-                        modifier = Modifier.size(12.dp))
+                    Icon(Icons.Default.Check, null, tint = Ok, modifier = Modifier.size(12.dp))
                     Spacer(Modifier.width(4.dp))
                     Text("On", color = Ok, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 }
@@ -768,7 +1312,6 @@ private fun ServiceRow(
     }
 }
 
-// ── Small components ──────────────────────────────────────────────────────
 @Composable
 private fun IconBadge(icon: ImageVector, tint: Color) {
     Box(
@@ -777,7 +1320,7 @@ private fun IconBadge(icon: ImageVector, tint: Color) {
             .background(tint.copy(alpha = 0.14f), RoundedCornerShape(11.dp)),
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(19.dp))
+        Icon(icon, null, tint = tint, modifier = Modifier.size(19.dp))
     }
 }
 
@@ -815,6 +1358,7 @@ private fun RowDivider() {
 }
 
 // ── Manual pair dialog ─────────────────────────────────────────────────────
+
 @Composable
 private fun ManualPairDialog(onDismiss: () -> Unit, onPair: (Pairing) -> Unit) {
     val ctx   = LocalContext.current
@@ -863,15 +1407,14 @@ private fun ManualPairDialog(onDismiss: () -> Unit, onPair: (Pairing) -> Unit) {
 }
 
 // ── Pause dialog ───────────────────────────────────────────────────────────
+
 @Composable
 private fun PauseDialog(onDismiss: () -> Unit, onPause: (Long?) -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor   = Surface2,
         shape            = RoundedCornerShape(20.dp),
-        title = {
-            Text("Pause DroidDock", color = Fg, fontWeight = FontWeight.SemiBold)
-        },
+        title = { Text("Pause DroidDock", color = Fg, fontWeight = FontWeight.SemiBold) },
         text = {
             Column {
                 Text(
@@ -880,11 +1423,11 @@ private fun PauseDialog(onDismiss: () -> Unit, onPause: (Long?) -> Unit) {
                     color = Dim, fontSize = 13.sp, lineHeight = 18.sp
                 )
                 Spacer(Modifier.height(16.dp))
-                PauseOption("Pause for 1 hour")     { onPause(60L * 60 * 1000) }
+                PauseOption("Pause for 1 hour")  { onPause(60L * 60 * 1000) }
                 Spacer(Modifier.height(8.dp))
-                PauseOption("Pause for 8 hours")    { onPause(8L * 60 * 60 * 1000) }
+                PauseOption("Pause for 8 hours") { onPause(8L * 60 * 60 * 1000) }
                 Spacer(Modifier.height(8.dp))
-                PauseOption("Until I resume")        { onPause(null) }
+                PauseOption("Until I resume")    { onPause(null) }
             }
         },
         confirmButton = {},
@@ -906,6 +1449,7 @@ private fun PauseOption(label: String, onClick: () -> Unit) {
 }
 
 // ── Feature guide ──────────────────────────────────────────────────────────
+
 @Composable
 private fun FeatureGuideScreen(onBack: () -> Unit) {
     Surface(Modifier.fillMaxSize(), color = Ink) {
@@ -949,13 +1493,9 @@ private fun GuideCard(section: GuideSection) {
                 .clickable { open = !open }
                 .padding(16.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(section.title, color = Fg, fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold)
+                    Text(section.title, color = Fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     Text(section.subtitle, color = Dim, fontSize = 12.sp,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
@@ -969,16 +1509,9 @@ private fun GuideCard(section: GuideSection) {
             AnimatedVisibility(visible = open) {
                 Column(Modifier.padding(top = 12.dp)) {
                     section.steps.forEachIndexed { i, step ->
-                        Row(
-                            modifier = Modifier.padding(vertical = 3.dp),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            Text(
-                                "${i + 1}.",
-                                color    = Amber,
-                                fontSize = 12.sp,
-                                modifier = Modifier.width(22.dp)
-                            )
+                        Row(modifier = Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.Top) {
+                            Text("${i + 1}.", color = Amber, fontSize = 12.sp,
+                                modifier = Modifier.width(22.dp))
                             Text(step, color = Dim, fontSize = 12.sp, lineHeight = 17.sp)
                         }
                     }
@@ -989,6 +1522,7 @@ private fun GuideCard(section: GuideSection) {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
+
 private val PHONE_PERMS = arrayOf(
     Manifest.permission.READ_SMS,
     Manifest.permission.SEND_SMS,
@@ -1057,8 +1591,8 @@ private val GUIDE_SECTIONS = listOf(
             "Click a conversation to see the full thread.",
             "Type at the bottom and press Enter to send a reply.")),
     GuideSection("Screen Mirroring", "Mirror and control your phone from your Mac.",
-        listOf("Connect both devices over USB or wireless ADB.",
-            "Tap Mirror in the Mac sidebar.",
+        listOf("Wi-Fi mirror: pair the DroidDock phone app, then click 'Mirror via Wi-Fi' on Mac.",
+            "ADB mirror: connect USB cable with Developer Options, click 'Mirror via ADB' on Mac.",
             "Your phone screen appears on your Mac — you can click, scroll and type.",
             "Close the mirror window on the Mac to stop."))
 )

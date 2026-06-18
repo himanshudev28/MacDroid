@@ -13,18 +13,14 @@ import SettingsView from './components/SettingsView.jsx'
 import CallOverlay from './components/CallOverlay.jsx'
 import SetupModal from './components/SetupModal.jsx'
 import MirrorView from './components/MirrorView.jsx'
+import DashboardView from './components/DashboardView.jsx'
+import DevicesView from './components/DevicesView.jsx'
+import CameraView from './components/CameraView.jsx'
+import MediaView from './components/MediaView.jsx'
+import ClipboardView from './components/ClipboardView.jsx'
+import CallsView from './components/CallsView.jsx'
 
 const ROOT = '/sdcard'
-
-const TABS = [
-  ['files',         'Files'],
-  ['photos',        'Photos'],
-  ['screen',        'Screen'],
-  ['messages',      'Messages'],
-  ['contacts',      'Contacts'],
-  ['notifications', 'Notifs'],
-  ['settings',      'Settings'],
-]
 
 export default function App() {
   const [tools, setTools] = useState(null)
@@ -41,7 +37,7 @@ export default function App() {
   const [setup, setSetup] = useState(null)
   const [wPairOpen, setWPairOpen] = useState(false)
   const [pairedGuid, setPairedGuid] = useState(null)
-  const [view, setView] = useState('files')
+  const [view, setView] = useState('dashboard')
   const [media, setMedia] = useState(null)
   const [notifs, setNotifs] = useState([])
   const [appInfo, setAppInfo] = useState(null)
@@ -148,9 +144,9 @@ export default function App() {
   useEffect(() => { if (!connected && fsLink) setPath(ROOT) }, [connected, fsLink])
   useEffect(() => { if (connected || fsLink) refreshList(path) }, [serial, path, connected, fsLink])
 
-  const enter    = (name) => setPath((p) => (p === '/' ? `/${name}` : `${p}/${name}`))
-  const up       = () => setPath((p) => p.split('/').slice(0, -1).join('/') || '/')
-  const jumpTo   = (idx) => setPath('/' + path.split('/').filter(Boolean).slice(0, idx + 1).join('/'))
+  const enter  = (name) => setPath((p) => (p === '/' ? `/${name}` : `${p}/${name}`))
+  const up     = () => setPath((p) => p.split('/').slice(0, -1).join('/') || '/')
+  const jumpTo = (idx) => setPath('/' + path.split('/').filter(Boolean).slice(0, idx + 1).join('/'))
 
   const withFlag = async (key, fn) => {
     setBusy((b) => ({ ...b, [key]: true }))
@@ -240,185 +236,194 @@ export default function App() {
     if (!res.ok) toast('bad', res.error)
   }
 
+  const mirrorWifi = async () => {
+    const r = await window.droid.mirrorPopout('screen')
+    if (!r.ok) toast('bad', r.error)
+    else toast('info', 'Approve screen capture on your phone…')
+  }
+
+  const cameraWifi = async () => {
+    const r = await window.droid.mirrorPopout('camera')
+    if (!r.ok) toast('bad', r.error)
+    else toast('info', 'Allow the camera on your phone…')
+  }
+
   const notifCount = notifs.length
-  const tabLabel = (id, base) =>
-    id === 'notifications' && notifCount > 0 ? `${base} ${notifCount}` : base
+
+  const renderView = () => {
+    switch (view) {
+      case 'dashboard':
+        return (
+          <DashboardView
+            connected={connected}
+            wifi={wifi}
+            appInfo={appInfo}
+            media={media}
+            notifs={notifs}
+            prog={prog}
+            onPair={() => setPairOpen(true)}
+            onMirrorWifi={mirrorWifi}
+            onCameraWifi={cameraWifi}
+            onUpload={upload}
+            onOpenDownloads={() => window.droid.openDownloads()}
+          />
+        )
+      case 'devices':
+        return (
+          <DevicesView
+            connected={connected}
+            info={info}
+            appInfo={appInfo}
+            wifi={wifi}
+            tools={tools}
+            busy={busy}
+            paired={!!pairedGuid}
+            onPair={() => setPairOpen(true)}
+            onWireless={goWireless}
+            onPairWireless={() => setWPairOpen(true)}
+            onUnpair={unpair}
+            onReconnect={reconnect}
+            onScreenshot={screenshot}
+            onToast={toast}
+          />
+        )
+      case 'notifications':
+        return (
+          <NotificationsView
+            linked={!!wifi?.connected}
+            items={notifs}
+            onClear={() => setNotifs([])}
+            onDismiss={(key) => {
+              window.droid.notifDismiss(key)
+              setNotifs((l) => l.filter((x) => x.key !== key))
+            }}
+            onToast={toast}
+          />
+        )
+      case 'messages':
+        return (
+          <MessagesView linked={!!wifi?.connected} onToast={toast} target={messageTarget} />
+        )
+      case 'calls':
+        return <CallsView linked={!!wifi?.connected} />
+      case 'contacts':
+        return (
+          <ContactsView
+            linked={!!wifi?.connected}
+            onToast={toast}
+            onCall={(contact) => {
+              setActiveCall((prev) => ({
+                ...prev,
+                state: 'RINGING',
+                number: contact.number,
+                name: contact.name || contact.number,
+              }))
+            }}
+            onOpenSms={(contact) => { setMessageTarget(contact); setView('messages') }}
+          />
+        )
+      case 'clipboard':
+        return <ClipboardView linked={!!wifi?.connected} onToast={toast} />
+      case 'files':
+        return fsAvailable ? (
+          <FileBrowser
+            path={path}
+            entries={entries}
+            loading={loading}
+            busy={busy}
+            transport={fsVia}
+            prog={prog}
+            onCancel={(tid) => window.droid.fsCancel(tid)}
+            onEnter={enter}
+            onUp={up}
+            onJump={jumpTo}
+            onRefresh={() => refreshList()}
+            onDownload={download}
+            onUpload={upload}
+            onDrop={dropFiles}
+            onRename={renameEntry}
+            onDelete={deleteEntry}
+          />
+        ) : (
+          <WaitingState
+            unauthorized={unauthorized}
+            onLinkApp={() => setPairOpen(true)}
+            onAdvanced={() => setWPairOpen(true)}
+          />
+        )
+      case 'photos':
+        return <PhotosView available={fsAvailable} onToast={toast} />
+      case 'camera':
+        return (
+          <CameraView
+            linked={!!wifi?.connected}
+            connected={connected}
+            scrcpy={tools?.scrcpy}
+            busy={busy}
+            onCameraWifi={cameraWifi}
+            onCameraAdb={camera}
+            onToast={toast}
+          />
+        )
+      case 'media':
+        return (
+          <MediaView
+            media={media}
+            onCmd={(cmd, value) => window.droid.mediaCmd(cmd, value)}
+          />
+        )
+      case 'screen':
+        return (
+          <MirrorView
+            linked={!!wifi?.connected}
+            connected={connected}
+            scrcpy={tools?.scrcpy}
+            busy={busy}
+            onMirrorAdb={mirror}
+            onToast={toast}
+          />
+        )
+      case 'settings':
+        return <SettingsView onToast={toast} />
+      default:
+        return null
+    }
+  }
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
-      {/* ── Titlebar ──────────────────────────────────────────────── */}
-      <header
-        className="drag relative flex h-11 shrink-0 items-center justify-between border-b border-line bg-panel pl-[76px] pr-4"
-        style={{ boxShadow: 'inset 0 -1px 0 rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.04)' }}
-      >
-        {/* Left: brand */}
-        <div className="flex items-center gap-2">
-          <span
-            className={`h-[7px] w-[7px] rounded-full transition-all duration-500 ${
-              connected ? 'bg-amber led' : wifi?.connected ? 'bg-ok/70' : 'bg-dim/35'
-            }`}
-          />
-          <span className="font-display text-[13px] font-semibold tracking-[0.04em] text-fg/90">
-            DroidDock
-          </span>
-          {(connected || wifi?.connected) && (
-            <span className="font-mono text-[10px] text-dim/60">
-              {connected
-                ? (info?.model || connected.model)
-                : wifi?.phoneName || 'linked'}
-            </span>
-          )}
-        </div>
+    <div className="flex h-screen overflow-hidden bg-ink">
+      <Sidebar
+        view={view}
+        setView={setView}
+        connected={connected}
+        wifi={wifi}
+        appInfo={appInfo}
+        notifCount={notifCount}
+      />
 
-        {/* Right: tool chips */}
-        {tools && (
-          <div className="no-drag flex items-center gap-1.5">
-            <ToolChip label="adb"    on={tools.adb}    onClick={() => setSetup({ reason: null })} />
-            <ToolChip label="scrcpy" on={tools.scrcpy} onClick={() => setSetup({ reason: null })} />
+      <main className="gridbg relative flex min-w-0 flex-1 flex-col overflow-hidden">
+        {prog && prog.dir === 'phone' && (
+          <div className="shrink-0 flex items-center gap-3 border-b border-amber/20 bg-amber/5 px-4 py-1.5">
+            <span className="shrink-0 font-mono text-[10px] text-amber/80">
+              Receiving {prog.name}
+            </span>
+            <div className="h-0.5 flex-1 overflow-hidden rounded-full bg-amber/15">
+              <div
+                className="h-full rounded-full bg-amber/70 transition-all duration-300"
+                style={{ width: `${prog.total ? Math.round((prog.sent / prog.total) * 100) : 0}%` }}
+              />
+            </div>
+            <span className="shrink-0 font-mono text-[10px] text-dim/60">
+              {prog.total ? `${Math.round((prog.sent / prog.total) * 100)}%` : '…'}
+            </span>
           </div>
         )}
-      </header>
 
-      <div className="flex min-h-0 flex-1">
-        {/* ── Sidebar ─────────────────────────────────────────────── */}
-        <Sidebar
-          device={connected}
-          info={info}
-          appInfo={appInfo}
-          busy={busy}
-          scrcpy={tools?.scrcpy}
-          wifi={wifi}
-          media={media}
-          onMediaCmd={(cmd, value) => window.droid.mediaCmd(cmd, value)}
-          onPair={() => setPairOpen(true)}
-          onToggleNotif={async () => setWifi(await window.droid.wifiToggleNotif())}
-          onMirror={mirror}
-          onWireless={goWireless}
-          onPairWireless={() => setWPairOpen(true)}
-          onUnpair={unpair}
-          onReconnect={reconnect}
-          paired={!!pairedGuid}
-          onCamera={camera}
-          onScreenshot={screenshot}
-          onUpload={upload}
-          onOpenDownloads={() => window.droid.openDownloads()}
-        />
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {renderView()}
+        </div>
+      </main>
 
-        {/* ── Main area ───────────────────────────────────────────── */}
-        <main className="gridbg relative flex min-w-0 flex-1 flex-col overflow-hidden">
-          {/* Tab bar */}
-          <div
-            className="flex h-10 shrink-0 items-stretch gap-0 overflow-x-auto border-b border-line bg-ink/70 px-3"
-            style={{ scrollbarWidth: 'none' }}
-          >
-            {TABS.map(([id, label]) => {
-              const active = view === id
-              return (
-                <button
-                  key={id}
-                  onClick={() => setView(id)}
-                  className={`no-drag relative shrink-0 px-3.5 py-0 font-mono text-[10.5px] font-medium tracking-[0.05em] transition-colors duration-150 ${
-                    active ? 'text-amber' : 'text-dim hover:text-fg/80'
-                  }`}
-                >
-                  {tabLabel(id, label)}
-                  {active && (
-                    <span
-                      className="tab-line absolute bottom-0 left-2 right-2 h-[2px] rounded-t-full bg-amber"
-                    />
-                  )}
-                  {id === 'notifications' && notifCount > 0 && !active && (
-                    <span className="absolute right-1.5 top-2 h-1.5 w-1.5 rounded-full bg-amber/70" />
-                  )}
-                </button>
-              )
-            })}
-          </div>
-
-          {/* Phone → Mac receive progress (visible on all tabs) */}
-          {prog && prog.dir === 'phone' && (
-            <div className="shrink-0 flex items-center gap-3 border-b border-amber/20 bg-amber/5 px-4 py-1.5">
-              <span className="shrink-0 font-mono text-[10px] text-amber/80">
-                Receiving {prog.name}
-              </span>
-              <div className="h-0.75 flex-1 overflow-hidden rounded-full bg-amber/15">
-                <div
-                  className="h-full rounded-full bg-amber/70 transition-all duration-300"
-                  style={{ width: `${prog.total ? Math.round((prog.sent / prog.total) * 100) : 0}%` }}
-                />
-              </div>
-              <span className="shrink-0 font-mono text-[10px] text-dim/60">
-                {prog.total ? `${Math.round((prog.sent / prog.total) * 100)}%` : '…'}
-              </span>
-            </div>
-          )}
-
-          {/* View content */}
-          <div className="min-h-0 flex-1">
-            {view === 'messages' ? (
-              <MessagesView linked={!!wifi?.connected} onToast={toast} target={messageTarget} />
-            ) : view === 'contacts' ? (
-              <ContactsView
-                linked={!!wifi?.connected}
-                onToast={toast}
-                onCall={(contact) => {
-                  setActiveCall((prev) => ({
-                    ...prev,
-                    state: 'RINGING',
-                    number: contact.number,
-                    name: contact.name || contact.number,
-                  }))
-                }}
-                onOpenSms={(contact) => { setMessageTarget(contact); setView('messages') }}
-              />
-            ) : view === 'notifications' ? (
-              <NotificationsView
-                linked={!!wifi?.connected}
-                items={notifs}
-                onClear={() => setNotifs([])}
-                onDismiss={(key) => {
-                  window.droid.notifDismiss(key)
-                  setNotifs((l) => l.filter((x) => x.key !== key))
-                }}
-                onToast={toast}
-              />
-            ) : view === 'settings' ? (
-              <SettingsView onToast={toast} />
-            ) : view === 'photos' ? (
-              <PhotosView available={fsAvailable} onToast={toast} />
-            ) : view === 'screen' ? (
-              <MirrorView linked={!!wifi?.connected} onToast={toast} />
-            ) : fsAvailable ? (
-              <FileBrowser
-                path={path}
-                entries={entries}
-                loading={loading}
-                busy={busy}
-                transport={fsVia}
-                prog={prog}
-                onCancel={(tid) => window.droid.fsCancel(tid)}
-                onEnter={enter}
-                onUp={up}
-                onJump={jumpTo}
-                onRefresh={() => refreshList()}
-                onDownload={download}
-                onUpload={upload}
-                onDrop={dropFiles}
-                onRename={renameEntry}
-                onDelete={deleteEntry}
-              />
-            ) : (
-              <WaitingState
-                unauthorized={unauthorized}
-                onLinkApp={() => setPairOpen(true)}
-                onAdvanced={() => setWPairOpen(true)}
-              />
-            )}
-          </div>
-        </main>
-      </div>
-
-      {/* ── Overlays ──────────────────────────────────────────────── */}
       <Toasts items={toasts} />
 
       {setup && (
@@ -442,22 +447,5 @@ export default function App() {
       )}
       <div className="grain" />
     </div>
-  )
-}
-
-function ToolChip({ label, on, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      title={on ? `${label} detected` : `${label} not found — click to install`}
-      className={`flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-[9px] tracking-[0.06em] transition-all duration-150 ${
-        on
-          ? 'bg-amber/8 text-amber/80 hover:bg-amber/15 hover:text-amber'
-          : 'text-dim/60 hover:bg-panel2 hover:text-dim'
-      }`}
-    >
-      <span className={`h-1 w-1 rounded-full ${on ? 'bg-amber' : 'bg-dim/40'}`} />
-      {label}
-    </button>
   )
 }
