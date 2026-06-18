@@ -122,8 +122,10 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
     var showManual  by remember { mutableStateOf(false) }
     var showGuide   by remember { mutableStateOf(false) }
     var showPause   by remember { mutableStateOf(false) }
-    var sending     by remember { mutableStateOf(false) }
-    var currentTab  by remember { mutableStateOf("home") }
+    var sending         by remember { mutableStateOf(false) }
+    val activeTransfers by TransferManager.activeTransfers.collectAsState()
+    val recentTransfers by TransferManager.recentTransfers.collectAsState()
+    var currentTab      by remember { mutableStateOf("home") }
 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -318,8 +320,10 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
                     },
                 )
                 "files" -> FilesTab(
-                    connected = connected,
-                    sending   = sending,
+                    connected       = connected,
+                    sending         = sending,
+                    activeTransfers = activeTransfers,
+                    recentTransfers = recentTransfers,
                     onSendFile = { if (!sending) filePicker.launch("*/*") },
                     onSendClipboard = {
                         val cm   = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -835,13 +839,67 @@ private fun ConnectTab(
 
 // ── Files tab ──────────────────────────────────────────────────────────────
 
+private fun formatBytes(bytes: Long): String = when {
+    bytes >= 1_073_741_824L -> "${"%.1f".format(bytes / 1_073_741_824f)} GB"
+    bytes >= 1_048_576L     -> "${"%.1f".format(bytes / 1_048_576f)} MB"
+    bytes >= 1024L          -> "${"%.0f".format(bytes / 1024f)} KB"
+    else                    -> "$bytes B"
+}
+
+private fun formatSpeed(bps: Long): String = when {
+    bps >= 1_048_576L -> "${"%.1f".format(bps / 1_048_576f)} MB/s"
+    bps >= 1024L      -> "${"%.0f".format(bps / 1024f)} KB/s"
+    else              -> "$bps B/s"
+}
+
+private fun formatTimeAgo(ts: Long): String {
+    val diff = System.currentTimeMillis() - ts
+    return when {
+        diff < 60_000L      -> "just now"
+        diff < 3_600_000L   -> "${diff / 60_000L}m ago"
+        diff < 86_400_000L  -> "${diff / 3_600_000L}h ago"
+        else                -> "${diff / 86_400_000L}d ago"
+    }
+}
+
+private fun extColor(name: String): Color = when (name.substringAfterLast('.', "").lowercase()) {
+    "pdf"                                           -> Color(0xFFEF4444)
+    "jpg", "jpeg", "png", "gif", "webp", "heic",
+    "bmp", "svg"                                    -> Color(0xFF10B981)
+    "mp4", "mov", "avi", "mkv", "webm", "m4v"      -> Color(0xFF8B5CF6)
+    "mp3", "wav", "m4a", "flac", "aac", "ogg"      -> Color(0xFFF59E0B)
+    "doc", "docx", "txt", "rtf", "odt"             -> Color(0xFF3B82F6)
+    "xls", "xlsx", "csv"                            -> Color(0xFF22C55E)
+    "ppt", "pptx"                                   -> Color(0xFFF97316)
+    "zip", "rar", "7z", "tar", "gz", "bz2"         -> Color(0xFF6B7280)
+    "apk"                                           -> Color(0xFF78C1A3)
+    else                                            -> Color(0xFF6B7280)
+}
+
+private fun extLabel(name: String): String =
+    name.substringAfterLast('.', "file").uppercase().take(4)
+
 @Composable
 private fun FilesTab(
-    connected:      Boolean,
-    sending:        Boolean,
-    onSendFile:     () -> Unit,
+    connected:       Boolean,
+    sending:         Boolean,
+    activeTransfers: List<TransferProgress>,
+    recentTransfers: List<TransferRecord>,
+    onSendFile:      () -> Unit,
     onSendClipboard: () -> Unit,
 ) {
+    val startOfDay = remember {
+        val cal = java.util.Calendar.getInstance()
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0)
+        cal.set(java.util.Calendar.MILLISECOND, 0)
+        cal.timeInMillis
+    }
+    val todayBytes = recentTransfers
+        .filter { it.completedAt >= startOfDay && it.success }
+        .sumOf { it.sizeBytes }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -850,56 +908,126 @@ private fun FilesTab(
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         Spacer(Modifier.height(12.dp))
-        Text("File Sharing", color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Bold,
-            letterSpacing = (-0.3).sp)
-        Spacer(Modifier.height(4.dp))
-        Text("Send files and clipboard between devices", color = Dim, fontSize = 13.sp)
 
-        Spacer(Modifier.height(20.dp))
-
+        // Summary card + Send button
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            shape    = RoundedCornerShape(24.dp),
-            color    = Surface1,
-            tonalElevation = 0.dp
+            shape = RoundedCornerShape(20.dp),
+            color = Surface2,
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text("Transferred today", color = Dim, fontSize = 11.sp, letterSpacing = 0.5.sp)
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        if (todayBytes == 0L) "—" else formatBytes(todayBytes),
+                        color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.5).sp
+                    )
+                }
+                Button(
+                    onClick = onSendFile,
+                    enabled = !sending,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Amber,
+                        contentColor = Color(0xFF1A0E00),
+                        disabledContainerColor = Amber.copy(alpha = 0.4f),
+                        disabledContentColor = Color(0xFF1A0E00).copy(alpha = 0.5f)
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Text(if (sending) "Sending…" else "+ Send", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+
+        // Upload queue (only when active)
+        if (activeTransfers.isNotEmpty()) {
+            Spacer(Modifier.height(20.dp))
+            Text(
+                "UPLOAD QUEUE",
+                color = Dim, fontSize = 10.sp, letterSpacing = 1.2.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+            )
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                color = Surface1,
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+                    activeTransfers.forEachIndexed { idx, transfer ->
+                        if (idx > 0) RowDivider()
+                        ActiveTransferRow(transfer)
+                    }
+                }
+            }
+        }
+
+        // Recent transfers
+        if (recentTransfers.isNotEmpty()) {
+            Spacer(Modifier.height(20.dp))
+            Text(
+                "RECENT TRANSFERS",
+                color = Dim, fontSize = 10.sp, letterSpacing = 1.2.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+            )
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                color = Surface1,
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+                    recentTransfers.forEachIndexed { idx, record ->
+                        if (idx > 0) RowDivider()
+                        RecentTransferRow(record)
+                    }
+                }
+            }
+        }
+
+        // Quick actions
+        Spacer(Modifier.height(20.dp))
+        Text(
+            "QUICK ACTIONS",
+            color = Dim, fontSize = 10.sp, letterSpacing = 1.2.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+        )
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            color = Surface1,
         ) {
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
                 ServiceRow(
-                    icon     = Icons.Default.UploadFile,
-                    tint     = Orange,
-                    title    = "Send File to Mac",
-                    subtitle = if (sending) "Sending…" else "Pick any file — it lands in Mac Downloads",
-                    granted  = null,
-                    action   = if (sending) "…" else "Pick"
-                ) { onSendFile() }
-                RowDivider()
-                ServiceRow(
-                    icon     = Icons.Default.ContentCopy,
-                    tint     = Purple,
-                    title    = "Send Clipboard to Mac",
+                    icon = Icons.Default.ContentCopy,
+                    tint = Purple,
+                    title = "Send Clipboard to Mac",
                     subtitle = "Push whatever you copied right now",
-                    granted  = null,
-                    action   = "Send"
+                    granted = null,
+                    action = "Send"
                 ) { onSendClipboard() }
             }
         }
 
-        Spacer(Modifier.height(16.dp))
-
+        Spacer(Modifier.height(20.dp))
         Text(
-            text          = "TIPS",
-            color         = Dim,
-            fontSize      = 10.sp,
-            letterSpacing = 1.2.sp,
-            fontWeight    = FontWeight.SemiBold,
-            modifier      = Modifier.padding(start = 4.dp, bottom = 8.dp)
+            "TIPS",
+            color = Dim, fontSize = 10.sp, letterSpacing = 1.2.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
         )
-
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            shape    = RoundedCornerShape(20.dp),
-            color    = Surface1,
-            tonalElevation = 0.dp
+            shape = RoundedCornerShape(20.dp),
+            color = Surface1,
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 listOf(
@@ -922,6 +1050,93 @@ private fun FilesTab(
         }
 
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun ActiveTransferRow(transfer: TransferProgress) {
+    val color = extColor(transfer.fileName)
+    Row(
+        modifier = Modifier.padding(vertical = 12.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .background(color.copy(alpha = 0.15f), RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(extLabel(transfer.fileName), color = color,
+                fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    transfer.fileName, color = Fg, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("${transfer.percent}%", color = Amber, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(Modifier.height(2.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(formatBytes(transfer.totalBytes), color = Dim, fontSize = 11.sp)
+                if (transfer.speedBps > 0) {
+                    Text(formatSpeed(transfer.speedBps), color = Dim, fontSize = 11.sp)
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            LinearProgressIndicator(
+                progress = { (transfer.sentBytes.toFloat() / transfer.totalBytes.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
+                color = Amber,
+                trackColor = Surface3,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecentTransferRow(record: TransferRecord) {
+    val color = extColor(record.fileName)
+    Row(
+        modifier = Modifier.padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .background(color.copy(alpha = 0.15f), RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(extLabel(record.fileName), color = color,
+                fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                record.fileName, color = Fg, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(2.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(formatBytes(record.sizeBytes), color = Dim, fontSize = 11.sp)
+                Text("·", color = Dim, fontSize = 11.sp)
+                Text(if (record.direction == "toMac") "→ Mac" else "← Phone", color = Dim, fontSize = 11.sp)
+                Text("·", color = Dim, fontSize = 11.sp)
+                Text(formatTimeAgo(record.completedAt), color = Dim, fontSize = 11.sp)
+            }
+        }
+        if (record.success) {
+            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Ok, modifier = Modifier.size(18.dp))
+        } else {
+            Icon(Icons.Default.Error, contentDescription = null, tint = Bad, modifier = Modifier.size(18.dp))
+        }
     }
 }
 

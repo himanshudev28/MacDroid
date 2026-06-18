@@ -39,7 +39,7 @@ It's two apps that talk to each other:
 |:--:|---|---|
 | 📋 | **Clipboard sync** | Mac → phone automatically; phone → Mac automatically or manually — **Auto / Manual** toggle. Works on Android 13+ / Samsung (uses accessibility events, not clipboard reads). |
 | 🔔 | **Notification mirroring** | Phone notifications on your Mac as native macOS alerts with **inline reply** and dismiss. Incoming calls shown with caller ID. |
-| 📁 | **File transfer & browser** | Drag-and-drop both ways with live progress; browse, download, upload, **rename**, **delete** and **search** phone storage. |
+| 📁 | **File transfer & browser** | Drag-and-drop both ways with live progress; browse, download, upload, **rename**, **delete** and **search** phone storage. Android Files tab shows an **upload queue** with real-time progress bar, transfer speed, and a **recent transfers** history with colored file-type badges. |
 | 🖼️ | **Photos & Videos** | Browse thumbnails, open full-res in Preview / QuickTime, download originals. |
 | 💬 | **Messages** | Polished 2-pane SMS chat — conversation list with avatar initials, search, day dividers, composer. Threads sync live. |
 | 👤 | **Contacts** | Browse and search your phone's contacts. |
@@ -246,6 +246,7 @@ DroidDock/
 - [x] **Mac UI redesign** — Apple HIG + Liquid Glass (glassmorphism, Geist font, layered depth)
 - [x] **Android UI redesign** — Material Design 3 (all-vector icons, MD3 components, dynamic palette)
 - [x] **Phone → Mac file transfer** — send files from the Android app directly to Mac Downloads with live amber progress bar
+- [x] **Android Files tab** — upload queue with real-time progress bars, transfer speed, percentage; recent transfers history with colored file-type badges and direction/time labels
 - [ ] TLS on the LAN link
 - [ ] Audio streaming (Mac ↔ phone)
 

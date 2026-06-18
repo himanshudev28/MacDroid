@@ -11,6 +11,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
 import okio.Buffer
 import okio.ByteString
 import org.json.JSONObject
@@ -18,6 +19,25 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+
+data class TransferProgress(
+    val transferId: Int,
+    val fileName: String,
+    val totalBytes: Long,
+    val sentBytes: Long,
+    val speedBps: Long
+) {
+    val percent: Int get() = if (totalBytes > 0) ((sentBytes * 100L) / totalBytes).toInt().coerceIn(0, 100) else 0
+}
+
+data class TransferRecord(
+    val id: Long,
+    val fileName: String,
+    val sizeBytes: Long,
+    val direction: String, // "toMac" or "fromMac"
+    val completedAt: Long,
+    val success: Boolean
+)
 
 /** Phase 6a A3 — binary file transfer over the app link. Isolated from the JSON
  *  message path; ConnectionManager hands binary frames + fs-* control here. */
@@ -43,6 +63,9 @@ object TransferManager {
     private val pendingPhonePushResult = ConcurrentHashMap<Int, (Boolean, String?) -> Unit>() // transferId → callback
     private val phonePushSeq = AtomicInteger(1)
 
+    val activeTransfers = MutableStateFlow<List<TransferProgress>>(emptyList())
+    val recentTransfers = MutableStateFlow<List<TransferRecord>>(emptyList())
+
     fun attach(ctx: Context, socket: okhttp3.WebSocket) {
         appCtx = ctx.applicationContext
         ws = socket
@@ -55,6 +78,15 @@ object TransferManager {
         incoming.clear()
         outgoing.values.forEach { it.cancel() }
         outgoing.clear()
+        // Mark active phone-push transfers as failed in recent list
+        val now = System.currentTimeMillis()
+        val dropped = activeTransfers.value.map { p ->
+            TransferRecord(p.transferId.toLong(), p.fileName, p.totalBytes, "toMac", now, false)
+        }
+        if (dropped.isNotEmpty()) {
+            recentTransfers.value = (dropped + recentTransfers.value).take(20)
+        }
+        activeTransfers.value = emptyList()
         pendingPhonePush.values.forEach { it.onResult(false, "link dropped") }
         pendingPhonePush.clear()
         pendingPhonePushResult.values.forEach { it(false, "link dropped") }
@@ -110,25 +142,53 @@ object TransferManager {
     private suspend fun streamToMac(p: PendingPhonePush, transferId: Int) {
         val ctx    = appCtx ?: run { p.onResult(false, "no context"); return }
         val socket = ws     ?: run { p.onResult(false, "link dropped"); return }
+
+        activeTransfers.value = activeTransfers.value + TransferProgress(transferId, p.name, p.size, 0L, 0L)
+
         try {
             ctx.contentResolver.openInputStream(p.uri)?.use { ins ->
                 val buf = ByteArray(CHUNK)
                 var seq = 0
+                var bytesSent = 0L
+                var lastEmitNs = System.nanoTime()
+                var bytesAtLastEmit = 0L
+
                 while (currentCoroutineContext().isActive) {
                     val n = ins.read(buf)
                     if (n < 0) break
                     while (currentCoroutineContext().isActive && (ws?.queueSize() ?: 0) > MAX_INFLIGHT) delay(20)
                     val s = ws ?: break
                     s.send(frame(transferId, seq++, buf, n))
+                    bytesSent += n
+
+                    val nowNs = System.nanoTime()
+                    val elapsedMs = (nowNs - lastEmitNs) / 1_000_000L
+                    if (elapsedMs >= 500L) {
+                        val speedBps = if (elapsedMs > 0) ((bytesSent - bytesAtLastEmit) * 1000L) / elapsedMs else 0L
+                        val cur = TransferProgress(transferId, p.name, p.size, bytesSent, speedBps)
+                        activeTransfers.value = activeTransfers.value.map { if (it.transferId == transferId) cur else it }
+                        lastEmitNs = nowNs
+                        bytesAtLastEmit = bytesSent
+                    }
                 }
             }
             if (currentCoroutineContext().isActive) {
                 // Register result callback BEFORE sending done so the ack can't race
-                pendingPhonePushResult[transferId] = p.onResult
+                pendingPhonePushResult[transferId] = { ok, err ->
+                    activeTransfers.value = activeTransfers.value.filter { it.transferId != transferId }
+                    val rec = TransferRecord(transferId.toLong(), p.name, p.size, "toMac", System.currentTimeMillis(), ok)
+                    recentTransfers.value = (listOf(rec) + recentTransfers.value).take(20)
+                    p.onResult(ok, err)
+                }
                 send(JSONObject().put("type", "phone-push-done")
                     .put("transferId", transferId).put("size", p.size))
+            } else {
+                activeTransfers.value = activeTransfers.value.filter { it.transferId != transferId }
             }
         } catch (e: Exception) {
+            activeTransfers.value = activeTransfers.value.filter { it.transferId != transferId }
+            val rec = TransferRecord(transferId.toLong(), p.name, p.size, "toMac", System.currentTimeMillis(), false)
+            recentTransfers.value = (listOf(rec) + recentTransfers.value).take(20)
             pendingPhonePushResult.remove(transferId)
             outgoing.remove(transferId)
             p.onResult(false, e.message ?: "send failed")
