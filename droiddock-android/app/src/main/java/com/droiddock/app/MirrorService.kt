@@ -129,12 +129,22 @@ class MirrorService : Service() {
             }
         }, null)
 
-        val metrics = DisplayMetrics()
         val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        @Suppress("DEPRECATION") wm.defaultDisplay.getRealMetrics(metrics)
-        val dpi = metrics.densityDpi
-        var w = metrics.widthPixels
-        var h = metrics.heightPixels
+        val dpi: Int
+        var w: Int
+        var h: Int
+        if (Build.VERSION.SDK_INT >= 30) {
+            val bounds = wm.currentWindowMetrics.bounds
+            w = bounds.width()
+            h = bounds.height()
+            dpi = resources.displayMetrics.densityDpi
+        } else {
+            val metrics = DisplayMetrics()
+            @Suppress("DEPRECATION") wm.defaultDisplay.getRealMetrics(metrics)
+            dpi = metrics.densityDpi
+            w = metrics.widthPixels
+            h = metrics.heightPixels
+        }
         val cap = 1280
         val longEdge = maxOf(w, h)
         if (longEdge > cap) {
@@ -185,8 +195,9 @@ class MirrorService : Service() {
         val h = pick.height and 1.inv()
 
         val surface = startEncoder(w, h, "camera")
-        camThread = HandlerThread("ddcam").also { it.start() }
-        val handler = Handler(camThread!!.looper)
+        val ht = HandlerThread("ddcam").also { it.start() }
+        camThread = ht
+        val handler = Handler(ht.looper)
 
         mgr.openCamera(camId, object : CameraDevice.StateCallback() {
             override fun onOpened(device: CameraDevice) {

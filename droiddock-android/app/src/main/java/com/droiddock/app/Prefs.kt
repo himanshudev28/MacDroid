@@ -19,9 +19,9 @@ object Prefs {
     fun load(ctx: Context): Pairing? {
         val sp = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
         val token = sp.getString("token", null) ?: return null
-        val ips = sp.getString("ips", "")!!.split(",").filter { it.isNotBlank() }
+        val ips = (sp.getString("ips", "") ?: "").split(",").filter { it.isNotBlank() }
         if (ips.isEmpty()) return null
-        return Pairing(ips, sp.getInt("port", 48484), token, sp.getString("macName", "Mac")!!)
+        return Pairing(ips, sp.getInt("port", 48484), token, sp.getString("macName", "Mac") ?: "Mac")
     }
 
     fun clear(ctx: Context) {

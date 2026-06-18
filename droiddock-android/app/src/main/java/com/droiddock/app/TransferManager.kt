@@ -137,12 +137,14 @@ object TransferManager {
 
     private fun uriFileName(ctx: Context, uri: Uri): String? =
         ctx.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-            if (c.moveToFirst()) c.getString(c.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME)) else null
+            val col = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (c.moveToFirst() && col >= 0) c.getString(col) else null
         }
 
     private fun uriFileSize(ctx: Context, uri: Uri): Long =
         ctx.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
-            if (c.moveToFirst()) c.getLong(c.getColumnIndexOrThrow(OpenableColumns.SIZE)) else 0L
+            val col = c.getColumnIndex(OpenableColumns.SIZE)
+            if (c.moveToFirst() && col >= 0) c.getLong(col) else 0L
         } ?: 0L
 
     /** Send a photo thumbnail (small, single frame) keyed by the request id. */

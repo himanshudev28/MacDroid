@@ -37,9 +37,13 @@ class NotifListener : NotificationListenerService() {
 
         // many apps re-post the same notification; only forward real changes
         val hash = "$title|$text"
-        if (!force && lastSent[sbn.key] == hash) return
-        lastSent[sbn.key] = hash
-        if (lastSent.size > 300) lastSent.remove(lastSent.keys.first())
+        val skip = synchronized(lastSent) {
+            if (!force && lastSent[sbn.key] == hash) return@synchronized true
+            lastSent[sbn.key] = hash
+            if (lastSent.size > 300) lastSent.remove(lastSent.keys.first())
+            false
+        }
+        if (skip) return
 
         val replyAction = findReplyAction(sbn.notification)
         if (replyAction != null) NotifStore.put(sbn.key, replyAction) else NotifStore.remove(sbn.key)
@@ -58,7 +62,7 @@ class NotifListener : NotificationListenerService() {
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
-        lastSent.remove(sbn.key)
+        synchronized(lastSent) { lastSent.remove(sbn.key) }
         NotifStore.remove(sbn.key)
         ConnectionManager.send(
             JSONObject().put("type", "notification-removed").put("key", sbn.key)

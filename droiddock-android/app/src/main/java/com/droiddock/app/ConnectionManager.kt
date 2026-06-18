@@ -383,9 +383,11 @@ object ConnectionManager {
 
     private fun setClipboard(text: String) {
         lastFromMac = text
-        val cm = appCtx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cm.setPrimaryClip(ClipData.newPlainText("DroidDock", text))
-        lastEvent.value = "clipboard ← Mac"
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            val cm = appCtx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("DroidDock", text))
+            lastEvent.value = "clipboard ← Mac"
+        }
     }
 
     private fun deviceName(): String =

@@ -68,6 +68,7 @@ object SmsRepo {
         require(address.isNotBlank() && text.isNotBlank()) { "empty message" }
         val sm = if (Build.VERSION.SDK_INT >= 31) {
             ctx.getSystemService(SmsManager::class.java)
+                ?: throw IllegalStateException("SmsManager unavailable")
         } else {
             @Suppress("DEPRECATION") SmsManager.getDefault()
         }
