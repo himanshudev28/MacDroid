@@ -55,6 +55,15 @@ object ConnectionManager {
         loopJob = scope.launch { connectLoop() }
     }
 
+    /** Cancel the running loop and restart immediately — use after QR/manual re-pair
+     *  so the new IPs are tried right away without waiting for the current attempt. */
+    fun restart(ctx: Context) {
+        appCtx = ctx.applicationContext
+        pausedUntil.value = Prefs.pausedUntil(appCtx)
+        loopJob?.cancel()
+        loopJob = scope.launch { connectLoop() }
+    }
+
     /** Forget-the-Mac teardown: stop the connect loop and drop any live socket.
      *  A later [ensureLoop] (e.g. after re-pairing) starts a fresh loop. */
     fun shutdown() {
@@ -126,6 +135,19 @@ object ConnectionManager {
                 if (attempt(ip, pairing)) {
                     linked = true
                     break
+                }
+            }
+            // Known IPs failed — broadcast on the LAN to find the Mac's current IP.
+            // Handles WiFi-switch without re-pairing: both devices on new network,
+            // Mac answers the broadcast, phone saves the fresh IP.
+            if (!linked) {
+                val discovered = discoverViaBroadcast(pairing.token, pairing.port + 1)
+                if (discovered != null && !pairing.ips.contains(discovered)) {
+                    lastEvent.value = "found Mac at $discovered"
+                    if (attempt(discovered, pairing)) {
+                        linked = true
+                        Prefs.save(appCtx, pairing.copy(ips = listOf(discovered) + pairing.ips.take(2)))
+                    }
                 }
             }
             backoff = if (linked) 2_000L else minOf(backoff * 2, 15_000L)
@@ -389,6 +411,30 @@ object ConnectionManager {
             lastEvent.value = "clipboard ← Mac"
         }
     }
+
+    /** Broadcast on 255.255.255.255:<discoveryPort> with the pairing token.
+     *  The Mac replies with "DROIDDOCK:HERE" from its current IP — we return that IP.
+     *  Returns null if nothing replies within 1.5 s (Mac not on this network). */
+    private fun discoverViaBroadcast(token: String, discoveryPort: Int): String? = try {
+        java.net.DatagramSocket().use { socket ->
+            socket.broadcast = true
+            socket.soTimeout = 1500
+            val payload = "DROIDDOCK:DISCOVER:$token".toByteArray()
+            socket.send(
+                java.net.DatagramPacket(
+                    payload, payload.size,
+                    java.net.InetAddress.getByName("255.255.255.255"),
+                    discoveryPort
+                )
+            )
+            val buf = ByteArray(64)
+            val resp = java.net.DatagramPacket(buf, buf.size)
+            socket.receive(resp)
+            if (String(resp.data, 0, resp.length).trim() == "DROIDDOCK:HERE")
+                resp.address.hostAddress
+            else null
+        }
+    } catch (_: Exception) { null }
 
     private fun deviceName(): String =
         "${Build.MANUFACTURER} ${Build.MODEL}".trim().ifEmpty { "Android" }

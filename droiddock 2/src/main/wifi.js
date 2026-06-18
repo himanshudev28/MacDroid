@@ -6,11 +6,13 @@ import { randomUUID } from 'node:crypto'
 import { networkInterfaces, hostname } from 'node:os'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { createSocket } from 'node:dgram'
 
 const PORT = 48484
 
 let config = null
 let wss = null
+let udp = null  // UDP discovery socket (port+1): phone broadcasts token → Mac replies HERE
 let phone = null // { socket, name }
 let onStatus = () => {}
 let onEvent = () => {}
@@ -256,6 +258,18 @@ export function start({ statusCb, eventCb, forwardCb, phoneFileCb }) {
 
   wss = new WebSocketServer({ port: config.port, host: '0.0.0.0' })
 
+  // UDP discovery: phone broadcasts "DROIDDOCK:DISCOVER:<token>" on port+1 when
+  // it can't reach known IPs (e.g. after both devices switched to a different WiFi).
+  // We reply "DROIDDOCK:HERE" so the phone learns our current IP without re-pairing.
+  udp = createSocket('udp4')
+  udp.on('message', (msg, rinfo) => {
+    if (msg.toString().trim() === `DROIDDOCK:DISCOVER:${config.token}`) {
+      udp.send(Buffer.from('DROIDDOCK:HERE'), rinfo.port, rinfo.address)
+    }
+  })
+  udp.on('error', () => {}) // ignore bind errors (port busy etc.)
+  udp.bind(config.port + 1, '0.0.0.0')
+
   wss.on('connection', (socket) => {
     let authed = false
     let name = 'Android'
@@ -384,9 +398,7 @@ export function start({ statusCb, eventCb, forwardCb, phoneFileCb }) {
 
 export function stop() {
   clearInterval(watcher)
-  try {
-    wss?.close()
-  } catch {
-    /* noop */
-  }
+  try { wss?.close() } catch { /* noop */ }
+  try { udp?.close() } catch { /* noop */ }
+  udp = null
 }

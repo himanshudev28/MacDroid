@@ -136,6 +136,9 @@ private fun DroidDockScreen() {
         Prefs.save(ctx, pairing)
         paired = true
         BridgeService.start(ctx)
+        // Restart the loop immediately so new IPs are tried right away,
+        // not after the current slow connection attempt times out.
+        ConnectionManager.restart(ctx)
         Toast.makeText(ctx, "Paired with ${pairing.macName}", Toast.LENGTH_SHORT).show()
     }
 
