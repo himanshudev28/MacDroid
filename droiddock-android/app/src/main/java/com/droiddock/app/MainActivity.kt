@@ -46,6 +46,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.content.pm.PackageManager
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.json.JSONObject
 
 // ── Palette (aligned with the Mac app) ───────────────────────────────────
@@ -65,11 +68,16 @@ private val Blue       = Color(0xFF5B8FFF)
 private val Orange     = Color(0xFFF0934C)
 
 class MainActivity : ComponentActivity() {
+    private val pairFlow = MutableStateFlow<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         if (Prefs.load(this) != null) BridgeService.start(this)
+        intent?.data?.toString()?.takeIf { it.startsWith("droiddock://pair") }
+            ?.let { pairFlow.value = it }
         setContent {
+            val pairUri by pairFlow.collectAsState()
             MaterialTheme(
                 colorScheme = darkColorScheme(
                     background      = Ink,
@@ -84,13 +92,19 @@ class MainActivity : ComponentActivity() {
                     outline         = LineColor,
                     outlineVariant  = LineColor.copy(alpha = 0.6f),
                 )
-            ) { DroidDockScreen() }
+            ) { DroidDockScreen(pairUri) { pairFlow.value = null } }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        intent.data?.toString()?.takeIf { it.startsWith("droiddock://pair") }
+            ?.let { pairFlow.value = it }
     }
 }
 
 @Composable
-private fun DroidDockScreen() {
+private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = {}) {
     val ctx         = LocalContext.current
     val connected   by ConnectionManager.connected.collectAsState()
     val macName     by ConnectionManager.macName.collectAsState()
@@ -109,7 +123,6 @@ private fun DroidDockScreen() {
     var showManual  by remember { mutableStateOf(false) }
     var showGuide   by remember { mutableStateOf(false) }
     var showPause   by remember { mutableStateOf(false) }
-    var showScan    by remember { mutableStateOf(false) }
     var sending     by remember { mutableStateOf(false) }
 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -125,19 +138,10 @@ private fun DroidDockScreen() {
         }
     }
 
-    val cameraPermLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) showScan = true
-        else Toast.makeText(ctx, "Camera permission needed to scan QR", Toast.LENGTH_SHORT).show()
-    }
-
     val applyPairing: (Pairing) -> Unit = { pairing ->
         Prefs.save(ctx, pairing)
         paired = true
         BridgeService.start(ctx)
-        // Restart the loop immediately so new IPs are tried right away,
-        // not after the current slow connection attempt times out.
         ConnectionManager.restart(ctx)
         Toast.makeText(ctx, "Paired with ${pairing.macName}", Toast.LENGTH_SHORT).show()
     }
@@ -153,19 +157,55 @@ private fun DroidDockScreen() {
         }
     }
 
-    val handleQr: (String) -> Unit = { qrText ->
+    val handleQr: (String) -> Unit = { raw ->
         runCatching {
-            val o   = JSONObject(qrText)
-            val ips = mutableListOf<String>()
-            val arr = o.optJSONArray("ips")
-            if (arr != null) for (i in 0 until arr.length()) ips.add(arr.getString(i))
-            require(ips.isNotEmpty() && o.has("token"))
-            Pairing(ips, o.optInt("port", 48484), o.getString("token"), o.optString("name", "Mac"))
+            if (raw.startsWith("droiddock://pair")) {
+                val uri = Uri.parse(raw)
+                val ips = (uri.getQueryParameter("ips") ?: "")
+                    .split(",").filter { it.isNotBlank() }
+                val token = uri.getQueryParameter("token") ?: ""
+                require(ips.isNotEmpty() && token.isNotEmpty())
+                Pairing(
+                    ips,
+                    uri.getQueryParameter("port")?.toIntOrNull() ?: 48484,
+                    token,
+                    uri.getQueryParameter("name") ?: "Mac"
+                )
+            } else {
+                val o   = JSONObject(raw)
+                val ips = mutableListOf<String>()
+                val arr = o.optJSONArray("ips")
+                if (arr != null) for (i in 0 until arr.length()) ips.add(arr.getString(i))
+                require(ips.isNotEmpty() && o.has("token"))
+                Pairing(ips, o.optInt("port", 48484), o.getString("token"), o.optString("name", "Mac"))
+            }
         }.onSuccess { pairing ->
             applyPairing(pairing)
         }.onFailure {
             Toast.makeText(ctx, "Not a DroidDock QR code", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    LaunchedEffect(pairUri) {
+        pairUri ?: return@LaunchedEffect
+        clearPairUri()
+        handleQr(pairUri)
+    }
+
+    // Use ZXing's bundled CaptureActivity — avoids BarcodeView/Compose lifecycle race
+    val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
+        result.contents?.let { handleQr(it) }
+    }
+
+    val cameraPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) scanLauncher.launch(ScanOptions().apply {
+            setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+            setBeepEnabled(false)
+            setOrientationLocked(false)
+        })
+        else Toast.makeText(ctx, "Camera permission needed to scan QR", Toast.LENGTH_SHORT).show()
     }
 
     val permLauncher = rememberLauncherForActivityResult(
@@ -180,17 +220,6 @@ private fun DroidDockScreen() {
         if (Build.VERSION.SDK_INT >= 33) {
             notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-    }
-
-    // ── Full-screen overlays take priority ───────────────────────────
-    if (showScan) {
-        ScanScreen(
-            onResult = { qrText -> showScan = false; handleQr(qrText) },
-            onManual = { showScan = false; showManual = true },
-            onBack   = { showScan = false },
-            onHelp   = { showScan = false; showGuide = true }
-        )
-        return
     }
 
     if (showGuide) {
@@ -245,7 +274,11 @@ private fun DroidDockScreen() {
                 onClick = {
                     val hasCam = ctx.checkSelfPermission(Manifest.permission.CAMERA) ==
                             PackageManager.PERMISSION_GRANTED
-                    if (hasCam) showScan = true
+                    if (hasCam) scanLauncher.launch(ScanOptions().apply {
+                        setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                        setBeepEnabled(false)
+                        setOrientationLocked(false)
+                    })
                     else cameraPermLauncher.launch(Manifest.permission.CAMERA)
                 },
                 modifier = Modifier.fillMaxWidth().height(52.dp),

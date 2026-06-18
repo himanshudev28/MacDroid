@@ -135,7 +135,8 @@ export const photoThumb = (id, kind) => transfer.thumb(id, kind)
 
 export function pairingPayload() {
   const s = status()
-  return JSON.stringify({ v: 1, name: s.host, ips: s.ips, port: s.port, token: s.token })
+  // URL scheme so system cameras (Samsung/Google Lens) show "Open DroidDock" directly
+  return `droiddock://pair?v=1&name=${encodeURIComponent(s.host)}&ips=${s.ips.join(',')}&port=${s.port}&token=${s.token}`
 }
 
 function showNotification(msg) {
