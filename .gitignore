@@ -22,3 +22,9 @@ droiddock-android/.cxx/
 
 # ---- logs / misc ----
 *.log
+
+# ---- Claude Code skill files ----
+*_SKILL.md
+SKILL.md
+skills-lock.json
+videos/
