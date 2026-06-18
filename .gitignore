@@ -28,3 +28,6 @@ droiddock-android/.cxx/
 SKILL.md
 skills-lock.json
 videos/
+
+# ---- graphify knowledge graph (local only) ----
+graphify-out/
