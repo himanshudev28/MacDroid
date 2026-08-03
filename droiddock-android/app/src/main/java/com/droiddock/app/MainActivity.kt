@@ -24,6 +24,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -49,6 +50,7 @@ import android.content.pm.PackageManager
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 private val Ink        = Color(0xFF0D0D12)
@@ -110,6 +112,7 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
     val event       by ConnectionManager.lastEvent.collectAsState()
     val pausedUntil by ConnectionManager.pausedUntil.collectAsState()
     val isPaused    = pausedUntil != 0L
+    val macCaps     by ConnectionManager.macCaps.collectAsState()
 
     var paired      by remember { mutableStateOf(Prefs.load(ctx) != null) }
     var notifAccess by remember { mutableStateOf(notifAccessGranted(ctx)) }
@@ -126,6 +129,13 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
     val activeTransfers by TransferManager.activeTransfers.collectAsState()
     val recentTransfers by TransferManager.recentTransfers.collectAsState()
     var currentTab      by remember { mutableStateOf("home") }
+
+    // The "macfs" tab only exists while the connected Mac advertises the "macfs" cap
+    // (Phase 19). If it disappears — reconnect to an older Mac build — bounce off the
+    // tab immediately rather than leaving it selected but absent from the nav bar.
+    LaunchedEffect(macCaps) {
+        if (currentTab == "macfs" && !macCaps.contains("macfs")) currentTab = "home"
+    }
 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -260,13 +270,18 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
                 modifier = Modifier
                     .navigationBarsPadding()
             ) {
-                val navItems = listOf(
-                    Triple("home",     "Home",     Icons.Filled.Home),
-                    Triple("connect",  "Connect",  Icons.Outlined.WifiTethering),
-                    Triple("files",    "Files",    Icons.Outlined.Folder),
-                    Triple("mirror",   "Mirror",   Icons.Outlined.ScreenShare),
-                    Triple("settings", "Settings", Icons.Outlined.Settings),
-                )
+                val navItems = buildList {
+                    add(Triple("home",     "Home",     Icons.Filled.Home))
+                    add(Triple("connect",  "Connect",  Icons.Outlined.WifiTethering))
+                    add(Triple("files",    "Files",    Icons.Outlined.Folder))
+                    // Phase 19 — entirely absent (not just disabled) unless the connected
+                    // Mac advertised the "macfs" cap in its `welcome`.
+                    if (macCaps.contains("macfs")) {
+                        add(Triple("macfs", "Mac Files", Icons.Outlined.LaptopMac))
+                    }
+                    add(Triple("mirror",   "Mirror",   Icons.Outlined.ScreenShare))
+                    add(Triple("settings", "Settings", Icons.Outlined.Settings))
+                }
                 navItems.forEach { (id, label, icon) ->
                     NavigationBarItem(
                         selected = currentTab == id,
@@ -340,6 +355,7 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
                         ).show()
                     },
                 )
+                "macfs" -> MacFilesTab(connected = connected)
                 "mirror" -> MirrorTab(
                     connected   = connected,
                     overlayOk   = overlayOk,
@@ -1136,6 +1152,188 @@ private fun RecentTransferRow(record: TransferRecord) {
             Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Ok, modifier = Modifier.size(18.dp))
         } else {
             Icon(Icons.Default.Error, contentDescription = null, tint = Bad, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+// ── Mac Files tab (Phase 19 — reverse file browsing) ───────────────────────
+
+private fun macFsEntryPath(base: String, entry: JSONObject): String {
+    val name = entry.optString("name")
+    return if (base.isEmpty()) name else "$base/$name"
+}
+
+@Composable
+private fun MacFilesTab(connected: Boolean) {
+    val ctx   = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var path        by remember { mutableStateOf("") }
+    var entries     by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var loading     by remember { mutableStateOf(false) }
+    var error       by remember { mutableStateOf<String?>(null) }
+    var pullingPath by remember { mutableStateOf<String?>(null) }
+    var pullFrac    by remember { mutableStateOf(0f) }
+
+    LaunchedEffect(path, connected) {
+        if (!connected) {
+            error = "Not connected to Mac"
+            entries = emptyList()
+            return@LaunchedEffect
+        }
+        loading = true
+        error = null
+        runCatching { ConnectionManager.macFsList(path) }
+            .onSuccess { arr ->
+                entries = (0 until arr.length()).map { arr.getJSONObject(it) }
+            }
+            .onFailure { error = it.message ?: "Could not load folder" }
+        loading = false
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Spacer(Modifier.height(12.dp))
+        Text("Mac Files", color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp)
+        Spacer(Modifier.height(12.dp))
+
+        // Breadcrumb + up navigation
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (path.isNotEmpty()) {
+                IconButton(
+                    onClick = { path = path.substringBeforeLast('/', "") },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(Icons.Default.ArrowBack, "Up", tint = Fg, modifier = Modifier.size(16.dp))
+                }
+                Spacer(Modifier.width(6.dp))
+            }
+            Text(
+                if (path.isEmpty()) "Mac" else path,
+                color = Dim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+
+        when {
+            loading -> Box(
+                Modifier.fillMaxWidth().padding(vertical = 40.dp),
+                contentAlignment = Alignment.Center
+            ) { Text("Loading…", color = Dim, fontSize = 13.sp) }
+
+            error != null -> Box(
+                Modifier.fillMaxWidth().padding(vertical = 40.dp),
+                contentAlignment = Alignment.Center
+            ) { Text(error ?: "", color = Bad, fontSize = 13.sp) }
+
+            entries.isEmpty() -> Box(
+                Modifier.fillMaxWidth().padding(vertical = 40.dp),
+                contentAlignment = Alignment.Center
+            ) { Text("Empty folder", color = Dim, fontSize = 13.sp) }
+
+            else -> Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                color = Surface1,
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+                    entries.forEachIndexed { idx, entry ->
+                        if (idx > 0) RowDivider()
+                        val full = macFsEntryPath(path, entry)
+                        MacFsEntryRow(
+                            entry    = entry,
+                            pulling  = pullingPath == full,
+                            fraction = if (pullingPath == full) pullFrac else 0f,
+                            onOpen   = { if (entry.optBoolean("dir")) path = full },
+                            onPull   = {
+                                pullingPath = full
+                                pullFrac = 0f
+                                scope.launch {
+                                    val result = ConnectionManager.macFsPull(full) { received, total ->
+                                        pullFrac = if (total > 0)
+                                            (received.toFloat() / total.toFloat()).coerceIn(0f, 1f) else 0f
+                                    }
+                                    pullingPath = null
+                                    Toast.makeText(
+                                        ctx,
+                                        result.fold({ "Saved to Downloads" }, { e -> e.message ?: "Pull failed" }),
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun MacFsEntryRow(
+    entry:    JSONObject,
+    pulling:  Boolean,
+    fraction: Float,
+    onOpen:   () -> Unit,
+    onPull:   () -> Unit,
+) {
+    val isDir = entry.optBoolean("dir")
+    val name  = entry.optString("name")
+    val color = if (isDir) Blue else extColor(name)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp)
+            .clickable(enabled = isDir, onClick = onOpen),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .background(color.copy(alpha = 0.15f), RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (isDir) Icon(Icons.Outlined.Folder, null, tint = color, modifier = Modifier.size(20.dp))
+            else Text(extLabel(name), color = color,
+                fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                name, color = Fg, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
+            if (!isDir) {
+                Spacer(Modifier.height(2.dp))
+                Text(formatBytes(entry.optLong("size")), color = Dim, fontSize = 11.sp)
+            }
+            if (pulling) {
+                Spacer(Modifier.height(6.dp))
+                LinearProgressIndicator(
+                    progress = { fraction },
+                    modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
+                    color = Amber,
+                    trackColor = Surface3,
+                )
+            }
+        }
+        if (!isDir) {
+            if (pulling) {
+                Text("${(fraction * 100).toInt()}%", color = Amber, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            } else {
+                TonalChip("Pull", Amber, onPull)
+            }
         }
     }
 }

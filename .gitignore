@@ -16,6 +16,7 @@ droiddock-android/app/build/
 droiddock-android/**/build/
 droiddock-android/captures/
 droiddock-android/.cxx/
+Cross-platform design specs
 **/local.properties
 *.iml
 .idea/
@@ -31,3 +32,10 @@ videos/
 
 # ---- graphify knowledge graph (local only) ----
 graphify-out/
+
+# ---- droiddock-tauri: Rust build artifacts ----
+droiddock-tauri/src-tauri/target/
+
+# ---- throwaway Phase 0 spikes, and captured protocol corpus (may contain real personal data) ----
+spikes/
+droiddock-tauri/protocol-corpus/

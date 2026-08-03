@@ -1,0 +1,514 @@
+@import 'tailwindcss';
+
+/* ═══════════════════════════════════════════════════════════════════════
+   DroidDock design system — "a native Mac instrument with an Android heart"
+
+   Two voices, each with one job:
+   · --color-accent  — the USER's hand: everything interactive. Read at
+     runtime from the macOS system accent (appearance.rs), so the app
+     tints itself the way native Tahoe apps do.
+   · --color-link    — the PHONE's heartbeat: Android robot green,
+     reserved exclusively for link/live status (LED, "Linked over
+     Wi-Fi", live transfer pulses). Never on buttons, never decorative.
+
+   Type roles:
+   · display — ui-rounded (SF Pro Rounded): view titles, big numbers,
+     empty-state headings. The friendly-native voice.
+   · body    — SF Pro (system).
+   · mono    — SF Mono, demoted to REAL DATA only: paths, IPs, tokens,
+     sizes, timestamps. Never for decorative labels.
+   ══════════════════════════════════════════════════════════════════════ */
+
+@theme {
+  /* ─── Canvas layers (dark, default) — warm basalt, not blue-black ── */
+  --color-ink:     #161519;
+  --color-panel:   #1d1c21;
+  --color-panel2:  #242329;
+  --color-panel3:  #2d2c33;
+  --color-line:    rgba(255, 255, 255, 0.08);
+  --color-glow:    rgba(255, 255, 255, 0.03);
+
+  /* ─── Text ───────────────────────────────────────────────────────── */
+  --color-fg:      #f2f1ee;
+  --color-dim:     #a3a2ad;
+  --color-faint:   #6e6d79;
+
+  /* ─── The two voices ─────────────────────────────────────────────── */
+  /* Interactive accent — overwritten at runtime with the macOS system
+     accent color (see App.tsx / appearance.rs). */
+  --color-accent:  #0a84ff;
+  /* Android robot green — link/live status ONLY. */
+  --color-link:    #3ddc84;
+
+  /* ─── Semantic ───────────────────────────────────────────────────── */
+  --color-ok:      #30d158;
+  --color-bad:     #ff453a;
+  --color-warn:    #ffd60a;
+
+  /* ─── Typography ─────────────────────────────────────────────────── */
+  /* Zero-egress: no webfonts. ui-rounded resolves to SF Pro Rounded on
+     macOS — a native face with real personality. */
+  --font-display: ui-rounded, -apple-system, 'BlinkMacSystemFont', system-ui, sans-serif;
+  --font-body:    -apple-system, 'BlinkMacSystemFont', system-ui, sans-serif;
+  --font-mono:    ui-monospace, 'SF Mono', monospace;
+}
+
+/* ─── Light mode — warm paper, not clinical white ──────────────────── */
+@media (prefers-color-scheme: light) {
+  :root {
+    --color-ink:     #f3f2ef;
+    --color-panel:   #faf9f7;
+    --color-panel2:  #ffffff;
+    --color-panel3:  #edecea;
+    --color-line:    rgba(22, 21, 25, 0.09);
+    --color-glow:    rgba(0, 0, 0, 0.03);
+    --color-fg:      #1d1c21;
+    --color-dim:     #5f5e66;
+    --color-faint:   #8b8a92;
+    /* Robot green tuned darker for contrast on paper. */
+    --color-link:    #17914f;
+    --color-ok:      #248a3d;
+    --color-bad:     #d70015;
+    --color-warn:    #b25000;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+html,
+body {
+  /* Transparent so Layer 1's native NSVisualEffectView vibrancy can show
+     through wherever a panel (e.g. the sidebar) doesn't paint its own
+     opaque fill. Views with real content paint var(--color-ink)
+     themselves — see App.tsx — so they stay fully opaque, zero blur cost. */
+  background: transparent;
+}
+
+body {
+  color: var(--color-fg);
+  font-family: var(--font-body);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+/* ─── Quality floor: visible keyboard focus, everywhere ─────────────── */
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 60%, transparent);
+  outline-offset: 1px;
+  border-radius: 6px;
+}
+input:focus,
+textarea:focus {
+  outline: none; /* fields show focus via .field's border instead */
+}
+
+/* ═══ Component vocabulary — use these, don't reinvent per view ═══════ */
+
+/* Section label — replaces the old tracked-mono-uppercase eyebrows.
+   Sentence case, quiet, informational. */
+.label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-dim);
+  letter-spacing: 0.01em;
+}
+
+/* Real data (paths, IPs, tokens, sizes) — the only place mono lives. */
+.data {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Flat card — dense lists, table containers. */
+.card {
+  background: var(--color-panel);
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+}
+
+/* Raised card — focal content (pairing, now-playing, device hero). */
+.card-raised {
+  background: var(--color-panel2);
+  border: 1px solid var(--color-line);
+  border-radius: 16px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 1px 2px rgba(0, 0, 0, 0.25),
+    0 6px 20px rgba(0, 0, 0, 0.18);
+}
+@media (prefers-color-scheme: light) {
+  .card-raised {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.9),
+      0 1px 2px rgba(0, 0, 0, 0.06),
+      0 6px 20px rgba(0, 0, 0, 0.05);
+  }
+}
+
+/* Buttons — three tiers plus danger. Height 32px default. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease,
+    transform 0.06s ease, opacity 0.12s ease;
+  cursor: default;
+  user-select: none;
+}
+.btn:active {
+  transform: scale(0.985);
+}
+.btn:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.btn-primary {
+  background: var(--color-accent);
+  color: #fff;
+  border: 1px solid transparent;
+}
+.btn-primary:hover {
+  background: color-mix(in srgb, var(--color-accent) 88%, #fff);
+}
+
+.btn-secondary {
+  background: var(--color-panel3);
+  color: var(--color-fg);
+  border: 1px solid var(--color-line);
+}
+.btn-secondary:hover {
+  background: color-mix(in srgb, var(--color-panel3) 80%, var(--color-fg) 8%);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--color-dim);
+  border: 1px solid transparent;
+}
+.btn-ghost:hover {
+  background: var(--color-panel2);
+  color: var(--color-fg);
+}
+
+.btn-danger {
+  background: color-mix(in srgb, var(--color-bad) 14%, transparent);
+  color: var(--color-bad);
+  border: 1px solid color-mix(in srgb, var(--color-bad) 25%, transparent);
+}
+.btn-danger:hover {
+  background: color-mix(in srgb, var(--color-bad) 22%, transparent);
+}
+
+/* Compact icon-only button (toolbars, row actions). */
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  width: 28px;
+  border-radius: 8px;
+  color: var(--color-dim);
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.btn-icon:hover {
+  background: var(--color-panel3);
+  color: var(--color-fg);
+}
+
+/* Text/search fields. */
+.field {
+  background: color-mix(in srgb, var(--color-ink) 65%, var(--color-panel));
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  padding: 7px 11px;
+  font-size: 13px;
+  color: var(--color-fg);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.field::placeholder {
+  color: var(--color-faint);
+}
+.field:focus {
+  border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 15%, transparent);
+}
+
+/* List row — hover + selected states for dense lists. */
+.row {
+  border-radius: 10px;
+  transition: background-color 0.1s ease;
+}
+.row:hover {
+  background: var(--color-panel2);
+}
+.row-selected {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+.row-selected:hover {
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+}
+
+/* ─── Sidebar / toolbar glass (Layer 2) ───────────────────────────────
+   No backdrop-filter here on purpose: Layer 1 (native window vibrancy,
+   applied in Rust via tauri.conf.json's windowEffects) already supplies
+   the blur. This is just a translucent tint + inner-highlight painted
+   on top of it — cheap, static, never stacked or animated. ── */
+.glass-chrome {
+  background:
+    linear-gradient(
+      160deg,
+      rgba(255, 255, 255, 0.12) 0%,
+      rgba(255, 255, 255, 0.03) 22%,
+      rgba(255, 255, 255, 0) 45%,
+      rgba(255, 255, 255, 0) 75%,
+      rgba(255, 255, 255, 0.04) 100%
+    ),
+    color-mix(in srgb, var(--color-panel) 55%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset -1px 0 0 rgba(255, 255, 255, 0.05);
+}
+
+@media (prefers-color-scheme: light) {
+  .glass-chrome {
+    background:
+      linear-gradient(
+        160deg,
+        rgba(255, 255, 255, 0.55) 0%,
+        rgba(255, 255, 255, 0.12) 22%,
+        rgba(255, 255, 255, 0) 45%,
+        rgba(255, 255, 255, 0) 75%,
+        rgba(0, 0, 0, 0.02) 100%
+      ),
+      color-mix(in srgb, var(--color-panel) 55%, transparent);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.8),
+      inset -1px 0 0 rgba(0, 0, 0, 0.04);
+  }
+}
+
+/* Accessibility: WebKit has no prefers-reduced-transparency media query
+   (verified unsupported through Safari 27 / iOS 26.5), so this is set from
+   a native NSWorkspace read in Rust (see appearance.rs) instead of CSS. */
+[data-reduce-transparency='true'] .glass-chrome {
+  background: var(--color-panel);
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .led,
+  .rise,
+  .rise-fast,
+  .ping-soft,
+  .ping-soft-center,
+  .spinner,
+  .tab-line,
+  .link-thread {
+    animation: none !important;
+  }
+}
+
+/* ─── macOS drag regions ──────────────────────────────────────────── */
+.drag    { -webkit-app-region: drag; }
+.no-drag { -webkit-app-region: no-drag; }
+
+/* ─── Glass materials (Layer 2, CSS-only) ──────────────────────────────
+   For floating chrome with no native vibrancy underneath it (popovers,
+   modals). Capped at 8–12px blur; one per view, never stacked/animated. */
+.glass {
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(10px) saturate(150%);
+  -webkit-backdrop-filter: blur(10px) saturate(150%);
+}
+
+.glass-dim {
+  background: rgba(255, 255, 255, 0.025);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.glass-heavy {
+  background: rgba(18, 17, 20, 0.82);
+  backdrop-filter: blur(12px) saturate(150%);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+}
+@media (prefers-color-scheme: light) {
+  .glass-heavy {
+    background: rgba(250, 249, 247, 0.85);
+  }
+}
+
+[data-reduce-transparency='true'] .glass,
+[data-reduce-transparency='true'] .glass-dim,
+[data-reduce-transparency='true'] .glass-heavy {
+  background: var(--color-panel2);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* Inner-edge highlight — glass specular */
+.luminous {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.18);
+}
+
+.luminous-sm {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* Floating shadows */
+.float-sm {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.30),
+    0 4px 12px rgba(0, 0, 0, 0.20);
+}
+
+.float-md {
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.35),
+    0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.float-lg {
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.40),
+    0 16px 48px rgba(0, 0, 0, 0.30);
+}
+
+/* ─── Link heartbeat (the phone-is-alive pulse) ──────────────────────
+   Green by definition: this animation only ever means "linked". */
+@keyframes led {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-link) 45%, transparent);
+  }
+  55% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-link) 0%, transparent);
+  }
+}
+.led { animation: led 2.4s ease-in-out infinite; }
+
+/* The Link thread — the signature motif. A dashed thread that flows
+   between the two device nodes while the phone is linked. */
+@keyframes thread-flow {
+  to { stroke-dashoffset: -12; }
+}
+.link-thread {
+  animation: thread-flow 1.6s linear infinite;
+}
+
+/* ─── Row / card entrance ─────────────────────────────────────────── */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+.rise { animation: rise 0.28s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+@keyframes rise-fast {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.rise-fast { animation: rise-fast 0.18s cubic-bezier(0.2, 0.8, 0.3, 1) both; }
+
+/* ─── Radar / waiting ring ────────────────────────────────────────── */
+@keyframes ping-soft {
+  0%      { transform: scale(0.88); opacity: 0.55; }
+  75%, 100% { transform: scale(1.65); opacity: 0; }
+}
+.ping-soft { animation: ping-soft 2.2s cubic-bezier(0, 0, 0.2, 1) infinite; }
+
+@keyframes ping-soft-center {
+  0%      { transform: translate(-50%, 0) scale(0.88); opacity: 0.7; }
+  70%     { transform: translate(-50%, 0) scale(1.45); opacity: 0.1; }
+  100%    { transform: translate(-50%, 0) scale(0.88); opacity: 0; }
+}
+.ping-soft-center { animation: ping-soft-center 1.8s ease-out infinite; }
+
+/* ─── Spinner ─────────────────────────────────────────────────────── */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spinner { animation: spin 0.75s linear infinite; }
+
+/* ─── Tab active pill underline ──────────────────────────────────── */
+@keyframes tab-in {
+  from { transform: scaleX(0.4); opacity: 0; }
+  to   { transform: scaleX(1);   opacity: 1; }
+}
+.tab-line {
+  animation: tab-in 0.18s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* ─── Scrollbar — macOS-style thin ───────────────────────────────── */
+::-webkit-scrollbar               { width: 4px; height: 4px; }
+::-webkit-scrollbar-track         { background: transparent; }
+::-webkit-scrollbar-thumb         {
+  background: color-mix(in srgb, var(--color-fg) 14%, transparent);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover   {
+  background: color-mix(in srgb, var(--color-fg) 24%, transparent);
+}
+::-webkit-scrollbar-corner        { background: transparent; }
+
+/* ─── Range slider (vol + seek) — accent thumb, hairline track ───── */
+.vol-slider,
+.seek-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 3px;
+  background: transparent;
+  outline: none;
+  cursor: pointer;
+}
+.vol-slider::-webkit-slider-runnable-track,
+.seek-slider::-webkit-slider-runnable-track {
+  height: 3px;
+  background: color-mix(in srgb, var(--color-fg) 12%, transparent);
+  border-radius: 99px;
+}
+.vol-slider::-webkit-slider-thumb,
+.seek-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  border: 2px solid var(--color-panel);
+  margin-top: -5px;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.vol-slider:hover::-webkit-slider-thumb,
+.seek-slider:hover::-webkit-slider-thumb {
+  transform: scale(1.2);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-accent) 45%, transparent);
+}

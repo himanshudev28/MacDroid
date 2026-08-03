@@ -22,17 +22,33 @@ import okhttp3.WebSocketListener
 import okio.ByteString
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 object ConnectionManager {
     // Capabilities this companion advertises to the Mac (Phase 6a app-link transport).
-    private val CAPS = listOf("info", "fs", "photos", "shot")
+    // "photosync" (Phase 18) — Mac only expects `photos-changed` pings if this is present.
+    private val CAPS = listOf("info", "fs", "photos", "shot", "photosync")
 
     val connected = MutableStateFlow(false)
     val macName = MutableStateFlow<String?>(null)
     val lastEvent = MutableStateFlow("idle")
     // 0 = active; Long.MAX_VALUE = until resume; else epoch-ms deadline (auto-resume).
     val pausedUntil = MutableStateFlow(0L)
+    // Phase 19 — capabilities the connected Mac advertised in its `welcome` (e.g. "macfs").
+    // Empty for an older Mac build that doesn't send `caps` at all.
+    val macCaps = MutableStateFlow<List<String>>(emptyList())
+
+    // Phase 19 reverse file browsing: phone-originated mac-fs-* request/reply registry.
+    // "pfs"-prefixed reqIds are a namespace deliberately separate from the Mac's own
+    // numeric reqIds and from TransferManager's "pp${seq}" phone-push reqIds, so an
+    // incoming mac-fs-* reply can never be misrouted into the wrong pending-table on
+    // either side.
+    private val macFsSeq = AtomicInteger(1)
+    private fun nextMacFsReqId() = "pfs${macFsSeq.getAndIncrement()}"
+    private val pendingMacFs = ConcurrentHashMap<String, CompletableDeferred<JSONObject>>()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var loopJob: Job? = null
@@ -180,6 +196,9 @@ object ConnectionManager {
                         ws = webSocket
                         connected.value = true
                         macName.value = msg.optString("name", pairing.macName)
+                        macCaps.value = msg.optJSONArray("caps")?.let { arr ->
+                            List(arr.length()) { i -> arr.optString(i) }
+                        } ?: emptyList()
                         lastEvent.value = "linked"
                         TransferManager.attach(appCtx, webSocket)
                         MediaRemote.push()
@@ -228,6 +247,19 @@ object ConnectionManager {
                     "fs-pull", "fs-push-begin", "fs-push-done", "fs-cancel",
                     "phone-push", "phone-push-result" ->
                         TransferManager.onControl(msg)
+                    "mac-fs-list-result", "mac-fs-list-error", "mac-fs-pull-begin" -> {
+                        pendingMacFs.remove(msg.optString("reqId"))?.complete(msg)
+                    }
+                    "mac-fs-pull-done" -> TransferManager.onMacFsPullControl(msg)
+                    "mac-fs-pull-error" -> {
+                        // Arrives either before a transfer begins (still in this registry,
+                        // e.g. a bad path) or mid-transfer after mac-fs-pull-begin already
+                        // handed off to TransferManager — the message has no transferId to
+                        // tell us which, so check both in order.
+                        val pending = pendingMacFs.remove(msg.optString("reqId"))
+                        if (pending != null) pending.complete(msg)
+                        else TransferManager.onMacFsPullControl(msg)
+                    }
                     "photos-list" -> respond(webSocket, msg, "photos-list") {
                         it.put("items", PhotoRepo.list(appCtx, msg.optInt("offset", 0), msg.optInt("limit", 500)))
                     }
@@ -336,6 +368,11 @@ object ConnectionManager {
             connected.value = false
             lastEvent.value = "disconnected"
             TransferManager.detach() // abort transfers; JSON features recover on reconnect
+            // Fail any mac-fs-list/mac-fs-pull call still waiting on a reply so it doesn't
+            // hang forever; a generic "-error" type satisfies either caller's check below.
+            val dropped = JSONObject().put("type", "mac-fs-link-error").put("error", "link dropped")
+            pendingMacFs.values.forEach { it.complete(dropped) }
+            pendingMacFs.clear()
         }
     }
 
@@ -378,6 +415,42 @@ object ConnectionManager {
 
     fun sendFileToMac(uri: android.net.Uri, ctx: Context, onResult: (Boolean, String?) -> Unit) =
         TransferManager.pushToMac(uri, ctx, onResult)
+
+    /** Phase 19 — list a Mac folder (phone-initiated; awaits mac-fs-list-result/-error). */
+    suspend fun macFsList(path: String): JSONArray {
+        val socket = ws ?: throw IllegalStateException("Not connected to Mac")
+        val reqId = nextMacFsReqId()
+        val deferred = CompletableDeferred<JSONObject>()
+        pendingMacFs[reqId] = deferred
+        socket.send(JSONObject().put("type", "mac-fs-list").put("reqId", reqId).put("path", path).toString())
+        val reply = deferred.await()
+        if (reply.optString("type").endsWith("-error")) {
+            throw Exception(reply.optString("error").ifEmpty { "Could not list folder" })
+        }
+        return reply.optJSONArray("entries") ?: JSONArray()
+    }
+
+    /** Phase 19 — pull a file from the Mac into Downloads. Awaits mac-fs-pull-begin here,
+     *  then hands the binary receive off to TransferManager (which owns the Downloads-folder
+     *  write + progress), and that resolves once mac-fs-pull-done/-error arrives. */
+    suspend fun macFsPull(
+        path: String,
+        onProgress: (bytesReceived: Long, totalBytes: Long) -> Unit
+    ): Result<File> {
+        val socket = ws ?: return Result.failure(IllegalStateException("Not connected to Mac"))
+        val reqId = nextMacFsReqId()
+        val deferred = CompletableDeferred<JSONObject>()
+        pendingMacFs[reqId] = deferred
+        socket.send(JSONObject().put("type", "mac-fs-pull").put("reqId", reqId).put("path", path).toString())
+        val begin = deferred.await()
+        if (begin.optString("type").endsWith("-error")) {
+            return Result.failure(Exception(begin.optString("error").ifEmpty { "Pull failed" }))
+        }
+        val transferId = begin.optInt("transferId")
+        val size = begin.optLong("size")
+        val name = path.substringAfterLast('/').ifEmpty { "file" }
+        return TransferManager.receiveMacFsPull(reqId, transferId, size, name, onProgress)
+    }
 
     fun sendClipboardText(text: String): Boolean {
         if (text.isEmpty()) return false

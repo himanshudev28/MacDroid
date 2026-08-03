@@ -14,6 +14,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.provider.MediaStore
 import android.provider.Telephony
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +29,7 @@ class BridgeService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val handler = Handler(Looper.getMainLooper())
     private var observing = false
+    private var observingPhotos = false
 
     private val notifySms = Runnable {
         ConnectionManager.send(JSONObject().put("type", "sms-changed"))
@@ -37,6 +39,22 @@ class BridgeService : Service() {
         override fun onChange(selfChange: Boolean) {
             handler.removeCallbacks(notifySms)
             handler.postDelayed(notifySms, 800)
+        }
+    }
+
+    // Phase 18 — no item IDs are sent; the phone tracks no sync cursor at all.
+    // This is just a "something changed" doorbell. The Mac re-lists photos via
+    // the existing photos-list request and diffs against its own ledger, so a
+    // burst of writes (burst-mode shot, video finalize + thumbnail write, etc.)
+    // only needs to be debounced down to one wake-up, not deduplicated by ID.
+    private val notifyPhotos = Runnable {
+        ConnectionManager.send(JSONObject().put("type", "photos-changed"))
+    }
+
+    private val photosObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean) {
+            handler.removeCallbacks(notifyPhotos)
+            handler.postDelayed(notifyPhotos, 800)
         }
     }
 
@@ -70,6 +88,17 @@ class BridgeService : Service() {
                 observing = true
             }
         }
+        if (!observingPhotos) {
+            runCatching {
+                contentResolver.registerContentObserver(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, photosObserver
+                )
+                contentResolver.registerContentObserver(
+                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, photosObserver
+                )
+                observingPhotos = true
+            }
+        }
         return START_STICKY
     }
 
@@ -77,7 +106,9 @@ class BridgeService : Service() {
 
     override fun onDestroy() {
         if (observing) runCatching { contentResolver.unregisterContentObserver(smsObserver) }
+        if (observingPhotos) runCatching { contentResolver.unregisterContentObserver(photosObserver) }
         handler.removeCallbacks(notifySms)
+        handler.removeCallbacks(notifyPhotos)
         scope.cancel()
         super.onDestroy()
     }

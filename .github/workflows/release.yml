@@ -10,25 +10,38 @@ permissions:
   contents: write
 
 jobs:
+  # Builds the Tauri rewrite (droiddock-tauri/app) — the Electron app
+  # (droiddock 2/) is retired from this job once Phase 16 parity validation
+  # passes; until then it stays buildable locally, just not in CI.
   mac:
     name: Build macOS app
     runs-on: macos-14
-    defaults:
-      run:
-        working-directory: 'droiddock 2'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm ci
-      - run: npm run build
-      # Unsigned, zipped, for both Apple Silicon and Intel.
-      - run: npx electron-builder --mac zip --arm64 --x64 -c.mac.identity=null
-      - name: Publish macOS zips to the release
-        uses: softprops/action-gh-release@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
         with:
-          files: 'droiddock 2/dist/*.zip'
+          workspaces: droiddock-tauri/app/src-tauri -> target
+      - name: Install frontend dependencies
+        working-directory: droiddock-tauri/app
+        run: npm ci
+      # Unsigned/ad-hoc, right-click-to-open — matches the Electron job's
+      # `-c.mac.identity=null` precedent; notarization is a paid decision,
+      # not made yet (see checkpoint.md's open questions).
+      - name: Build & publish via tauri-action
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: droiddock-tauri/app
+          tagName: ${{ github.ref_name }}
+          releaseName: 'DroidDock ${{ github.ref_name }}'
+          releaseBody: 'See the assets below to download this version.'
+          releaseDraft: false
+          prerelease: false
 
   android:
     name: Build Android APK

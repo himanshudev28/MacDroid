@@ -3,6 +3,7 @@ package com.droiddock.app
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -57,6 +58,13 @@ object TransferManager {
     private val incoming = ConcurrentHashMap<Int, PushReceiver>() // Mac → phone
     private val outgoing = ConcurrentHashMap<Int, Job>()           // phone → Mac (Mac-requested pull)
 
+    // Phase 19 reverse file browsing: mac-fs-pull downloads (Mac → phone, phone-initiated).
+    // Kept separate from `incoming` (which serves Mac-initiated fs-push) since transferId
+    // here is allocated independently by the Mac; onBinary checks both maps.
+    private val incomingMacFs = ConcurrentHashMap<Int, MacFsPullReceiver>()      // transferId → receiver
+    private data class MacFsPullEntry(val transferId: Int, val completion: CompletableDeferred<Result<File>>)
+    private val pendingMacFsPull = ConcurrentHashMap<String, MacFsPullEntry>()  // reqId → awaiting completion
+
     // Phone-initiated push to Mac
     private data class PendingPhonePush(val uri: Uri, val name: String, val size: Long, val onResult: (Boolean, String?) -> Unit)
     private val pendingPhonePush = ConcurrentHashMap<String, PendingPhonePush>()     // reqId → pending
@@ -91,6 +99,10 @@ object TransferManager {
         pendingPhonePush.clear()
         pendingPhonePushResult.values.forEach { it(false, "link dropped") }
         pendingPhonePushResult.clear()
+        incomingMacFs.values.forEach { it.abort() }
+        incomingMacFs.clear()
+        pendingMacFsPull.values.forEach { it.completion.complete(Result.failure(Exception("link dropped"))) }
+        pendingMacFsPull.clear()
     }
 
     private fun send(obj: JSONObject) {
@@ -222,7 +234,82 @@ object TransferManager {
         if (bytes.size < HEADER) return
         if ((bytes[0].toInt() and 0xff) != KIND_DATA) return
         val tid = beInt(bytes, 1)
-        incoming[tid]?.write(bytes.substring(HEADER))
+        val payload = bytes.substring(HEADER)
+        incoming[tid]?.write(payload)
+        incomingMacFs[tid]?.write(payload)
+    }
+
+    /* ---- mac-fs-pull: phone-initiated download from the Mac (Phase 19) ---- */
+
+    /** Registers a receiver for an in-progress mac-fs-pull download and suspends until
+     *  [onMacFsPullControl] reports mac-fs-pull-done/-error. Bytes land in the same
+     *  Downloads folder existing Mac→phone pushes use ([FileRepo.uniqueDest] avoids
+     *  overwriting a same-named file already there). */
+    suspend fun receiveMacFsPull(
+        reqId: String,
+        transferId: Int,
+        size: Long,
+        name: String,
+        onProgress: (bytesReceived: Long, totalBytes: Long) -> Unit
+    ): Result<File> {
+        val dest = FileRepo.uniqueDest(File("/sdcard/Download/"), name)
+        incomingMacFs[transferId] = MacFsPullReceiver(dest, size, onProgress)
+        val completion = CompletableDeferred<Result<File>>()
+        pendingMacFsPull[reqId] = MacFsPullEntry(transferId, completion)
+        return completion.await()
+    }
+
+    /** Handles mac-fs-pull-done / mac-fs-pull-error once a download is underway — routed
+     *  here from ConnectionManager since these gate a binary transfer's lifecycle, mirroring
+     *  how fs-push-begin/-done are handled above via [onControl]. */
+    fun onMacFsPullControl(msg: JSONObject) {
+        val entry = pendingMacFsPull.remove(msg.optString("reqId")) ?: return
+        val receiver = incomingMacFs.remove(entry.transferId)
+        if (msg.optString("type") == "mac-fs-pull-done") {
+            val file = receiver?.finish()
+            entry.completion.complete(
+                if (file != null) Result.success(file)
+                else Result.failure(IllegalStateException("no receiver for transfer"))
+            )
+        } else {
+            receiver?.abort()
+            entry.completion.complete(Result.failure(Exception(msg.optString("error").ifEmpty { "pull failed" })))
+        }
+    }
+
+    private class MacFsPullReceiver(
+        val dest: File,
+        val expected: Long,
+        val onProgress: (Long, Long) -> Unit
+    ) {
+        private val out = FileOutputStream(dest)
+        private var received = 0L
+        private var done = false
+
+        @Synchronized
+        fun write(payload: ByteString) {
+            if (done) return
+            try {
+                val a = payload.toByteArray()
+                out.write(a)
+                received += a.size
+                onProgress(received, expected)
+            } catch (_: Exception) { /* surfaced when mac-fs-pull-done/-error resolves */ }
+        }
+
+        @Synchronized
+        fun finish(): File {
+            if (!done) { done = true; runCatching { out.flush(); out.close() } }
+            return dest
+        }
+
+        @Synchronized
+        fun abort() {
+            if (done) return
+            done = true
+            runCatching { out.close() }
+            dest.delete()
+        }
     }
 
     /* ---- pull: phone → Mac ---- */
