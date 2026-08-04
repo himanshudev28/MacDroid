@@ -47,7 +47,9 @@ jobs:
 
             * **macOS** — DroidDock Tauri (`.dmg` / `.app`), built from `droiddock-tauri/`.
             * **Android** — `DroidDock-Android.apk`, built from `droiddock-android/`.
-          releaseDraft: false
+          # Drafted, not published: the build lands as a draft to inspect and
+          # release by hand. Flip to false once a run has been trusted end to end.
+          releaseDraft: true
           prerelease: false
 
   android:
