@@ -294,9 +294,10 @@ textarea:focus {
   }
 }
 
-/* ─── macOS drag regions ──────────────────────────────────────────── */
-.drag    { -webkit-app-region: drag; }
-.no-drag { -webkit-app-region: no-drag; }
+/* No `-webkit-app-region` rules live here on purpose. Despite the prefix it
+   is a Chromium extension WebKit never implemented, so it silently does
+   nothing in this WKWebView — window dragging uses Tauri's
+   `data-tauri-drag-region` attribute instead. */
 
 /* ─── Glass materials (Layer 2, CSS-only) ──────────────────────────────
    For floating chrome with no native vibrancy underneath it (popovers,

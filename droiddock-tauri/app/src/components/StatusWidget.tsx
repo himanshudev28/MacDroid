@@ -83,8 +83,7 @@ export default function StatusWidget() {
         <button
           onClick={() => openMainWindow()}
           title="Open DroidDock"
-          className="no-drag btn-icon shrink-0"
-          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+          className="btn-icon shrink-0"
         >
           <Icon name="monitor" size={12} />
         </button>
@@ -108,8 +107,7 @@ export default function StatusWidget() {
 
       {hasTrack && media ? (
         <div
-          className="no-drag flex items-center gap-2"
-          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+          className="flex items-center gap-2"
         >
           <div className="min-w-0 flex-1">
             <p className="truncate text-[11.5px] font-medium text-fg">{media.title || "Unknown"}</p>

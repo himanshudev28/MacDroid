@@ -71,7 +71,6 @@ import {
 
 export default function App() {
   const [view, setView] = useState<ViewId>("dashboard");
-  console.log("[DroidDock] Rendering App component with view:", view);
   const [config, setConfig] = useState<DroidConfig | null>(null);
   const [status, setStatus] = useState<WifiStatus>({ connected: false, phoneName: null });
   const [notifs, setNotifs] = useState<Notif[]>([]);
@@ -643,8 +642,8 @@ export default function App() {
           the column. */}
       {phoneOpen && (
         <aside className="glass-chrome flex w-64 shrink-0 flex-col border-r border-line">
-          <div className="drag h-7 shrink-0" style={{ WebkitAppRegion: "drag" } as React.CSSProperties} />
-          <div className="no-drag min-h-0 flex-1 p-3 pt-1">
+          <div data-tauri-drag-region className="h-7 shrink-0" />
+          <div className="min-h-0 flex-1 p-3 pt-1">
             <PhoneCard
               status={status}
               info={appDeviceInfo}
@@ -667,10 +666,12 @@ export default function App() {
         {/* Title bar: gives the traffic lights a drag region now that the
             sidebar no longer spans the window, and names the current view. */}
         <header
-          className="drag flex h-11 shrink-0 items-center gap-2 border-b border-line px-5"
-          style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+          data-tauri-drag-region
+          className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-5"
         >
-          <h2 className="font-display text-[13px] font-semibold text-fg/85">{itemFor(view).label}</h2>
+          <h2 data-tauri-drag-region className="font-display text-[13px] font-semibold text-fg/85">
+            {itemFor(view).label}
+          </h2>
           {linked && (
             <span className="flex items-center gap-1.5 text-[11.5px] text-(--color-link)">
               <span className="led h-1.5 w-1.5 rounded-full bg-(--color-link)" />

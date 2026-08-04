@@ -42,10 +42,10 @@ export default function Rail({
 
   return (
     <nav className="glass-chrome flex w-14 shrink-0 flex-col items-center border-r border-line">
-      <div className="drag h-7 w-full shrink-0" style={{ WebkitAppRegion: "drag" } as React.CSSProperties} />
+      <div data-tauri-drag-region className="h-7 w-full shrink-0" />
 
       {/* App mark — the Link motif in miniature. */}
-      <div className="no-drag mb-1 flex h-9 w-9 shrink-0 items-center justify-center" title="DroidDock">
+      <div className="mb-1 flex h-9 w-9 shrink-0 items-center justify-center" title="DroidDock">
         <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" aria-hidden="true">
           <rect x="3.5" y="6" width="6.5" height="12" rx="1.8" stroke="var(--color-link)" strokeWidth="1.7" />
           <rect x="14" y="6" width="6.5" height="9" rx="1.8" stroke="currentColor" strokeWidth="1.7" className="text-fg/70" />
@@ -57,7 +57,7 @@ export default function Rail({
       <div className="relative flex min-h-0 flex-1 flex-col">
         <div
           ref={scrollRef}
-          className="no-drag flex min-h-0 flex-1 flex-col items-center gap-0.5 overflow-y-auto pb-2"
+          className="flex min-h-0 flex-1 flex-col items-center gap-0.5 overflow-y-auto pb-2"
         >
           <RailButton item={HOME} active={view === HOME.id} onClick={() => setView(HOME.id)} />
 
@@ -90,7 +90,7 @@ export default function Rail({
         )}
       </div>
 
-      <div className="no-drag flex shrink-0 flex-col items-center gap-0.5 border-t border-line py-2">
+      <div className="flex shrink-0 flex-col items-center gap-0.5 border-t border-line py-2">
         <button
           onClick={onTogglePhone}
           title={`${phoneOpen ? "Hide" : "Show"} phone panel  ⌘⌥S`}

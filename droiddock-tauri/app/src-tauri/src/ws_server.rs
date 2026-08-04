@@ -312,7 +312,22 @@ pub async fn run(app: AppHandle, state: SharedState, port: u16) {
     let listener = match listener {
         Some(l) => l,
         None => {
+            // Losing the port is almost always a second copy of DroidDock still
+            // running — /Applications and a dev build, say. Returning quietly
+            // left an app that looked completely healthy but could never accept
+            // a phone, with the only clue on a stderr nobody reads.
             eprintln!("ws_server: failed to bind 0.0.0.0:{port} after 10 retries");
+            emit_event(
+                &app,
+                "wifi-event",
+                &json!({
+                    "kind": "bad",
+                    "text": format!(
+                        "Port {port} is already in use — another copy of DroidDock is probably \
+                         running. Quit it and restart, or change the port in Settings."
+                    ),
+                }),
+            );
             return;
         }
     };
