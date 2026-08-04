@@ -133,12 +133,15 @@ pub async fn on_control(app: &AppHandle, state: &SharedState, raw: &Value) {
         .map(|v| v as u32);
 
     match ty {
-        "photo-thumb-error" => {
+        // Both answer over the KIND_THUMB frame and so share its reqId
+        // namespace and this failure path.
+        "photo-thumb-error" | "app-icon-error" => {
             if let Some(req_id) = raw.get("reqId").and_then(Value::as_u64) {
+                let fallback = if ty == "app-icon-error" { "icon failed" } else { "thumbnail failed" };
                 let err = raw
                     .get("error")
                     .and_then(Value::as_str)
-                    .unwrap_or("thumbnail failed")
+                    .unwrap_or(fallback)
                     .to_string();
                 ws_server::fail_thumb(state, req_id as u32, err).await;
             }
@@ -203,11 +206,20 @@ async fn send_send(state: &SharedState, tid: Option<u32>, ev: SendEvent) {
 /// Upload a local file to the phone under `dest` (a directory path on the
 /// phone). Emits `transfer-progress` and resolves when the phone acks
 /// `fs-push-result`. Mirrors transfer.js `push()`.
+/// Send a local file to the phone.
+///
+/// `overwrite` is what the edit-in-place writeback path needs: the phone's
+/// `FileRepo.uniqueDest` never overwrites, so without it every save of an
+/// opened file landed as `name (2).ext`, `name (3).ext`, … while the Mac
+/// cheerfully reported "synced" and the file the user was editing was never
+/// actually updated. Normal user-initiated pushes keep the non-overwriting
+/// behaviour, which is the right default for dropping files into a folder.
 pub async fn push(
     app: AppHandle,
     state: SharedState,
     local_path: String,
     dest: String,
+    overwrite: bool,
 ) -> Result<(), String> {
     let path = PathBuf::from(&local_path);
     let name = path
@@ -221,7 +233,7 @@ pub async fn push(
 
     let begin = ws_server::request_default(
         &state,
-        json_map(json!({ "type": "fs-push-begin", "name": name, "size": size, "dest": dest })),
+        json_map(json!({ "type": "fs-push-begin", "name": name, "size": size, "dest": dest, "overwrite": overwrite })),
     )
     .await?;
     if let Some(err) = begin.get("error").and_then(Value::as_str) {
@@ -387,7 +399,7 @@ async fn start_phone_push(app: &AppHandle, state: &SharedState, raw: &Value) {
 
     let app = app.clone();
     let state2 = state.clone();
-    tauri::async_runtime::spawn(async move {
+    tokio::spawn(async move {
         let ok = receive_to_file(&app, &dest, transfer_id, &name, size, "phone", rx)
             .await
             .is_ok();

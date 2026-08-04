@@ -232,14 +232,44 @@ fn apply_aspect(window: &tauri::WebviewWindow, started: &Value) {
         return;
     }
     const BAR: f64 = 36.0;
-    const TARGET_H: f64 = 760.0;
-    let video_h = TARGET_H - BAR;
-    let width = (video_h * w / h).max(200.0).round();
-    let _ = window.set_size(tauri::LogicalSize::new(width, TARGET_H));
+    const PREFERRED_H: f64 = 760.0;
+
+    // How much of this monitor we're willing to take. Height is the tighter
+    // budget of the two because of the menu bar and Dock.
+    let (max_w, max_h) = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .map(|m| {
+            let scale = m.scale_factor();
+            let size = m.size();
+            (size.width as f64 / scale * 0.92, size.height as f64 / scale * 0.86)
+        })
+        .unwrap_or((1200.0, 800.0));
+
+    // Start from the phone-shaped default, then shrink on whichever axis binds
+    // first. Without the width clamp a landscape source — which is what the
+    // camera sends — solved to ~1290px wide from the fixed 760 height alone,
+    // i.e. wider than the screen on any laptop display.
+    let mut video_h = (PREFERRED_H - BAR).min(max_h - BAR);
+    let mut width = video_h * w / h;
+    if width > max_w {
+        width = max_w;
+        video_h = width * h / w;
+    }
+    let width = width.max(200.0).round();
+    let height = (video_h + BAR).round();
+    let _ = window.set_size(tauri::LogicalSize::new(width, height));
+
     // AppKit is main-thread-only; `on_started` runs on a tokio worker, so the
     // NSWindow call must be dispatched (set_size above proxies internally).
+    //
+    // Lock the ratio of the *content* box, bar included. Locking it to the bare
+    // video ratio (what this did before) is off by the bar's 36px, so dragging
+    // the window walked the video out of the shape it was given and
+    // `object-contain` letterboxed a little more with every pixel of resize.
     let win = window.clone();
-    let _ = window.run_on_main_thread(move || lock_aspect_native(&win, w, h));
+    let _ = window.run_on_main_thread(move || lock_aspect_native(&win, width, height));
 }
 
 #[cfg(target_os = "macos")]

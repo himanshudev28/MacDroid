@@ -30,6 +30,17 @@ object Prefs {
 
     /** Pause state: 0 = active, Long.MAX_VALUE = until the user resumes, else the
      *  epoch-millis deadline after which the link auto-resumes. */
+    /** A stable per-install id, generated once. The Mac keys its photo-sync
+     *  ledger on this rather than on "MANUFACTURER MODEL", which two identical
+     *  phones share — and which made each of them skip the other's photos. */
+    fun deviceId(ctx: Context): String {
+        val sp = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+        sp.getString("deviceId", null)?.let { return it }
+        val fresh = java.util.UUID.randomUUID().toString()
+        sp.edit().putString("deviceId", fresh).apply()
+        return fresh
+    }
+
     fun setPausedUntil(ctx: Context, until: Long) {
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
             .putLong("pausedUntil", until).apply()

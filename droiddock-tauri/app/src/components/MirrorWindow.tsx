@@ -183,12 +183,24 @@ export default function MirrorWindow() {
 
   return (
     <div className="flex h-screen select-none flex-col bg-ink">
-      <div className="drag flex h-9 shrink-0 items-center justify-between border-b border-line bg-panel px-2.5">
-        <span className="flex items-center gap-1.5 text-[11px] font-medium text-fg/85">
+      {/* `data-tauri-drag-region`, not the `.drag` class. That class sets
+          `-webkit-app-region: drag`, which despite the prefix is a Chromium
+          extension WebKit never implemented — so in this WKWebView it does
+          nothing at all, and a frameless window with no native title bar simply
+          could not be moved. Tauri checks this attribute on the event target,
+          so the label carries it too or dragging by the text wouldn't work. */}
+      <div
+        data-tauri-drag-region
+        className="flex h-9 shrink-0 items-center justify-between border-b border-line bg-panel px-2.5"
+      >
+        <span
+          data-tauri-drag-region
+          className="flex items-center gap-1.5 text-[11px] font-medium text-fg/85"
+        >
           <span className={`h-1.5 w-1.5 rounded-full ${live ? "led bg-(--color-link)" : "bg-faint"}`} />
           {isCam ? "Camera" : "Mirroring"}
         </span>
-        <div className="no-drag flex items-center gap-1">
+        <div className="flex items-center gap-1">
           {!isCam && live && (
             <>
               <Btn title="Back" onClick={() => key("back")}>
@@ -202,10 +214,19 @@ export default function MirrorWindow() {
               </Btn>
             </>
           )}
+          {/* Labelled, unlike the nav glyphs above: this is the camera
+              window's only control, and as a bare 28px icon among the pin and
+              close buttons it read as "there is no way to switch cameras". The
+              label doubles as the readout of which camera is live. */}
           {isCam && live && (
-            <Btn title="Switch front/back camera" onClick={flipCamera}>
+            <button
+              onClick={flipCamera}
+              title="Switch front/back camera"
+              className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-[11px] font-medium text-fg/85 transition-colors hover:bg-panel3"
+            >
               <Icon name="switchCamera" size={13} />
-            </Btn>
+              {facing === "front" ? "Front" : "Back"}
+            </button>
           )}
           <Btn title={onTop ? "Unpin (on top)" : "Keep on top"} onClick={toggleTop} active={onTop}>
             <Icon name="pin" size={12} />

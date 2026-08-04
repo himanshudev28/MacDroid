@@ -85,6 +85,27 @@ pub fn on_notification(app: &AppHandle, m: &Value) {
     if !(cfg.notifications && cfg.native_notifs) || cfg.is_paused() {
         return;
     }
+    // Per-app mute. Keyed on the package (Tier B added `pkg` to the wire) rather
+    // than the display label, so two apps sharing a name can't mute each other.
+    if let Some(pkg) = m.get("pkg").and_then(Value::as_str) {
+        if cfg.muted_apps.iter().any(|p| p == pkg) {
+            return;
+        }
+    }
+
+    // AirSync v4 parity: low-importance notifications land in the panel but
+    // don't interrupt. Android already decided this is background noise —
+    // re-raising it as a banner overrides the phone's own judgement.
+    if matches!(m.get("priority").and_then(Value::as_str), Some("low") | Some("min")) {
+        return;
+    }
+    // A progress notification updates continuously; a banner per percent would
+    // be unusable. The panel shows the live bar instead.
+    if m.get("progressMax").and_then(Value::as_i64).is_some_and(|v| v > 0)
+        || m.get("progressIndeterminate").and_then(Value::as_bool) == Some(true)
+    {
+        return;
+    }
 
     // wifi.js: `String(msg.key || randomUUID())` — a keyless notification gets
     // a throwaway unique key so it's never deduped (folding them all onto one

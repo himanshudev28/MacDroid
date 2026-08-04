@@ -333,7 +333,7 @@ fn start_watch(app: AppHandle, ws_state: SharedState, cache: EditCache, local_pa
         let local3 = local2.clone();
         let phone3 = phone2.clone();
         let gen3 = gen2.clone();
-        tauri::async_runtime::spawn(async move {
+        tokio::spawn(async move {
             tokio::time::sleep(DEBOUNCE).await;
             if gen3.load(Ordering::SeqCst) != my_gen {
                 return;
@@ -360,7 +360,10 @@ async fn do_writeback(app: AppHandle, ws_state: SharedState, cache: EditCache, l
 
     let dest_dir = parent_phone_dir(&phone_path);
     let local_str = local_path.to_string_lossy().to_string();
-    match transfer::push(app.clone(), ws_state, local_str, dest_dir).await {
+    // overwrite: true — this is a writeback of a file the user opened from the
+    // phone, so it must replace the original. Without it the phone's
+    // uniqueDest() silently forked every save into "name (2).ext".
+    match transfer::push(app.clone(), ws_state, local_str, dest_dir, true).await {
         Ok(()) => {
             cache.mark_synced(&local_path).await;
             emit_sync(&app, &local_path, &phone_path, "synced", None);

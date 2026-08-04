@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, memo } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import Icon from "../Icon";
@@ -21,7 +21,7 @@ import {
 
 const ROOT = "/sdcard";
 
-export default function FilesView({
+function FilesView({
   linked,
   onToast,
 }: {
@@ -468,3 +468,10 @@ function Row({
     </div>
   );
 }
+
+/* Memoised: App holds `media`, which the phone pushes once a second while
+   something is playing. Without this, every one of those ticks re-rendered this
+   whole view (thumbnail grids, file lists) even though none of its props
+   changed. All props here are primitives or stable useCallback refs, so the
+   comparison is sound. */
+export default memo(FilesView);

@@ -208,7 +208,14 @@ pub async fn brew_install(brew: &str, formula: &str) -> Result<(), String> {
 // ── Generic process runner (mirrors `run`) ──────────────────────────────
 
 async fn run(bin: &str, args: &[&str], timeout: Duration) -> Result<String, String> {
-    let fut = Command::new(bin).args(args).env("PATH", augmented_path()).output();
+    // kill_on_drop: on timeout the future below is dropped, and without this
+    // the adb child keeps running unsupervised. The 1s call-state poller made
+    // that a steady leak — dozens of orphaned processes over a long call.
+    let fut = Command::new(bin)
+        .args(args)
+        .env("PATH", augmented_path())
+        .kill_on_drop(true)
+        .output();
     let output = tokio::time::timeout(timeout, fut)
         .await
         .map_err(|_| "command timed out".to_string())?
@@ -222,6 +229,50 @@ async fn run(bin: &str, args: &[&str], timeout: Duration) -> Result<String, Stri
 }
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Detach a spawned GUI child (scrcpy) and report it if it dies on the spot.
+///
+/// We deliberately don't block on it — it owns its own window and outlives the
+/// call — but the handle must not simply be dropped either, or it lingers as a
+/// zombie until the app exits.
+///
+/// The reporting matters because `spawn()` succeeding proves almost nothing: it
+/// only means the binary was found and executable. A scrcpy whose ffmpeg can't
+/// resolve a dylib spawns fine and dies milliseconds later at dynamic-link
+/// time. With stderr going to `/dev/null` that produced *no* signal anywhere —
+/// the button did nothing, forever, and the actual message ("Library not
+/// loaded: …libbluray.2.dylib") was thrown away. So stderr is captured, and an
+/// exit inside `IMMEDIATE` is surfaced as a toast. A longer-lived process is a
+/// real session the user closed, and stays silent.
+fn reap(app: AppHandle, what: &'static str, child: std::process::Child) {
+    const IMMEDIATE: Duration = Duration::from_secs(3);
+    let started = Instant::now();
+    std::thread::spawn(move || {
+        let mut child = child;
+        // Drained to EOF (not a bounded read) so a chatty session can never
+        // fill the pipe and block scrcpy; only the tail is kept.
+        let mut tail = String::new();
+        if let Some(mut err) = child.stderr.take() {
+            use std::io::Read;
+            let mut buf = Vec::new();
+            let _ = err.read_to_end(&mut buf);
+            if buf.len() > 4096 {
+                buf = buf[buf.len() - 4096..].to_vec();
+            }
+            tail = String::from_utf8_lossy(&buf).to_string();
+        }
+        let ok = child.wait().map(|s| s.success()).unwrap_or(false);
+        if ok || started.elapsed() >= IMMEDIATE {
+            return;
+        }
+        let reason = tail
+            .lines()
+            .map(str::trim)
+            .rfind(|l| !l.is_empty())
+            .unwrap_or("scrcpy exited immediately");
+        emit_toast(&app, "bad", &format!("{what} failed — {reason}"));
+    });
+}
 
 /// POSIX single-quote escaping for paths sent through `adb shell` (mirrors `shq`).
 #[allow(dead_code)] // ported from adb.js for fidelity; not yet wired to a UI path (see module doc)
@@ -382,12 +433,24 @@ pub struct ToolsStatus {
 }
 
 fn tools_status(state: &AdbState) -> ToolsStatus {
+    // Each mutex is locked exactly once, into a local, BEFORE the struct is
+    // built. Locking `state.adb` twice inside the struct literal deadlocks:
+    // temporaries in a struct expression live until the whole expression is
+    // finished, so the guard taken for `adb:` is still held when `adb_path:`
+    // asks for it — and `std::sync::Mutex` is not reentrant. Since `adb_tools`
+    // is a sync command, the first caller was usually the *main thread*, which
+    // then hung holding `AdbState.adb` for the life of the process: frozen UI,
+    // and every async worker that later touched the tray blocked behind it
+    // until the networking runtime had no thread left to poll its IO driver.
+    let adb_path = state.adb.lock().unwrap().clone();
+    let scrcpy_path = state.scrcpy.lock().unwrap().clone();
+    let brew = state.brew.lock().unwrap().is_some();
     ToolsStatus {
-        adb: state.adb.lock().unwrap().is_some(),
-        scrcpy: state.scrcpy.lock().unwrap().is_some(),
-        brew: state.brew.lock().unwrap().is_some(),
-        adb_path: state.adb.lock().unwrap().clone(),
-        scrcpy_path: state.scrcpy.lock().unwrap().clone(),
+        adb: adb_path.is_some(),
+        scrcpy: scrcpy_path.is_some(),
+        brew,
+        adb_path,
+        scrcpy_path,
     }
 }
 
@@ -677,8 +740,14 @@ fn extract_ip_port(line: &str) -> Option<String> {
     for (i, tok) in bytes.iter().enumerate() {
         let parts: Vec<&str> = tok.split('.').collect();
         if parts.len() == 4 && parts.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit())) {
-            if let Some(port) = bytes[i + 1..].iter().find(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit())) {
-                return Some(format!("{tok}:{port}"));
+            // Must be the IMMEDIATELY following token. Scanning forward for
+            // "the next number anywhere" could pair an IP with an unrelated
+            // figure later in the line; the JS regex being ported requires
+            // `ip:port` adjacency.
+            if let Some(port) = bytes.get(i + 1) {
+                if !port.is_empty() && port.chars().all(|c| c.is_ascii_digit()) {
+                    return Some(format!("{tok}:{port}"));
+                }
             }
         }
     }
@@ -753,22 +822,118 @@ fn scrcpy_env(adb: Option<&str>) -> HashMap<String, String> {
 }
 
 /// Spawn scrcpy in camera mode, detached (its own OS window) — mirrors `camera`.
-pub fn camera(scrcpy: &str, serial: &str, adb: Option<&str>) -> Result<(), String> {
+pub fn camera(app: AppHandle, scrcpy: &str, serial: &str, adb: Option<&str>) -> Result<(), String> {
     std::process::Command::new(scrcpy)
         .args(["-s", serial, "--video-source=camera", "--camera-facing=back", "--no-audio", "--window-title", "DroidDock — Camera"])
         .envs(scrcpy_env(adb))
+        // Detached with stdio ignored, matching the Electron reference's
+        // `spawn(..., {detached:true, stdio:'ignore'})`. Without this each
+        // session left a zombie behind and scrcpy's chatter went to our stdio.
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        // Piped, not nulled: `reap` needs scrcpy's own message to explain an
+        // immediate failure. It drains the pipe, so nothing can block.
+        .stderr(std::process::Stdio::piped())
         .spawn()
-        .map(|_| ())
+        .map(|c| reap(app, "ADB camera", c))
         .map_err(|e| e.to_string())
 }
 
 /// Spawn scrcpy in mirror mode, detached — mirrors `mirror`.
-pub fn mirror(scrcpy: &str, serial: &str, adb: Option<&str>) -> Result<(), String> {
+pub fn mirror(app: AppHandle, scrcpy: &str, serial: &str, adb: Option<&str>) -> Result<(), String> {
     std::process::Command::new(scrcpy)
         .args(["-s", serial, "--window-title", "DroidDock — Mirror"])
         .envs(scrcpy_env(adb))
+        // Detached with stdio ignored, matching the Electron reference's
+        // `spawn(..., {detached:true, stdio:'ignore'})`. Without this each
+        // session left a zombie behind and scrcpy's chatter went to our stdio.
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        // Piped, not nulled: `reap` needs scrcpy's own message to explain an
+        // immediate failure. It drains the pipe, so nothing can block.
+        .stderr(std::process::Stdio::piped())
         .spawn()
-        .map(|_| ())
+        .map(|c| reap(app, "ADB mirror", c))
+        .map_err(|e| e.to_string())
+}
+
+/// Tier D — desktop mode ("wireless DeX for everyone", as AirSync puts it).
+///
+/// `--new-display` asks Android to create a *secondary virtual display* and
+/// mirror that instead of the phone's own screen, so the phone stays usable and
+/// the Mac window behaves like a real second desktop with its own launcher and
+/// freeform windows. It needs Android 11+ on the phone and scrcpy 2.5+ on the
+/// Mac; older combinations fail at spawn with scrcpy's own message rather than
+/// silently falling back to plain mirroring, which would be indistinguishable
+/// from the feature not working.
+///
+/// `--new-display=` with no value lets scrcpy pick the resolution/density from
+/// the device default — matching what AirSync's desktop launcher does.
+pub fn desktop(app: AppHandle, scrcpy: &str, serial: &str, size: Option<&str>, adb: Option<&str>) -> Result<(), String> {
+    // "Flex display": `--new-display=1920x1080` sizes the virtual display, and
+    // scrcpy lets you resize the window afterwards. Passing the bare flag
+    // instead lets the device pick its own default.
+    let display_arg = match size {
+        Some(s) if !s.is_empty() => format!("--new-display={s}"),
+        _ => "--new-display".to_string(),
+    };
+    std::process::Command::new(scrcpy)
+        .args([
+            "-s",
+            serial,
+            &display_arg,
+            "--window-title",
+            "DroidDock — Desktop",
+        ])
+        .envs(scrcpy_env(adb))
+        // Detached with stdio ignored, matching the Electron reference's
+        // `spawn(..., {detached:true, stdio:'ignore'})`. Without this each
+        // session left a zombie behind and scrcpy's chatter went to our stdio.
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        // Piped, not nulled: `reap` needs scrcpy's own message to explain an
+        // immediate failure. It drains the pipe, so nothing can block.
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map(|c| reap(app, "Desktop mode", c))
+        .map_err(|e| e.to_string())
+}
+
+/// Mirror with one app started on it. On a new virtual display this is how you
+/// get "that Android app, in its own Mac window" rather than a mirror of the
+/// whole phone — the Apps grid's "open on Mac" action.
+pub fn mirror_app(
+    app: AppHandle,
+    scrcpy: &str,
+    serial: &str,
+    package: &str,
+    new_display: bool,
+    adb: Option<&str>,
+) -> Result<(), String> {
+    let mut cmd = std::process::Command::new(scrcpy);
+    cmd.args(["-s", serial]);
+    if new_display {
+        cmd.arg("--new-display");
+    }
+    // scrcpy takes `--start-app=+pkg` to force-stop first, so re-launching an
+    // app that is already running on the phone still lands on the new display
+    // instead of silently resuming on the built-in one.
+    cmd.args([
+        format!("--start-app=+{package}"),
+        "--window-title".to_string(),
+        format!("DroidDock — {package}"),
+    ]);
+    cmd.envs(scrcpy_env(adb))
+        // Detached with stdio ignored, matching the Electron reference's
+        // `spawn(..., {detached:true, stdio:'ignore'})`. Without this each
+        // session left a zombie behind and scrcpy's chatter went to our stdio.
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        // Piped, not nulled: `reap` needs scrcpy's own message to explain an
+        // immediate failure. It drains the pipe, so nothing can block.
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map(|c| reap(app, "App window", c))
         .map_err(|e| e.to_string())
 }
 
@@ -790,9 +955,14 @@ pub async fn device_info(adb: &str, serial: &str) -> Result<DeviceInfo, String> 
         let serial = serial.to_string();
         async move { run(&adb, &["-s", &serial, "shell", &format!("getprop {k}")], DEFAULT_TIMEOUT).await.unwrap_or_default().trim().to_string() }
     };
-    let model = prop("ro.product.model").await;
-    let android = prop("ro.build.version.release").await;
-    let sdk = prop("ro.build.version.sdk").await;
+    // Concurrent, matching the reference's Promise.all — these are four
+    // independent shell round-trips and running them in series made the
+    // Devices tab visibly slow to populate.
+    let (model, android, sdk) = tokio::join!(
+        prop("ro.product.model"),
+        prop("ro.build.version.release"),
+        prop("ro.build.version.sdk"),
+    );
     let battery_raw = run(adb, &["-s", serial, "shell", "dumpsys battery"], DEFAULT_TIMEOUT).await.unwrap_or_default();
     let battery = battery_raw
         .lines()
@@ -985,8 +1155,11 @@ pub async fn get_volume(adb: &str, serial: &str) -> Volume {
 }
 
 fn parse_volume_get(out: &str) -> Option<(i64, i64)> {
-    // "...is 7 (min: 0, max: 15)"
-    let after_is = out.split("is ").nth(1)?;
+    // "...volume is 7 (min: 0, max: 15)". Anchored on the LAST "is " rather
+    // than the first: an unanchored split lands on any earlier "is " in the
+    // line (a device name like "Louis Phone" was enough) and then parses the
+    // wrong token as the level.
+    let after_is = out.rsplit("is ").next().filter(|t| *t != out)?;
     let level: i64 = after_is.split_whitespace().next()?.parse().ok()?;
     let max: i64 = after_is.split("max: ").nth(1)?.trim_end_matches(')').trim().parse().ok()?;
     Some((level, max))
@@ -1304,17 +1477,46 @@ pub fn adb_qr_pair_cancel(state: tauri::State<AdbState>) {
 }
 
 #[tauri::command]
-pub async fn adb_camera(state: tauri::State<'_, AdbState>, serial: String) -> Result<(), String> {
+pub async fn adb_camera(app: AppHandle, state: tauri::State<'_, AdbState>, serial: String) -> Result<(), String> {
     let scrcpy = state.scrcpy.lock().unwrap().clone().ok_or("scrcpy not found — brew install scrcpy")?;
     let adb = state.adb.lock().unwrap().clone();
-    camera(&scrcpy, &serial, adb.as_deref())
+    camera(app, &scrcpy, &serial, adb.as_deref())
 }
 
 #[tauri::command]
-pub async fn adb_mirror(state: tauri::State<'_, AdbState>, serial: String) -> Result<(), String> {
+pub async fn adb_mirror(app: AppHandle, state: tauri::State<'_, AdbState>, serial: String) -> Result<(), String> {
     let scrcpy = state.scrcpy.lock().unwrap().clone().ok_or("scrcpy not found — brew install scrcpy")?;
     let adb = state.adb.lock().unwrap().clone();
-    mirror(&scrcpy, &serial, adb.as_deref())
+    mirror(app, &scrcpy, &serial, adb.as_deref())
+}
+
+/// Tier D: mirror a *new virtual display* rather than the phone's own screen.
+#[tauri::command]
+pub async fn adb_desktop(
+    app: AppHandle,
+    state: tauri::State<'_, AdbState>,
+    serial: String,
+    size: Option<String>,
+) -> Result<(), String> {
+    let scrcpy = state.scrcpy.lock().unwrap().clone().ok_or("scrcpy not found — brew install scrcpy")?;
+    let adb = state.adb.lock().unwrap().clone();
+    desktop(app, &scrcpy, &serial, size.as_deref(), adb.as_deref())
+}
+
+/// Tier D: open one Android app in its own Mac window. With `new_display` the
+/// app gets a virtual display to itself and the phone screen is left alone;
+/// without it, the app is launched on the phone and the phone is mirrored.
+#[tauri::command]
+pub async fn adb_mirror_app(
+    app: AppHandle,
+    state: tauri::State<'_, AdbState>,
+    serial: String,
+    package: String,
+    new_display: bool,
+) -> Result<(), String> {
+    let scrcpy = state.scrcpy.lock().unwrap().clone().ok_or("scrcpy not found — brew install scrcpy")?;
+    let adb = state.adb.lock().unwrap().clone();
+    mirror_app(app, &scrcpy, &serial, &package, new_display, adb.as_deref())
 }
 
 #[tauri::command]
@@ -1389,5 +1591,56 @@ pub fn adb_call_start_polling(app: AppHandle, state: tauri::State<AdbState>, ser
     let serial = serial.or_else(|| first_device_serial(&state));
     if let (Some(serial), true) = (serial, state.adb.lock().unwrap().is_some()) {
         start_call_polling(app, serial);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// `tools_status` must never take the same lock twice in one expression.
+    ///
+    /// It used to, and because a struct literal keeps its temporaries alive
+    /// until the whole struct is built, the second `state.adb.lock()` waited on
+    /// a guard the same thread was still holding. That deadlocked the first
+    /// caller — normally the main thread, via the `adb_tools` command — and
+    /// took the UI, the tray and eventually the WebSocket accept loop with it.
+    /// Run on a worker thread with a deadline so a regression fails the suite
+    /// instead of hanging it.
+    #[test]
+    fn tools_status_does_not_deadlock_on_itself() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let state = super::AdbState::default();
+            let _ = tx.send(super::tools_status(&state).adb);
+        });
+        assert!(
+            rx.recv_timeout(std::time::Duration::from_secs(5)).is_ok(),
+            "tools_status deadlocked — it is locking the same mutex twice in one expression"
+        );
+    }
+
+    #[test]
+    fn volume_parse_is_anchored_to_the_last_is() {
+        assert_eq!(super::parse_volume_get("volume is 7 (min: 0, max: 15)"), Some((7, 15)));
+        // An earlier "is " in the line used to hijack the split and parse the
+        // wrong token as the level.
+        assert_eq!(
+            super::parse_volume_get("Louis Phone: volume is 9 (min: 0, max: 15)"),
+            Some((9, 15))
+        );
+        // No "is " at all must not silently parse the whole string.
+        assert_eq!(super::parse_volume_get("no volume here"), None);
+        assert_eq!(super::parse_volume_get(""), None);
+    }
+
+    #[test]
+    fn ip_port_requires_adjacency() {
+        assert_eq!(
+            super::extract_ip_port("connected to 192.168.1.5:5555"),
+            Some("192.168.1.5:5555".to_string())
+        );
+        // The port must immediately follow the IP. Scanning ahead for "the
+        // next number anywhere" paired the IP with an unrelated figure.
+        assert_eq!(super::extract_ip_port("192.168.1.5 device product:foo 1234"), None);
+        assert_eq!(super::extract_ip_port("no address here"), None);
     }
 }

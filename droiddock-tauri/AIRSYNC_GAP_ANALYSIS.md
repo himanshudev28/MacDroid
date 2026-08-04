@@ -1,5 +1,10 @@
 # AirSync → DroidDock gap analysis
 
+> **Status (2026-08-04): Tiers A–D built.** Every headline feature on
+> <https://sameerasw.com/airsync> now has a DroidDock equivalent. What remains
+> unbuilt is listed in §5 at the bottom, with the reason for each. Re-verified
+> against airsync-mac @ `81c13b3` (2026-08-02) and the live landing page.
+
 **Reference:** [sameerasw/airsync-mac](https://github.com/sameerasw/airsync-mac) @ main
 (~46k lines Swift/SwiftUI, 1959 commits) + <https://sameerasw.com/airsync>.
 **Subject:** `droiddock-tauri/app` (~11k lines Rust + React/TS) + `droiddock-android`.
@@ -106,3 +111,57 @@ Building a large new feature surface on top of that is a real risk: new bugs
 become indistinguishable from old ones. Recommended order is **fix the 5 open
 findings → then UI shell → then new features**, but that's a call for the
 project owner, not a blocker.
+
+
+---
+
+## 5. Status after Tiers A–D
+
+### Website headline features — all covered
+| AirSync claims | DroidDock |
+|---|---|
+| Android Mirror | ✅ Wi-Fi mirroring (no ADB needed — AirSync can't do this) **and** ADB/scrcpy |
+| Notification Sync, "grouped & stacked" | ✅ grouped by app, expand/collapse, toggle back to a flat list |
+| Reply to Notifications | ✅ (pre-existing) + per-app banner muting |
+| Clipboard Sync | ✅ (pre-existing) + explicit "send now" |
+| Media Control | ✅ full tab + mini-player on the phone card |
+| Send Files | ✅ (pre-existing) + quick action |
+| Desktop Mode | ✅ scrcpy `--new-display`, plus "open one app in its own Mac window" |
+| Wallpaper View | ✅ wallpaper + album art on the phone card |
+| AES End-to-End Encryption | ⚠️ **partial and labelled as such** — JSON control messages only; binary frames (files, thumbnails, mirror video) stay in the clear. See `crypto.rs`. |
+| Zero cloud / open source | ✅ already true |
+
+### Built beyond the original Tier A scope
+Apps grid + icon sync · recent apps · live clock · connection pill with real
+RTT · mDNS/Bonjour discovery · link-quality grading (`good`/`fair`/`weak`/
+`stalled`) · menu-bar panel · onboarding · categorised settings · window
+opacity · Mac remote control from the phone (opt-in) · per-app notification
+muting.
+
+### Menu bar / battery / widget (built 2026-08-04)
+| AirSync+ item | DroidDock |
+|---|---|
+| MenuBar Customizations | ✅ text mode, battery style, album-art layout — **except font size**, which Tauri gives no API for (max-length cap offered instead) |
+| Low Battery Alerts ("Soon" in AirSync) | ✅ shipped, with threshold + once-per-discharge logic |
+| Widgets ("Soon" in AirSync) | ✅ as a floating always-on-top panel. **Not** a WidgetKit widget — that needs a Swift extension Tauri can't ship |
+
+### Deliberately NOT built, with reasons
+| Item | Why not |
+|---|---|
+| **Quick Share / Nearby Share** (F7) | ~12k lines of reverse-engineered protobuf + UKEY2. Enormous, and DroidDock's own file transfer already works both ways. |
+| **Licensing / trial / Gumroad** (F15) | Personal app. Nothing to sell. |
+| **BLE transport** (F1, partial) | Real fallback value, but a whole second transport stack. mDNS closed most of the "can't find the Mac" gap for far less. |
+| **Native Metal scrcpy decode** (F9) | DroidDock already decodes its own Wi-Fi mirror stream via WebCodecs; this would only improve the ADB path, which already works by spawning scrcpy. |
+| **Apple Intelligence summaries** | Needs a macOS 15.1+ framework dependency for a cosmetic feature. |
+| **AppleScript surface, Sparkle auto-update, i18n** | Real but unrelated to the AirSync feature parity this was scoped to; each is its own project. |
+| **Full binary-frame encryption** | Would mean surgery on the highest-throughput, least-verified code (transfer + mirror hot loops). Flagged rather than half-done. |
+
+### Still open, worth doing later
+- Notification **action buttons** and **progress bars** (U12) — needs the phone
+  to send `actions[]`/`progress`, which it doesn't yet.
+- **In-card / sidebar mirroring** (U19) — mirroring inside the phone card
+  instead of a pop-out window.
+- **Mac → phone info sync** and **Mac media control from the phone** (F5/F6).
+- ~~The five pre-existing CRITICAL/MAJOR bugs~~ — **all fixed** (2026-08-04),
+  along with the pre-existing reqId-misroute hole and the `adb.rs` process
+  leaks. See `checkpoint.md` §"Open findings — ALL FIXED".

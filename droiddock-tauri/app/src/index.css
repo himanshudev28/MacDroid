@@ -19,74 +19,63 @@
      sizes, timestamps. Never for decorative labels.
    ══════════════════════════════════════════════════════════════════════ */
 
-@theme {
-  /* ─── Canvas layers (dark, default) — warm basalt, not blue-black ── */
+:root {
   --color-ink:     #161519;
   --color-panel:   #1d1c21;
   --color-panel2:  #242329;
   --color-panel3:  #2d2c33;
   --color-line:    rgba(255, 255, 255, 0.08);
   --color-glow:    rgba(255, 255, 255, 0.03);
-
-  /* ─── Text ───────────────────────────────────────────────────────── */
   --color-fg:      #f2f1ee;
   --color-dim:     #a3a2ad;
   --color-faint:   #6e6d79;
-
-  /* ─── The two voices ─────────────────────────────────────────────── */
-  /* Interactive accent — overwritten at runtime with the macOS system
-     accent color (see App.tsx / appearance.rs). */
   --color-accent:  #0a84ff;
-  /* Android robot green — link/live status ONLY. */
   --color-link:    #3ddc84;
-
-  /* ─── Semantic ───────────────────────────────────────────────────── */
   --color-ok:      #30d158;
   --color-bad:     #ff453a;
   --color-warn:    #ffd60a;
-
-  /* ─── Typography ─────────────────────────────────────────────────── */
-  /* Zero-egress: no webfonts. ui-rounded resolves to SF Pro Rounded on
-     macOS — a native face with real personality. */
-  --font-display: ui-rounded, -apple-system, 'BlinkMacSystemFont', system-ui, sans-serif;
-  --font-body:    -apple-system, 'BlinkMacSystemFont', system-ui, sans-serif;
-  --font-mono:    ui-monospace, 'SF Mono', monospace;
+  --font-display:  ui-rounded, -apple-system, 'BlinkMacSystemFont', system-ui, sans-serif;
+  --font-body:     -apple-system, 'BlinkMacSystemFont', system-ui, sans-serif;
+  --font-mono:     ui-monospace, 'SF Mono', monospace;
+  --app-opacity:   1;
 }
 
-/* ─── Light mode — warm paper, not clinical white ──────────────────── */
-@media (prefers-color-scheme: light) {
-  :root {
-    --color-ink:     #f3f2ef;
-    --color-panel:   #faf9f7;
-    --color-panel2:  #ffffff;
-    --color-panel3:  #edecea;
-    --color-line:    rgba(22, 21, 25, 0.09);
-    --color-glow:    rgba(0, 0, 0, 0.03);
-    --color-fg:      #1d1c21;
-    --color-dim:     #5f5e66;
-    --color-faint:   #8b8a92;
-    /* Robot green tuned darker for contrast on paper. */
-    --color-link:    #17914f;
-    --color-ok:      #248a3d;
-    --color-bad:     #d70015;
-    --color-warn:    #b25000;
-  }
+@theme {
+  --color-ink:     #161519;
+  --color-panel:   #1d1c21;
+  --color-panel2:  #242329;
+  --color-panel3:  #2d2c33;
+  --color-line:    rgba(255, 255, 255, 0.08);
+  --color-glow:    rgba(255, 255, 255, 0.03);
+  --color-fg:      #f2f1ee;
+  --color-dim:     #a3a2ad;
+  --color-faint:   #6e6d79;
+  --color-accent:  #0a84ff;
+  --color-link:    #3ddc84;
+  --color-ok:      #30d158;
+  --color-bad:     #ff453a;
+  --color-warn:    #ffd60a;
+  --font-display:  ui-rounded, -apple-system, 'BlinkMacSystemFont', system-ui, sans-serif;
+  --font-body:     -apple-system, 'BlinkMacSystemFont', system-ui, sans-serif;
+  --font-mono:     ui-monospace, 'SF Mono', monospace;
 }
+
+
+
 
 html,
 body,
 #root {
   height: 100%;
+  width: 100%;
 }
 
 html,
 body {
-  /* Transparent so Layer 1's native NSVisualEffectView vibrancy can show
-     through wherever a panel (e.g. the sidebar) doesn't paint its own
-     opaque fill. Views with real content paint var(--color-ink)
-     themselves — see App.tsx — so they stay fully opaque, zero blur cost. */
-  background: transparent;
+  background-color: #161519;
+  background-color: var(--color-ink, #161519);
 }
+
 
 body {
   color: var(--color-fg);
@@ -97,12 +86,12 @@ body {
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--color-accent) 25%, transparent);
+  background: rgba(10, 132, 255, 0.25);
 }
 
 /* ─── Quality floor: visible keyboard focus, everywhere ─────────────── */
 :focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--color-accent) 60%, transparent);
+  outline: 2px solid rgba(10, 132, 255, 0.6);
   outline-offset: 1px;
   border-radius: 6px;
 }
@@ -146,14 +135,7 @@ textarea:focus {
     0 1px 2px rgba(0, 0, 0, 0.25),
     0 6px 20px rgba(0, 0, 0, 0.18);
 }
-@media (prefers-color-scheme: light) {
-  .card-raised {
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.9),
-      0 1px 2px rgba(0, 0, 0, 0.06),
-      0 6px 20px rgba(0, 0, 0, 0.05);
-  }
-}
+
 
 /* Buttons — three tiers plus danger. Height 32px default. */
 .btn {
@@ -188,7 +170,7 @@ textarea:focus {
   border: 1px solid transparent;
 }
 .btn-primary:hover {
-  background: color-mix(in srgb, var(--color-accent) 88%, #fff);
+  background: #288dff;
 }
 
 .btn-secondary {
@@ -197,7 +179,7 @@ textarea:focus {
   border: 1px solid var(--color-line);
 }
 .btn-secondary:hover {
-  background: color-mix(in srgb, var(--color-panel3) 80%, var(--color-fg) 8%);
+  background: #3d3c45;
 }
 
 .btn-ghost {
@@ -211,12 +193,12 @@ textarea:focus {
 }
 
 .btn-danger {
-  background: color-mix(in srgb, var(--color-bad) 14%, transparent);
+  background: rgba(255, 69, 58, 0.14);
   color: var(--color-bad);
-  border: 1px solid color-mix(in srgb, var(--color-bad) 25%, transparent);
+  border: 1px solid rgba(255, 69, 58, 0.25);
 }
 .btn-danger:hover {
-  background: color-mix(in srgb, var(--color-bad) 22%, transparent);
+  background: rgba(255, 69, 58, 0.22);
 }
 
 /* Compact icon-only button (toolbars, row actions). */
@@ -237,7 +219,7 @@ textarea:focus {
 
 /* Text/search fields. */
 .field {
-  background: color-mix(in srgb, var(--color-ink) 65%, var(--color-panel));
+  background: #18171c;
   border: 1px solid var(--color-line);
   border-radius: 10px;
   padding: 7px 11px;
@@ -249,8 +231,8 @@ textarea:focus {
   color: var(--color-faint);
 }
 .field:focus {
-  border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 15%, transparent);
+  border-color: rgba(10, 132, 255, 0.55);
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.15);
 }
 
 /* List row — hover + selected states for dense lists. */
@@ -262,10 +244,10 @@ textarea:focus {
   background: var(--color-panel2);
 }
 .row-selected {
-  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  background: rgba(10, 132, 255, 0.12);
 }
 .row-selected:hover {
-  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  background: rgba(10, 132, 255, 0.16);
 }
 
 /* ─── Sidebar / toolbar glass (Layer 2) ───────────────────────────────
@@ -283,29 +265,13 @@ textarea:focus {
       rgba(255, 255, 255, 0) 75%,
       rgba(255, 255, 255, 0.04) 100%
     ),
-    color-mix(in srgb, var(--color-panel) 55%, transparent);
+    rgba(29, 28, 33, 0.75);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.14),
     inset -1px 0 0 rgba(255, 255, 255, 0.05);
 }
 
-@media (prefers-color-scheme: light) {
-  .glass-chrome {
-    background:
-      linear-gradient(
-        160deg,
-        rgba(255, 255, 255, 0.55) 0%,
-        rgba(255, 255, 255, 0.12) 22%,
-        rgba(255, 255, 255, 0) 45%,
-        rgba(255, 255, 255, 0) 75%,
-        rgba(0, 0, 0, 0.02) 100%
-      ),
-      color-mix(in srgb, var(--color-panel) 55%, transparent);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.8),
-      inset -1px 0 0 rgba(0, 0, 0, 0.04);
-  }
-}
+
 
 /* Accessibility: WebKit has no prefers-reduced-transparency media query
    (verified unsupported through Safari 27 / iOS 26.5), so this is set from
@@ -352,11 +318,7 @@ textarea:focus {
   backdrop-filter: blur(12px) saturate(150%);
   -webkit-backdrop-filter: blur(12px) saturate(150%);
 }
-@media (prefers-color-scheme: light) {
-  .glass-heavy {
-    background: rgba(250, 249, 247, 0.85);
-  }
-}
+
 
 [data-reduce-transparency='true'] .glass,
 [data-reduce-transparency='true'] .glass-dim,
@@ -396,14 +358,98 @@ textarea:focus {
     0 16px 48px rgba(0, 0, 0, 0.30);
 }
 
+/* ─── Window opacity (Settings › Appearance) ────────────────────────────
+   The main content surface. At 100% it's an opaque panel with zero blur
+   cost; below that, the native NSVisualEffectView behind the transparent
+   window shows through. See lib/appearance.ts. */
+:root {
+  --app-opacity: 1;
+}
+
+.app-surface {
+  background: var(--color-ink);
+}
+
+/* ═══ The phone card ═══════════════════════════════════════════════════
+   The app's centre of gravity: a persistent object representing the phone,
+   always on screen. Everything inside it sits on a dark backdrop, so its
+   contents are white-on-glass rather than using the app's fg/dim tokens. */
+
+.phone-card {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    0 2px 6px rgba(0, 0, 0, 0.30),
+    0 18px 48px rgba(0, 0, 0, 0.28);
+}
+
+/* Generated backdrop, standing in for the phone's real wallpaper (which the
+   wire protocol doesn't carry yet — see PhoneCard's `artwork` prop). Keyed
+   off the live macOS accent so it belongs to the same system as the rest of
+   the UI instead of reading as an arbitrary decorative gradient. */
+.phone-aurora {
+  background:
+    radial-gradient(
+      120% 80% at 15% 8%,
+      rgba(10, 132, 255, 0.35) 0%,
+      transparent 62%
+    ),
+    radial-gradient(
+      95% 65% at 92% 22%,
+      rgba(61, 220, 132, 0.25) 0%,
+      transparent 58%
+    ),
+    radial-gradient(
+      130% 90% at 50% 108%,
+      rgba(10, 132, 255, 0.25) 0%,
+      transparent 66%
+    ),
+    linear-gradient(165deg, #1b1a20 0%, #0e0d11 100%);
+}
+
+/* Controls sitting ON the phone card.
+   Deliberately NOT `backdrop-filter`: the card already paints an opaque
+   backdrop (wallpaper/aurora + scrim) underneath, so a blur here has almost
+   nothing to reveal — but each blurred element still forces its own
+   compositing pass. The card carries ~10 of these controls, so that was ~10
+   redundant GPU passes every frame for no visible difference. A flat
+   translucent fill reads identically over an opaque parent. */
+.on-glass {
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+}
+.on-glass:hover {
+  background: rgba(0, 0, 0, 0.42);
+}
+.on-glass-active {
+  background: rgba(255, 255, 255, 0.20);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+}
+
+/* Sliders drawn on the phone card's glass need a light track — the app-level
+   .seek-slider track is a tint of --color-fg, which vanishes on the card in
+   light mode. */
+.seek-on-glass::-webkit-slider-runnable-track {
+  background: rgba(255, 255, 255, 0.22);
+}
+.seek-on-glass::-webkit-slider-thumb {
+  background: #fff;
+  border-color: rgba(0, 0, 0, 0.35);
+  width: 11px;
+  height: 11px;
+  margin-top: -4px;
+}
+.seek-on-glass:hover::-webkit-slider-thumb {
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
+}
+
 /* ─── Link heartbeat (the phone-is-alive pulse) ──────────────────────
    Green by definition: this animation only ever means "linked". */
 @keyframes led {
   0%, 100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-link) 45%, transparent);
+    box-shadow: 0 0 0 0 rgba(61, 220, 132, 0.45);
   }
   55% {
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-link) 0%, transparent);
+    box-shadow: 0 0 0 4px rgba(61, 220, 132, 0);
   }
 }
 .led { animation: led 2.4s ease-in-out infinite; }
@@ -471,11 +517,11 @@ textarea:focus {
 ::-webkit-scrollbar               { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track         { background: transparent; }
 ::-webkit-scrollbar-thumb         {
-  background: color-mix(in srgb, var(--color-fg) 14%, transparent);
+  background: rgba(242, 241, 238, 0.14);
   border-radius: 99px;
 }
 ::-webkit-scrollbar-thumb:hover   {
-  background: color-mix(in srgb, var(--color-fg) 24%, transparent);
+  background: rgba(242, 241, 238, 0.24);
 }
 ::-webkit-scrollbar-corner        { background: transparent; }
 
@@ -492,7 +538,7 @@ textarea:focus {
 .vol-slider::-webkit-slider-runnable-track,
 .seek-slider::-webkit-slider-runnable-track {
   height: 3px;
-  background: color-mix(in srgb, var(--color-fg) 12%, transparent);
+  background: rgba(242, 241, 238, 0.12);
   border-radius: 99px;
 }
 .vol-slider::-webkit-slider-thumb,
@@ -510,5 +556,5 @@ textarea:focus {
 .vol-slider:hover::-webkit-slider-thumb,
 .seek-slider:hover::-webkit-slider-thumb {
   transform: scale(1.2);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--color-accent) 45%, transparent);
+  box-shadow: 0 0 8px rgba(10, 132, 255, 0.45);
 }

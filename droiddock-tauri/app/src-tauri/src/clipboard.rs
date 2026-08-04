@@ -92,6 +92,48 @@ pub fn on_incoming(app: &AppHandle, raw: &Value) {
     *guard.last_change_count.lock().unwrap() = new_count;
 }
 
+// ── Outbound: Mac → phone (explicit push) ────────────────────────────────
+
+/// Send whatever is on the Mac's pasteboard to the phone right now.
+///
+/// This is the phone card's "send clipboard" action — an explicit user request,
+/// so unlike the watcher it deliberately ignores the `last_seen` /
+/// `last_from_phone` echo guards: re-sending text the phone already has is
+/// exactly what was asked for, not a loop. It still respects `clipboardSync`
+/// and the global pause, because those mean "don't move clipboard data", and
+/// it still arms `last_from_phone` so the next watcher tick doesn't treat the
+/// send as a fresh local copy and duplicate it.
+#[tauri::command]
+pub async fn clipboard_push_now(
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<(), String> {
+    if !enabled(&app) {
+        return Err("Clipboard sync is off".into());
+    }
+    if !ws_server::is_connected(&state).await {
+        return Err("No phone linked".into());
+    }
+
+    // Read + guard bookkeeping in a sync block so no Retained<NSPasteboard>
+    // or MutexGuard is alive across the await below.
+    let text = {
+        let Some(text) = read_clipboard_text() else {
+            return Err("Clipboard is empty".into());
+        };
+        if text.is_empty() {
+            return Err("Clipboard is empty".into());
+        }
+        let guard = app.state::<ClipboardGuard>();
+        *guard.last_seen.lock().unwrap() = Some(text.clone());
+        *guard.last_change_count.lock().unwrap() = read_change_count();
+        text
+    };
+
+    ws_server::push(&state, json!({ "type": "clipboard", "text": text })).await;
+    Ok(())
+}
+
 // ── Outbound: Mac → phone (1s watcher) ───────────────────────────────────
 
 /// Poll the pasteboard once per second and forward genuine local changes to

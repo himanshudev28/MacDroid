@@ -18,11 +18,20 @@
 
 use crate::config;
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem};
-use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_autostart::ManagerExt;
 
 const TRAY_ID: &str = "main-tray";
+
+/// The menu-bar panel — a small always-on-top window hung under the tray icon,
+/// loading this same bundle at `#menubar` (exactly the routing trick the mirror
+/// pop-out already uses). Left-click the tray icon opens it; **right-click
+/// still opens the Pause/Resume/Quit menu, unchanged** — the menu didn't move,
+/// only the button that reaches it.
+const PANEL_LABEL: &str = "menubar";
+const PANEL_W: f64 = 340.0;
+const PANEL_H: f64 = 500.0;
 const HOUR_MS: i64 = 3_600_000;
 /// Any `paused_until` further out than this reads as "indefinite" for
 /// display. Deliberately NOT an exact-`i64::MAX` sentinel match — a
@@ -37,9 +46,198 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         .icon(app.default_window_icon().unwrap().clone())
         .tooltip("DroidDock")
         .menu(&menu)
+        // The menu moves to right-click so left-click can open the panel —
+        // the standard macOS menu-bar-app split. Every menu item is still
+        // exactly where it was, reached with the other button.
+        .show_menu_on_left_click(false)
         .on_menu_event(on_menu_event)
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                rect,
+                ..
+            } = event
+            {
+                toggle_panel(tray.app_handle(), Some(rect));
+            }
+        })
         .build(app)?;
     Ok(())
+}
+
+/// Set (or clear) the text shown beside the tray icon.
+///
+/// `"device"` is resolved here rather than in `statusbar::render_title` because
+/// the Mac's display name lives in config, not in the phone snapshot.
+pub fn set_title(app: &AppHandle, title: Option<&str>) {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else { return };
+    let cfg = app.state::<crate::AppState>().config.lock().unwrap().clone();
+    let resolved = match (cfg.menubar_text.as_str(), title) {
+        ("device", _) => crate::ws_server::last_phone_name(app),
+        (_, t) => t.map(str::to_string),
+    };
+    let _ = tray.set_title(resolved.as_deref());
+}
+
+// ── Floating status widget ───────────────────────────────────────────────
+
+/// The widget window.
+///
+/// Real macOS Widgets (Notification Centre / desktop) are WidgetKit, which
+/// means a Swift app extension embedded in the bundle — a Tauri app cannot
+/// produce one, so this is deliberately *not* claiming to be that. It's the
+/// thing the widget was for: a small always-on-top, borderless panel you can
+/// park anywhere and glance at.
+const WIDGET_LABEL: &str = "widget";
+const WIDGET_W: f64 = 240.0;
+const WIDGET_H: f64 = 132.0;
+
+#[tauri::command]
+pub fn widget_set(app: AppHandle, show: bool) -> Result<(), String> {
+    {
+        let state = app.state::<crate::AppState>();
+        let mut cfg = state.config.lock().unwrap();
+        cfg.widget_enabled = show;
+        config::save(&app, &cfg);
+    }
+    apply_widget(&app);
+    Ok(())
+}
+
+/// Open or close the widget to match the persisted setting. Called on startup
+/// too, so it reappears where it was after a restart.
+pub fn apply_widget(app: &AppHandle) {
+    let show = app.state::<crate::AppState>().config.lock().unwrap().widget_enabled;
+
+    if let Some(win) = app.get_webview_window(WIDGET_LABEL) {
+        let _ = if show { win.show() } else { win.hide() };
+        return;
+    }
+    if !show {
+        return;
+    }
+
+    let built = WebviewWindowBuilder::new(
+        app,
+        WIDGET_LABEL,
+        WebviewUrl::App("index.html#widget".into()),
+    )
+    .title("DroidDock")
+    .inner_size(WIDGET_W, WIDGET_H)
+    .resizable(false)
+    .decorations(false)
+    .transparent(true)
+    .always_on_top(true)
+    // Stays put when you switch Spaces — a status readout you have to go
+    // looking for defeats the point.
+    .visible_on_all_workspaces(true)
+    .skip_taskbar(true)
+    .build();
+
+    match built {
+        Ok(win) => {
+            let _ = win.show();
+        }
+        Err(e) => eprintln!("[widget] failed to open: {e}"),
+    }
+}
+
+// ── Menu-bar panel ───────────────────────────────────────────────────────
+
+/// Show the panel under the tray icon, or hide it if it's already up.
+/// Created lazily on first use and reused thereafter — same lifecycle as the
+/// mirror pop-out.
+fn toggle_panel(app: &AppHandle, rect: Option<tauri::Rect>) {
+    if let Some(win) = app.get_webview_window(PANEL_LABEL) {
+        if win.is_visible().unwrap_or(false) {
+            let _ = win.hide();
+        } else {
+            position_panel(&win, rect);
+            let _ = win.show();
+            let _ = win.set_focus();
+            // Opening the panel is seeing the notifications.
+            crate::statusbar::clear_unread(app);
+        }
+        return;
+    }
+
+    let built = WebviewWindowBuilder::new(
+        app,
+        PANEL_LABEL,
+        WebviewUrl::App("index.html#menubar".into()),
+    )
+    .title("DroidDock")
+    .inner_size(PANEL_W, PANEL_H)
+    .resizable(false)
+    .decorations(false)
+    .transparent(true)
+    .always_on_top(true)
+    .visible(false)
+    .build();
+
+    match built {
+        Ok(win) => {
+            // Click-away dismissal, the way every menu-bar panel behaves.
+            let handle = win.clone();
+            win.on_window_event(move |e| {
+                if let WindowEvent::Focused(false) = e {
+                    let _ = handle.hide();
+                }
+            });
+            position_panel(&win, rect);
+            let _ = win.show();
+            let _ = win.set_focus();
+            crate::statusbar::clear_unread(app);
+        }
+        Err(e) => eprintln!("[tray] menu-bar panel failed to open: {e}"),
+    }
+}
+
+/// Hang the panel just below the tray icon, horizontally centred on it, and
+/// nudged back on screen if the icon sits near the right edge.
+fn position_panel(win: &tauri::WebviewWindow, rect: Option<tauri::Rect>) {
+    let Some(rect) = rect else { return };
+    let scale = win.scale_factor().unwrap_or(1.0);
+
+    let (icon_x, icon_y) = match rect.position {
+        tauri::Position::Physical(p) => (f64::from(p.x) / scale, f64::from(p.y) / scale),
+        tauri::Position::Logical(p) => (p.x, p.y),
+    };
+    let (icon_w, icon_h) = match rect.size {
+        tauri::Size::Physical(s) => (f64::from(s.width) / scale, f64::from(s.height) / scale),
+        tauri::Size::Logical(s) => (s.width, s.height),
+    };
+
+    let mut x = icon_x + icon_w / 2.0 - PANEL_W / 2.0;
+    if let Ok(Some(monitor)) = win.current_monitor() {
+        let screen_w = f64::from(monitor.size().width) / monitor.scale_factor();
+        x = x.min(screen_w - PANEL_W - 8.0);
+    }
+    x = x.max(8.0);
+
+    let _ = win.set_position(tauri::LogicalPosition::new(x, icon_y + icon_h + 6.0));
+}
+
+/// Let the panel dismiss itself (e.g. after "Open DroidDock").
+#[tauri::command]
+pub fn menubar_hide(app: AppHandle) {
+    if let Some(win) = app.get_webview_window(PANEL_LABEL) {
+        let _ = win.hide();
+    }
+}
+
+/// Bring the main window forward — the panel's "Open DroidDock" action.
+#[tauri::command]
+pub fn open_main_window(app: AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+    if let Some(panel) = app.get_webview_window(PANEL_LABEL) {
+        let _ = panel.hide();
+    }
 }
 
 fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
@@ -58,6 +256,12 @@ fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     let pause_8h = MenuItemBuilder::with_id("pause_8h", "Pause for 8 hours").enabled(!paused).build(app)?;
     let pause_indef = MenuItemBuilder::with_id("pause_indef", "Pause indefinitely").enabled(!paused).build(app)?;
     let resume = MenuItemBuilder::with_id("resume", "Resume").enabled(paused).build(app)?;
+    let widget_on = cfg.widget_enabled;
+    let widget = MenuItemBuilder::with_id(
+        "widget",
+        if widget_on { "Hide status widget" } else { "Show status widget" },
+    )
+    .build(app)?;
     let quit = PredefinedMenuItem::quit(app, Some("Quit DroidDock"))?;
 
     MenuBuilder::new(app)
@@ -67,6 +271,8 @@ fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
         .item(&pause_8h)
         .item(&pause_indef)
         .item(&resume)
+        .separator()
+        .item(&widget)
         .separator()
         .item(&quit)
         .build()
@@ -87,6 +293,11 @@ fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         "pause_8h" => apply_pause(app, Some(config::now_ms() + 8 * HOUR_MS)),
         "pause_indef" => apply_pause(app, Some(i64::MAX)),
         "resume" => apply_pause(app, None),
+        "widget" => {
+            let show = !app.state::<crate::AppState>().config.lock().unwrap().widget_enabled;
+            let _ = widget_set(app.clone(), show);
+            refresh(app);
+        }
         _ => {}
     }
 }

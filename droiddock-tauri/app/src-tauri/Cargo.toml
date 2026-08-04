@@ -18,7 +18,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-dialog = "2"
@@ -40,6 +40,11 @@ mac-notification-sys = "0.6"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 # Phase 17: FSEvents-backed file watcher for edit-in-place writeback.
 notify = "8"
+mdns-sd = { version = "0.20.3", default-features = false, features = ["async"] }
+aes-gcm = "0.11.0"
+hkdf = "0.13.0"
+sha2 = "0.11.0"
+getrandom = "0.4.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
@@ -53,4 +58,17 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
     "objc2-core-foundation",
 ] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std"] }
+# Tier D: synthesising input events for the phone→Mac remote (mac_remote.rs).
+objc2-core-graphics = { version = "0.3", default-features = false, features = [
+    "std",
+    "CGEvent",
+    "CGEventSource",
+    "CGEventTypes",
+    # new_keyboard_event is gated behind this one.
+    "CGRemoteOperation",
+] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "CFCGTypes",
+] }
 

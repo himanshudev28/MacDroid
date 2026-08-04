@@ -1,3 +1,4 @@
+import { memo } from "react";
 import Icon from "../Icon";
 import EmptyState from "../EmptyState";
 import type { DroidConfig } from "../../lib/bridge";
@@ -6,7 +7,7 @@ import type { DroidConfig } from "../../lib/bridge";
 /// NSPasteboard watcher + the inbound write path) — this view is just a status
 /// display + a shortcut to the toggle, mirroring the Electron ClipboardView
 /// (which was also status-only, with the real switch living in Settings).
-export default function ClipboardView({
+function ClipboardView({
   linked,
   config,
   onToggle,
@@ -60,3 +61,10 @@ export default function ClipboardView({
     </div>
   );
 }
+
+/* Memoised: App holds `media`, which the phone pushes once a second while
+   something is playing. Without this, every one of those ticks re-rendered this
+   whole view (thumbnail grids, file lists) even though none of its props
+   changed. All props here are primitives or stable useCallback refs, so the
+   comparison is sound. */
+export default memo(ClipboardView);

@@ -20,6 +20,9 @@ export default function DevicesView({
   onUnpair,
   onReconnect,
   onScreenshot,
+  devices,
+  selected,
+  onSelect,
 }: {
   connected: AdbDevice | null;
   info: DeviceInfo | null;
@@ -34,7 +37,38 @@ export default function DevicesView({
   onUnpair: () => void;
   onReconnect: () => void;
   onScreenshot: () => void;
+  /// Every ready ADB device. More than one and the picker appears — before
+  /// this, a second phone silently reassigned every ADB action to whichever
+  /// enumerated first.
+  devices: AdbDevice[];
+  selected: string | null;
+  onSelect: (serial: string) => void;
 }) {
+  const picker =
+    devices.length > 1 ? (
+      <div className="card flex items-center gap-3 px-4 py-3">
+        <Icon name="terminal" size={14} className="shrink-0 text-dim" />
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-medium text-fg">ADB device</p>
+          <p className="mt-0.5 text-[11px] text-dim">
+            {devices.length} connected — pick which one the ADB actions target.
+          </p>
+        </div>
+        <select
+          value={selected ?? ""}
+          onChange={(e) => onSelect(e.target.value)}
+          aria-label="ADB device"
+          className="field shrink-0 max-w-56"
+        >
+          {devices.map((d) => (
+            <option key={d.serial} value={d.serial}>
+              {d.model || d.serial} ({d.transport})
+            </option>
+          ))}
+        </select>
+      </div>
+    ) : null;
+
   return (
     <div className="h-full overflow-y-auto p-6">
       <div className="mx-auto max-w-xl space-y-3">
@@ -45,6 +79,8 @@ export default function DevicesView({
             Reconnect
           </button>
         </div>
+
+        {picker}
 
         {connected ? <AdbDeviceCard device={connected} info={info} appInfo={appInfo} /> : <EmptyDeviceCard onPair={onPair} />}
 

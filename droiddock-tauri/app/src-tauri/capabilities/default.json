@@ -1,13 +1,15 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window and the mirror pop-out window",
-  "windows": ["main", "mirror"],
+  "description": "Capability for all app windows",
+  "windows": ["*"],
   "permissions": [
     "core:default",
     "core:window:allow-close",
+    "core:window:allow-start-dragging",
     "opener:default",
     "notification:default",
     "dialog:default"
   ]
 }
+

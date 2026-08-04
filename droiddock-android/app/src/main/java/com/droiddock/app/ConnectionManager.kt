@@ -30,7 +30,9 @@ import java.util.concurrent.atomic.AtomicInteger
 object ConnectionManager {
     // Capabilities this companion advertises to the Mac (Phase 6a app-link transport).
     // "photosync" (Phase 18) — Mac only expects `photos-changed` pings if this is present.
-    private val CAPS = listOf("info", "fs", "photos", "shot", "photosync")
+    // "wallpaper"/"apps" (Tier B) — the Mac only asks for those if advertised here,
+    // so an older phone build simply never gets the requests.
+    private val CAPS = listOf("info", "fs", "photos", "shot", "photosync", "wallpaper", "apps", LinkCrypto.CAP)
 
     val connected = MutableStateFlow(false)
     val macName = MutableStateFlow<String?>(null)
@@ -54,6 +56,9 @@ object ConnectionManager {
     private var loopJob: Job? = null
     @Volatile private var ws: WebSocket? = null
     @Volatile private var lastFromMac: String? = null
+    /// Tier C: set only when the Mac's welcome echoed "enc". Null means this
+    /// session is plaintext — the default, and how every pre-Tier-C build ran.
+    @Volatile private var linkKey: javax.crypto.spec.SecretKeySpec? = null
     // Last copy we couldn't deliver (link was down). Flushed on the next reconnect
     // so a copy made during a Wi-Fi blip / Mac restart still reaches the Mac.
     @Volatile private var pendingClip: String? = null
@@ -102,7 +107,7 @@ object ConnectionManager {
         Prefs.setPausedUntil(appCtx, until)
         pausedUntil.value = until
         // best-effort: tell the Mac to stop its mDNS/reconnect attempts, then drop the link
-        runCatching { ws?.send(JSONObject().put("type", "pause").put("until", until).toString()) }
+        runCatching { ws?.send(wire(JSONObject().put("type", "pause").put("until", until))) }
         runCatching { ws?.close(1000, "paused") }
         ws = null
         connected.value = false
@@ -156,13 +161,29 @@ object ConnectionManager {
             // Known IPs failed — broadcast on the LAN to find the Mac's current IP.
             // Handles WiFi-switch without re-pairing: both devices on new network,
             // Mac answers the broadcast, phone saves the fresh IP.
+            var broadcastIp: String? = null
             if (!linked) {
-                val discovered = discoverViaBroadcast(pairing.token, pairing.port + 1)
-                if (discovered != null && !pairing.ips.contains(discovered)) {
-                    lastEvent.value = "found Mac at $discovered"
-                    if (attempt(discovered, pairing)) {
+                broadcastIp = discoverViaBroadcast(pairing.token, pairing.port + 1)
+                if (broadcastIp != null && !pairing.ips.contains(broadcastIp)) {
+                    lastEvent.value = "found Mac at $broadcastIp"
+                    if (attempt(broadcastIp, pairing)) {
                         linked = true
-                        Prefs.save(appCtx, pairing.copy(ips = listOf(discovered) + pairing.ips.take(2)))
+                        Prefs.save(appCtx, pairing.copy(ips = listOf(broadcastIp) + pairing.ips.take(2)))
+                    }
+                }
+            }
+            // Tier C: last resort. Some routers drop directed broadcast or
+            // isolate clients, so the probe above never gets an answer even
+            // though the Mac is right there — multicast usually still works.
+            // Auth is unchanged: this only supplies an address to try. Skip any
+            // address the two paths above already exhausted this round.
+            if (!linked) {
+                val viaMdns = MdnsDiscovery.find(appCtx)
+                if (viaMdns != null && viaMdns != broadcastIp && !pairing.ips.contains(viaMdns)) {
+                    lastEvent.value = "found Mac at $viaMdns (mDNS)"
+                    if (attempt(viaMdns, pairing)) {
+                        linked = true
+                        Prefs.save(appCtx, pairing.copy(ips = listOf(viaMdns) + pairing.ips.take(2)))
                     }
                 }
             }
@@ -185,11 +206,21 @@ object ConnectionManager {
                     .put("token", pairing.token)
                     .put("name", deviceName())
                     .put("caps", JSONArray(CAPS))
+                    // Stable across reconnects and re-pairs; the Mac keys its
+                    // photo-sync ledger on this instead of the model name.
+                    .put("deviceId", Prefs.deviceId(appCtx))
                 webSocket.send(hello.toString())
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                val msg = runCatching { JSONObject(text) }.getOrNull() ?: return
+                val outer = runCatching { JSONObject(text) }.getOrNull() ?: return
+                // Tier C: unwrap first so every branch below keeps seeing
+                // plaintext. An envelope that fails to authenticate is dropped,
+                // never routed.
+                val msg = if (outer.optString("type") == "enc") {
+                    val key = linkKey ?: return
+                    LinkCrypto.open(key, outer) ?: return
+                } else outer
                 when (msg.optString("type")) {
                     "welcome" -> {
                         didConnect = true
@@ -199,25 +230,44 @@ object ConnectionManager {
                         macCaps.value = msg.optJSONArray("caps")?.let { arr ->
                             List(arr.length()) { i -> arr.optString(i) }
                         } ?: emptyList()
+                        // The Mac only echoes "enc" when the user enabled it
+                        // there. If it stays quiet we simply run in plaintext,
+                        // so an older Mac build is never stranded.
+                        linkKey = if (macCaps.value.contains(LinkCrypto.CAP)) {
+                            LinkCrypto.derive(pairing.token)
+                        } else null
                         lastEvent.value = "linked"
                         TransferManager.attach(appCtx, webSocket)
-                        MediaRemote.push()
+                        // forceArt: a fresh Mac has no album-art cache, and the
+                        // track hasn't "changed" from the phone's point of view.
+                        MediaRemote.push(true)
                         NotifListener.pushActive()
                         DeviceInfo.push(appCtx)
                         flushPendingClip() // deliver any copy made while we were offline
                     }
+                    // Tier C link-quality probe. Echo `t` back untouched — it's
+                    // the Mac's own clock reading, so this needs no time sync
+                    // here, and answering in the message loop (rather than at
+                    // the OkHttp ping layer) is what proves this loop is alive.
+                    "ping" -> reply(
+                        webSocket, JSONObject().put("type", "pong").put("t", msg.optLong("t"))
+                    )
                     "clipboard" -> {
                         val t = msg.optString("text")
                         if (t.isNotEmpty()) setClipboard(t)
                     }
                     "reply" -> {
                         val ok = NotifStore.reply(appCtx, msg.optString("key"), msg.optString("text"))
-                        webSocket.send(
-                            JSONObject().put("type", "reply-result").put("ok", ok).toString()
-                        )
+                        reply(webSocket, JSONObject().put("type", "reply-result").put("ok", ok))
                         lastEvent.value = if (ok) "reply → app" else "reply failed"
                     }
                     "dismiss" -> NotifStore.dismiss(msg.optString("key"))
+                    // AirSync v4 parity: tap a notification's action button on
+                    // the Mac and fire the original PendingIntent here.
+                    "notif-action" -> {
+                        val ok = NotifStore.fireAction(msg.optInt("index"), msg.optString("key"))
+                        lastEvent.value = if (ok) "action → app" else "action failed"
+                    }
                     "sms-threads" -> respond(webSocket, msg, "sms-threads") {
                         it.put("threads", SmsRepo.threads(appCtx))
                     }
@@ -271,10 +321,10 @@ object ConnectionManager {
                             try {
                                 TransferManager.sendThumb(reqId, PhotoRepo.thumbBytes(appCtx, id, kind))
                             } catch (e: Exception) {
-                                webSocket.send(
+                                reply(
+                                    webSocket,
                                     JSONObject().put("type", "photo-thumb-error")
                                         .put("reqId", reqId).put("error", e.message ?: "thumb failed")
-                                        .toString()
                                 )
                             }
                         }
@@ -301,6 +351,44 @@ object ConnectionManager {
                         }
                     }
                     "media-cmd" -> MediaRemote.command(msg.optString("cmd"), msg.optInt("value"))
+                    // ── Tier B: wallpaper / apps ─────────────────────────────
+                    "wallpaper" -> respond(webSocket, msg, "wallpaper") {
+                        it.put(
+                            "data",
+                            android.util.Base64.encodeToString(
+                                WallpaperRepo.bytes(appCtx), android.util.Base64.NO_WRAP
+                            )
+                        )
+                    }
+                    "apps-list" -> respond(webSocket, msg, "apps-list") {
+                        it.put("apps", AppsRepo.list(appCtx))
+                    }
+                    "app-icon" -> {
+                        // Same shape as photo-thumb: the icon rides the existing
+                        // KIND_THUMB binary frame keyed by reqId, so no new
+                        // transport is introduced for it.
+                        val reqId = msg.optInt("reqId")
+                        val pkg = msg.optString("pkg")
+                        scope.launch {
+                            try {
+                                TransferManager.sendThumb(reqId, AppsRepo.iconBytes(appCtx, pkg))
+                            } catch (e: Exception) {
+                                reply(
+                                    webSocket,
+                                    JSONObject().put("type", "app-icon-error")
+                                        .put("reqId", reqId)
+                                        .put("error", e.message ?: "icon failed")
+                                )
+                            }
+                        }
+                    }
+                    "app-launch" -> {
+                        val pkg = msg.optString("pkg")
+                        if (pkg.isNotEmpty()) {
+                            val ok = AppsRepo.launch(appCtx, pkg)
+                            lastEvent.value = if (ok) "opened $pkg" else "could not open $pkg"
+                        }
+                    }
                     "mirror-start" -> {
                         val inst = MirrorService.instance
                         if (inst != null && inst.isScreenAlive()) inst.resumeStreaming()
@@ -328,17 +416,26 @@ object ConnectionManager {
                             android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
                         MirrorService.instance?.flip(facing)
                     }
-                    "mirror-tap" -> AccessibilityControl.tap(msg.optDouble("x"), msg.optDouble("y"))
-                    "mirror-swipe" -> AccessibilityControl.swipe(
-                        msg.optDouble("x1"), msg.optDouble("y1"),
-                        msg.optDouble("x2"), msg.optDouble("y2"), msg.optInt("dur", 120)
-                    )
-                    "mirror-key" -> AccessibilityControl.key(msg.optString("key"))
-                    "mirror-text" -> when (msg.optString("op")) {
-                        "backspace" -> AccessibilityControl.backspace()
-                        "enter" -> AccessibilityControl.typeText("\n")
-                        else -> AccessibilityControl.typeText(msg.optString("text"))
-                    }
+                    // Screen control. All four need the accessibility service;
+                    // without it they no-op silently, so tell the Mac once
+                    // rather than letting the user keep clicking at a live
+                    // video that never responds.
+                    "mirror-tap", "mirror-swipe", "mirror-key", "mirror-text" ->
+                        if (!AccessibilityControl.available()) {
+                            reportControlUnavailable(webSocket)
+                        } else when (msg.optString("type")) {
+                            "mirror-tap" -> AccessibilityControl.tap(msg.optDouble("x"), msg.optDouble("y"))
+                            "mirror-swipe" -> AccessibilityControl.swipe(
+                                msg.optDouble("x1"), msg.optDouble("y1"),
+                                msg.optDouble("x2"), msg.optDouble("y2"), msg.optInt("dur", 120)
+                            )
+                            "mirror-key" -> AccessibilityControl.key(msg.optString("key"))
+                            "mirror-text" -> when (msg.optString("op")) {
+                                "backspace" -> AccessibilityControl.backspace()
+                                "enter" -> AccessibilityControl.typeText("\n")
+                                else -> AccessibilityControl.typeText(msg.optString("text"))
+                            }
+                        }
                 }
             }
 
@@ -384,7 +481,49 @@ object ConnectionManager {
         else MirrorPermissionActivity.request(appCtx, source, facing)
     }
 
-    fun send(obj: JSONObject): Boolean = ws?.send(obj.toString()) ?: false
+    /** Seal if this session negotiated encryption. Every JSON write on this
+     *  link goes through here — a direct `socket.send(obj.toString())` anywhere
+     *  would silently emit plaintext on an encrypted session, which is the one
+     *  failure mode optional crypto must not have. */
+    internal fun wire(obj: JSONObject): String {
+        val key = linkKey ?: return obj.toString()
+        return runCatching { LinkCrypto.seal(key, obj).toString() }.getOrElse {
+            // Never silently downgrade to plaintext — a caller that thinks it
+            // is encrypted must not have its message sent in the clear.
+            ""
+        }
+    }
+
+    /** Reply on a specific socket (the listener has `webSocket` in hand before
+     *  `ws` is even assigned), still honouring the session key. */
+    private fun reply(socket: WebSocket, obj: JSONObject): Boolean {
+        val payload = wire(obj)
+        return payload.isNotEmpty() && socket.send(payload)
+    }
+
+    @Volatile private var lastControlWarnAt = 0L
+
+    /**
+     * Tell the Mac its screen-control message went nowhere.
+     *
+     * Throttled to one message per 5s: a scroll or a dragged swipe arrives as a
+     * burst, and the point is to explain the problem once, not to answer every
+     * frame of it.
+     */
+    private fun reportControlUnavailable(socket: WebSocket) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastControlWarnAt < 5_000) return
+        lastControlWarnAt = now
+        lastEvent.value = "screen control needs Accessibility"
+        reply(socket, JSONObject().put("type", "control-unavailable"))
+    }
+
+    fun send(obj: JSONObject): Boolean {
+        val socket = ws ?: return false
+        val payload = wire(obj)
+        if (payload.isEmpty()) return false
+        return socket.send(payload)
+    }
 
     /** Send one H.264 access unit as a binary frame: [kind=3][flags][payload].
      *  flags bit0 = keyframe. Used by MirrorService for screen mirroring. */
@@ -410,7 +549,7 @@ object ConnectionManager {
                 }
             )
         }
-        socket.send(out.toString())
+        socket.send(wire(out))
     }
 
     fun sendFileToMac(uri: android.net.Uri, ctx: Context, onResult: (Boolean, String?) -> Unit) =
@@ -422,7 +561,7 @@ object ConnectionManager {
         val reqId = nextMacFsReqId()
         val deferred = CompletableDeferred<JSONObject>()
         pendingMacFs[reqId] = deferred
-        socket.send(JSONObject().put("type", "mac-fs-list").put("reqId", reqId).put("path", path).toString())
+        socket.send(wire(JSONObject().put("type", "mac-fs-list").put("reqId", reqId).put("path", path)))
         val reply = deferred.await()
         if (reply.optString("type").endsWith("-error")) {
             throw Exception(reply.optString("error").ifEmpty { "Could not list folder" })
@@ -441,7 +580,7 @@ object ConnectionManager {
         val reqId = nextMacFsReqId()
         val deferred = CompletableDeferred<JSONObject>()
         pendingMacFs[reqId] = deferred
-        socket.send(JSONObject().put("type", "mac-fs-pull").put("reqId", reqId).put("path", path).toString())
+        socket.send(wire(JSONObject().put("type", "mac-fs-pull").put("reqId", reqId).put("path", path)))
         val begin = deferred.await()
         if (begin.optString("type").endsWith("-error")) {
             return Result.failure(Exception(begin.optString("error").ifEmpty { "Pull failed" }))
@@ -452,6 +591,17 @@ object ConnectionManager {
         return TransferManager.receiveMacFsPull(reqId, transferId, size, name, onProgress)
     }
 
+    /** Tier D — drive the Mac's pointer/keyboard. Fire-and-forget by design:
+     *  the Mac has no ack for input events, and a trackpad that waited for one
+     *  would feel broken. Only reachable while the Mac advertises "remote",
+     *  which it only does when the user enabled it there. */
+    fun sendRemote(action: String, build: (JSONObject) -> Unit = {}): Boolean {
+        if (!macCaps.value.contains("remote")) return false
+        val obj = JSONObject().put("type", "remote").put("action", action)
+        runCatching { build(obj) }
+        return send(obj)
+    }
+
     fun sendClipboardText(text: String): Boolean {
         if (text.isEmpty()) return false
         if (text == lastFromMac) return true // avoid echo loops
@@ -460,7 +610,7 @@ object ConnectionManager {
             pendingClip = text // queue it; flushPendingClip() delivers on reconnect
             return false
         }
-        val ok = socket.send(JSONObject().put("type", "clipboard").put("text", text).toString())
+        val ok = socket.send(wire(JSONObject().put("type", "clipboard").put("text", text)))
         pendingClip = if (ok) null else text
         return ok
     }
@@ -470,7 +620,7 @@ object ConnectionManager {
         val p = pendingClip ?: return
         val socket = ws ?: return
         if (p == lastFromMac) { pendingClip = null; return }
-        if (socket.send(JSONObject().put("type", "clipboard").put("text", p).toString())) {
+        if (socket.send(wire(JSONObject().put("type", "clipboard").put("text", p)))) {
             pendingClip = null
             lastEvent.value = "clipboard → Mac"
         }

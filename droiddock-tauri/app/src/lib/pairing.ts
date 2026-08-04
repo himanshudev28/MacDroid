@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 
 export type PairingInfo = {
   host: string;
@@ -8,6 +8,15 @@ export type PairingInfo = {
 };
 
 export function getPairingInfo(): Promise<PairingInfo> {
+  // Deliberately NOT mocked outside Tauri, unlike the read-only commands in
+  // `bridge.ts`. `vite dev` also serves this bundle at localhost:1420 in a
+  // plain browser, and a placeholder token here renders a QR that *looks*
+  // real — scanning it stores a token the Mac will never accept, and the phone
+  // then fails every handshake with no visible reason. Both callers already
+  // handle a rejection by not drawing a QR at all, which is the honest result.
+  if (!isTauri()) {
+    return Promise.reject(new Error("Pairing is only available inside the DroidDock app"));
+  }
   return invoke("get_pairing_info");
 }
 

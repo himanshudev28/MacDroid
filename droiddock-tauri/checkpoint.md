@@ -572,8 +572,9 @@ Phases 12–19, so its fixes below are already merged into the shared tree
   defense. If anything webview-loaded breaks mysteriously, check the CSP
   first.
 
-**OPEN FINDINGS — verified against source but NOT fixed here (they belong to
-the Phases 12–19 session's files; do not let them get silently dropped):**
+**OPEN FINDINGS — ALL SIX NOW FIXED (2026-08-04).** Kept below for the record;
+see "Open findings — ALL FIXED" further down for what each fix was. The
+`adb.rs` items in this list are the only ones still outstanding.
 - **CRITICAL / Phase 19:** the phone's Mac Files tab opens with `path:""`;
   the Mac has no empty-path branch (`canonicalize("")` errors out) and no
   root-discovery message — the feature errors immediately on open.
@@ -616,6 +617,348 @@ the Phases 12–19 session's files; do not let them get silently dropped):**
   items re-toast an error on every pass; edit-cache watcher/lock maps only
   shrink via cap-eviction; the SettingsView roots editor accepts relative
   paths that can never match `check_root`.
+
+## UI Tier A — AirSync-inspired shell (2026-08-04; unverified on hardware)
+
+Driven by a comparison against [sameerasw/airsync-mac](https://github.com/sameerasw/airsync-mac);
+the full gap table is in `AIRSYNC_GAP_ANALYSIS.md` (repo root, sibling to this
+file). **Scope was explicitly "Tier A — the UI", keeping all 13 views**, and
+the user's standing instruction for this work was *"do not break my existing
+flow — some buttons/tabs have different work"*. So every change below is
+either additive or presentation-only; **no view's internals or actions were
+modified**. `FilesView`'s double-click split (directory → open, file →
+edit-in-place), the Enter-to-send fields, and every existing toggle handler
+are untouched.
+
+**The structural change.** AirSync's sidebar *is the phone*; DroidDock's was a
+13-row nav list. Now: a 56px icon rail (all 13 destinations, same Connect /
+Conversations / Library grouping, labels moved to tooltips) + a 256px phone
+panel + content. `Sidebar.tsx` was deleted; its nav vocabulary moved to
+`lib/nav.ts` (`ViewId` now lives there — `DashboardView`'s import was
+repointed).
+
+**New:** `components/phone/` — `PhoneCard` (the persistent live-phone object),
+`ConnectionPill` (+ popover: device, Mac address, ADB serial/mode, pause
+state), `PhoneClock` (local `Date()`, minute-boundary ticks — AirSync's
+`TimeView` also uses the Mac's own clock, so no protocol addition), `MiniPlayer`
+(reuses the existing `media` push / `media-cmd`), `StatusStrip` (battery glyph
+drawn to the real percentage, volume popover), `QuickActions`.
+`components/Rail.tsx`, `components/Onboarding.tsx` (4 steps, skippable, first
+run only), `components/MenubarPanel.tsx`, `lib/nav.ts`, `lib/appearance.ts`.
+
+**Backdrop seam:** AirSync paints the phone's real wallpaper (or current album
+art) behind that card. The wire protocol carries neither, so the card renders a
+generated aurora keyed off the live macOS accent. `PhoneCard`'s `artwork` prop
+is the seam — pass a data URL and it takes over with a cross-fade, no other
+change. That's the first thing to wire if Tier B (wallpaper/album-art sync)
+ever happens.
+
+**Changed (presentation only):**
+- `NotificationsView` — grouped-by-app stacking with per-group expand and a
+  toolbar toggle back to the flat list (persisted, `notifStacks`). Defaults to
+  grouped. `NotifRow`/`CallRow` and every reply/dismiss action are byte-identical.
+- `SettingsView` — one scrolling page became a 6-category two-pane view.
+  Categories are a 1:1 remap of the existing sections; **no control changed
+  group**. New `Appearance` pane: window-opacity slider (CSS `--app-opacity` on
+  `.app-surface`, revealing the already-configured native vibrancy; stored in
+  `localStorage`, not `droiddock.json`, since it's a display preference with no
+  bearing on the link) + a read-only system-accent swatch.
+- `Icon.tsx` — optional `title` prop (renders `<title>`; stays `aria-hidden`
+  without one).
+
+**New Rust:** `clipboard::clipboard_push_now` (explicit "send clipboard now" —
+deliberately bypasses the `last_seen`/`last_from_phone` echo guards, since
+re-sending is what was asked; still honours `clipboardSync` + pause, and still
+arms the guards so the next watcher tick doesn't duplicate it).
+`tray::menubar_hide` / `tray::open_main_window` + the panel window itself.
+
+**⚠️ The one behavioural change to flag:** the tray icon's **left-click now
+opens the menu-bar panel; the Pause/Resume/Quit menu moved to right-click**
+(`show_menu_on_left_click(false)`). That's the standard macOS menu-bar-app
+split and what AirSync does — no menu item was removed or moved — but it *is* a
+different mouse button than before. Two-line revert in `tray.rs::build` if
+unwanted.
+
+**Deliberately NOT done:** global drag-and-drop file send. `FilesView` already
+registers its own `onDragDropEvent`; a second app-level listener would
+double-handle every drop. Left entirely to `FilesView`.
+
+**Verified:** `npx tsc --noEmit` clean, `npm run build` clean, `cargo build`
+clean, `cargo test` 23/23 pass. **NOT verified:** anything on real hardware or
+even a running app — the phone card's live data (battery, media, ADB pill),
+the menu-bar panel's window positioning under the tray icon, and its
+click-away dismissal have never been seen rendered. Same standing debt as
+Phases 3–19.
+
+## AirSync v4 changelog match (2026-08-04; unverified on hardware)
+
+Checked the v4 "What's new" list item by item. Built the achievable gaps:
+
+- **Notification progress, priority, action buttons.** Android now sends
+  `progress`/`progressMax`/`progressIndeterminate`, `priority`, `ongoing`, and
+  up to 3 non-reply action labels; `notif-action` fires one back by index (index,
+  not label — two buttons can share a label). Two subtleties: the re-post dedupe
+  hash now *includes* progress, or every update after the first would be
+  swallowed as a duplicate; and the blanket `isOngoing` drop had to make an
+  exception for progress notifications, since a download is ongoing by nature
+  and was previously discarded outright. Mac-side, `low`/`min` priority and any
+  progress notification land in the panel but raise **no banner** — Android
+  already judged them background, and a banner per percent is unusable.
+- **ADB device picker.** Previously auto-picked whichever device enumerated
+  first, silently reassigning every ADB action when a second phone appeared.
+  Devices tab now shows a picker when more than one is ready; the explicit
+  choice survives until that device disappears.
+- **Flex display.** `--new-display=<W>×<H>` for desktop mode, Settings-selectable
+  (Auto / 1280×800 / 1920×1080 / 2560×1440).
+- **Default mirror mode.** Wi-Fi / ADB / Desktop; the Mirror tab badges the
+  chosen route instead of always highlighting Wi-Fi.
+- **Menubar unread count.** `●N` beside the menu-bar text, cleared when the
+  panel opens. Backfill on connect is deliberately *not* counted, or every
+  reconnect would badge the menu bar.
+- **Call controls in the menubar panel.** Mute / speaker / hang up without
+  raising the main window. ADB-only, same constraint the main overlay has —
+  there is no Wi-Fi control message for these and inventing one would need an
+  Android receive path that doesn't exist.
+
+**Already had, no work needed:** Bonjour discovery (Tier C), ADB QR pairing,
+mirror navigation buttons + keyboard + scroll, wireless mirroring, seekbar sync,
+easier app muting, improved app search, new settings UI (Mac), keyboard
+shortcuts, efficiency pass, UI tooltips, **device-lost pop-up**.
+
+**Not built, and why:** BLE nearby transport (a whole second transport stack) ·
+WebDAV remote browsing (the one substantive gap left) · Quick Share pop-up
+(~12k lines of reverse-engineered protobuf) · Apple Intelligence summarisation
+(macOS 15.1+ framework for a cosmetic feature) · Control-Centre playback
+(needs `MPNowPlayingInfoCenter`) · menu-bar text marquee (we truncate; macOS
+gives no marquee for status items) · TouchID for QR scan · Lottie animations,
+new app icon, custom error reporting (cosmetic/infra) · native-mirroring
+sub-items (our Wi-Fi mirror is a different implementation that already covers
+navigation, keyboard and wireless).
+
+**Verified:** `cargo test` **49/49**, `cargo build` zero warnings,
+`tsc --noEmit`, `npm run build`, `./gradlew :app:compileDebugKotlin`.
+
+## Menu bar, low-battery alerts, status widget (2026-08-04; unverified on hardware)
+
+The last three AirSync+ items. New `statusbar.rs` holds the phone's
+battery/media snapshot that all three read, rather than each re-deriving it.
+
+**Menu-bar customisation.** `Config.menubar_text` (`none`/`battery`/`media`/
+`device`), `menubar_battery_style` (`percent`/`bar`/`both`), `menubar_max_len`,
+`menubar_album_art` (`none`/`thumb`/`background`, applied in the panel's
+now-playing card). New Settings › Menu bar pane; the title repaints immediately
+on change and on every `device-info`/`media` push.
+
+> **One AirSync setting is NOT reproduced: menu-bar font size.** Tauri exposes
+> only `TrayIcon::set_title`, not the underlying `NSStatusItem` button, so
+> there is no supported way to set an attributed title. Rather than ship a
+> slider that does nothing, the max-length cap is offered instead — it controls
+> how much menu bar the app occupies, which is what the font setting is for.
+> If pixel-accurate parity ever matters this needs raw AppKit access to the
+> status item, which Tauri doesn't hand out.
+
+**Low battery alerts.** `low_battery_alert` (default **on**) +
+`low_battery_pct` (default 20). Fires on a *downward crossing* only: below
+threshold, not charging, and not already alerted at or below that level.
+Charging or recovering above the threshold re-arms it, so a phone hovering at
+the boundary produces one banner per discharge rather than one per
+`device-info` push. Honours the global pause. **AirSync markets this but hasn't
+shipped it** (its own onboarding marks it "Soon").
+
+**Status widget.** A borderless, always-on-top, drag-anywhere window at
+`#widget` (same routing trick as the mirror pop-out and menu-bar panel),
+`visible_on_all_workspaces` so it survives a Space switch. Battery bar +
+now-playing + transport. Toggle in Settings and in the tray menu; persisted, so
+it reopens on restart.
+
+> **This is deliberately not a macOS Widget.** Real ones are WidgetKit — a
+> Swift app extension embedded in the bundle — which a Tauri app cannot
+> produce. The floating panel delivers the same glanceable value; the Settings
+> copy and the component doc both say so rather than implying parity. AirSync
+> hasn't shipped its widgets either ("Soon").
+
+**Verified:** `cargo test` **48/48** (7 new, covering battery-style rendering,
+char-boundary truncation on multi-byte titles, and the alert's
+once-per-discharge/re-arm/pause behaviour), `cargo build` zero warnings,
+`tsc --noEmit`, `npm run build`, `./gradlew :app:compileDebugKotlin`.
+
+## Open findings — ALL FIXED (2026-08-04, after Tiers B–D)
+
+The 3 CRITICAL + 2 MAJOR findings that had been sitting unfixed since the
+2026-07-04 review session are now closed, plus the pre-existing reqId
+misroute. **Still unverified on hardware** — these are code fixes with unit
+tests, not a hardware pass.
+
+1. **CRITICAL / Phase 19 — Mac Files errored the instant it opened.** The
+   phone's tab opens with `path: ""`, which hit `canonicalize("")` and failed.
+   Added `mac_fs::list_roots()`: an empty path now returns the configured
+   roots as a synthetic top level. Root entries carry an extra absolute
+   `path` field (skip-if-none, so ordinary entries are unchanged) because a
+   root's display name is only its basename and the phone has no base to join
+   it to; `macFsEntryPath()` prefers that field when present. 3 tests.
+2. **CRITICAL / Phase 17 — edit writeback never overwrote anything.** It reused
+   `fs-push-begin`, and Android's `FileRepo.uniqueDest` never overwrites, so
+   every save landed as `name (2).ext`, `name (3).ext`, … while the Mac
+   reported "synced" and the file the user was actually editing was never
+   touched. `transfer::push` gained an explicit `overwrite` parameter: `true`
+   only from the writeback path, `false` for user-initiated pushes (where
+   not clobbering a same-named file is the right default). Android honours it
+   in `beginPush`.
+3. **CRITICAL / Phase 19 — `mac-fs-pull` dropped its leading chunks.** The Mac
+   streamed immediately after `mac-fs-pull-begin`, but the phone only registers
+   its receiver *after* handling that reply, so the first chunks went nowhere —
+   and `MacFsPullReceiver.finish()` had no size check, so the result was a
+   silently truncated file reported as success. Added a `mac-fs-pull-ready`
+   ack: the Mac arms a waiter *before* announcing the transfer and blocks until
+   the phone confirms its receiver exists. A 5s timeout means an older phone
+   build degrades to the previous (racy) behaviour instead of hanging.
+   `finish()` now also fails a short file rather than returning it.
+4. **MAJOR / Phase 18 — photo-sync ledger collided on same-model phones.** It
+   was keyed on `hello.name` (= "MANUFACTURER MODEL"), so two identical phones
+   shared one bucket and each skipped the other's photos as already-synced.
+   `hello` gained an optional `deviceId` — a UUID the phone generates once and
+   persists in `Prefs`. `current_phone_key()` prefers it and falls back to the
+   name for older builds. The old `current_phone_name()` accessor was **deleted**
+   rather than left in place: two near-identical accessors is exactly how a
+   future caller picks the name-keyed one again.
+5. **MAJOR / Phase 19 — reverse browsing was on by default.** No toggle, and it
+   ignored the global pause. Now `Config.mac_fs_enabled`, **default off**, with
+   a Settings switch. The Mac only advertises the `"macfs"` cap while it's on,
+   so the phone's tab is absent rather than broken; both handlers re-check the
+   flag and the pause per request rather than trusting the advert. While
+   fixing this, `mac-fs-list` was also moved off the inbound read loop (it was
+   awaited inline — a slow or hung root stalled routing for every other
+   feature).
+6. **Pre-existing since Phase 2 — reqId fast-path could be hijacked.** Any
+   message whose numeric `reqId` matched an in-flight request resolved it,
+   regardless of `type`, so a crafted reply could be delivered as the answer to
+   an unrelated request (contacts, sms, fs-list…). The pending table now stores
+   the expected reply *family* alongside each waiter and verifies it before
+   resolving. Family = the request type with a trailing `-begin` stripped
+   (`fs-push-begin` is answered by `fs-push`/`fs-push-error`), matched as
+   `type == family || type == "family-…"`. 5 tests, including that an untyped
+   request can never be resolved.
+
+### `adb.rs` items from the same review — also fixed
+These were the last outstanding entries in the old OPEN FINDINGS list, and
+three of them are process leaks, so they double as resource fixes:
+
+- **Timed-out adb calls leaked their child process.** `run()` now sets
+  `kill_on_drop(true)`; on timeout the future is dropped and the child went on
+  running unsupervised. The 1s call-state poller made this a steady leak.
+- **Every scrcpy session left a zombie**, and scrcpy's console output inherited
+  the app's stdio. All four spawn sites are now detached with stdio nulled
+  (matching the Electron reference's `{detached:true, stdio:'ignore'}`), and
+  the `Child` is reaped on a detached thread instead of being dropped.
+- **`parse_volume_get` split on an unanchored `"is "`** — a device name
+  containing "is " (e.g. "Louis Phone") shifted the parse onto the wrong token.
+  Now anchored on the last occurrence.
+- **`extract_ip_port` could pair an IP with a distant later number.** The JS
+  regex it ports requires `ip:port` adjacency; it now does too.
+- **`device_info` made 4 sequential adb round-trips** where the reference uses
+  `Promise.all` — four ~200ms shells in series was a visibly slow Devices tab.
+  Now `tokio::join!`.
+
+Not fixed: the `adb track-devices` child on quit (item 3) — it already has a
+`stop` flag and kills itself on the next read, and the screenshot filename
+format (item 7), which is cosmetic.
+
+**Verified:** `cargo test` **41/41** (10 new), `cargo build` **zero warnings**,
+`tsc --noEmit`, `npm run build`, `./gradlew :app:compileDebugKotlin`.
+
+## Tiers B, C, D — AirSync feature parity (2026-08-04; unverified on hardware)
+
+Built straight through on explicit instruction ("proceed b,c,d one by one").
+Full before/after table in `AIRSYNC_GAP_ANALYSIS.md` §5. **Android was
+unfrozen** for all three tiers, same as Phases 18–19.
+
+### Tier B — fill the phone card
+New protocol, all **caps-gated** so an older phone build simply never receives
+the requests: `wallpaper` and `apps-list` are numeric-reqId request/reply pairs
+shaped exactly like `photos-list`; `app-icon` answers over the **existing**
+KIND_THUMB binary frame (so it inherits the disjoint thumb-reqId namespace, the
+12s timeout and the `*-error` path for free); `app-launch` is fire-and-forget.
+`hello.caps` gained `"wallpaper"`/`"apps"`.
+
+- **Android:** `AppsRepo.kt` (LAUNCHER-intent query + a `<queries>` manifest
+  element rather than the broad `QUERY_ALL_PACKAGES` permission; icons as PNG
+  because adaptive icons are transparent outside the mask), `WallpaperRepo.kt`
+  (720px JPEG; needs the MANAGE_EXTERNAL_STORAGE the app already holds, and
+  fails readably if declined). `MediaRemote` gained album art + a `trackKey` —
+  **art rides along only on a track change**, because `push()` fires once a
+  second while playing and a ~40 KB base64 image per tick would dwarf every
+  other message on the link combined. `NotifListener` now sends `pkg`.
+- **Mac:** `wallpaper_get`/`apps_list`/`app_icon`/`app_launch`, an in-memory
+  icon cache (`lib/appIcons.ts` — deliberately NOT persisted; a few hundred
+  base64 PNGs is the wrong thing to put in localStorage), the Apps grid with
+  prefix-ranked search, a recents row, real app icons on notification rows, and
+  wallpaper/album-art wired into `PhoneCard`'s `artwork` seam.
+
+### Tier C — connectivity
+- **Link quality** (`link_quality.rs`): JSON `ping{t}` → `pong{t}` every 4s,
+  EMA-smoothed, published as `good`/`fair`/`weak`/`stalled`. Deliberately not
+  OkHttp's protocol ping — that one is answered by the phone's TCP stack whether
+  or not the app is processing messages, so it can't detect the case this
+  exists for. `stalled` (socket open, phone silent) now drives the lost-link
+  strip and tints the connection pill.
+- **mDNS** (`mdns.rs`, new dep `mdns-sd`, Apache-2.0/MIT): advertises
+  `_droiddock._tcp` as a **third** fallback after known IPs and UDP broadcast.
+  UDP broadcast is untouched. **No secret is published** — the TXT record has
+  the Mac's name only; auth is still the WS token. Android browses via
+  `NsdManager` (`MdnsDiscovery.kt`), which always tears the browse down.
+- **AES-256-GCM** (`crypto.rs` + `LinkCrypto.kt`, opt-in, default off):
+  HKDF-SHA256 over the pairing token, `{"type":"enc","n":…,"d":…}` envelope,
+  fresh random nonce per message. Negotiated `hello.caps` → `welcome.caps`, and
+  it engages **only if the user enabled it**, so turning it on can never strand
+  an older phone. `welcome` itself is necessarily plaintext (it's the message
+  that says encryption is on). **Every** JSON write on both sides was routed
+  through one sealing helper — a stray `socket.send(obj.toString())` would
+  silently emit plaintext on an encrypted session, which is the one failure mode
+  optional crypto must not have. 6 unit tests cover round-trip, token binding,
+  nonce non-reuse, tampering, truncation and malformed envelopes.
+  **⚠️ Scope, stated in the module doc and the Settings copy: JSON control
+  messages only.** Binary frames (file chunks, thumbnails, app icons, mirror
+  video) stay in the clear — wrapping them means surgery on the hot
+  transfer/mirror loops. This is NOT "end-to-end encryption of everything", and
+  nothing in the UI claims it is.
+
+### Tier D
+- **Desktop mode** — `adb_desktop` (scrcpy `--new-display`), plus
+  `adb_mirror_app` to open one app in its own Mac window (double-click in the
+  Apps grid). Needs Android 11+ / scrcpy 2.5+; older combinations fail at spawn
+  with scrcpy's own message rather than silently degrading.
+- **Mac remote control** (`mac_remote.rs`) — the PRD's parked Phase 20, now
+  requested explicitly. **Gated harder than anything else in the app** because
+  it moves *authority*, not data: off by default (`Config.remote_control`),
+  caps-gated (`"remote"` advertised only while on), re-checked on every inbound
+  event, muted by the global pause, and restricted to a fixed key/mouse/scroll
+  vocabulary with **no** shell or arbitrary-keycode verb. macOS Accessibility
+  permission is a second, OS-enforced gate this code cannot bypass. Android got
+  a caps-gated "Remote" tab (trackpad + arrows + text), same absent-unless-
+  advertised pattern as Mac Files.
+- **Per-app notification muting** — now possible because Tier B added `pkg`.
+  Mutes the macOS banner only; the in-app list still records everything.
+
+### Resource pass (requested)
+- **~10 stacked `backdrop-filter` layers removed** from the phone card. Each
+  blurred element forces its own compositing pass every frame, and they sat over
+  an already-opaque backdrop (wallpaper/aurora + scrim) with essentially nothing
+  to reveal. Replaced with a flat `.on-glass` fill — visually identical over an
+  opaque parent. `backdrop-filter` is kept only for popovers/modals, which float
+  over arbitrary app content where the blur is real.
+- **Heavy views memoised** (`FilesView`, `PhotosView`, `AppsView`,
+  `SettingsView`, `ClipboardView`, `CallsView`). The phone pushes `media` once a
+  second while playing; without this, every tick re-rendered thumbnail grids and
+  file lists whose props hadn't changed.
+- `PhoneClock` ticks on the minute boundary, not every second (59 of 60 renders
+  were producing identical output).
+- Album art is sent once per track, not per tick (see Tier B).
+
+**Verified:** `npx tsc --noEmit`, `npm run build`, `cargo build` (zero
+warnings), `cargo test` **31/31**, `./gradlew :app:compileDebugKotlin`. **NOT
+verified:** any of it on real hardware. Nothing in Tiers B–D has been seen
+running, and the encryption and remote-control paths in particular have never
+completed a real handshake. Same standing debt as Phases 3–19.
 
 ## Design decisions (final direction — supersedes earlier attempts)
 1. ❌ Rejected: carrying over Electron's existing design tokens as-is.

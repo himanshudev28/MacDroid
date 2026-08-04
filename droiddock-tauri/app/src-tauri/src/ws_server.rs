@@ -30,19 +30,48 @@ const OUTBOX_CAP: usize = 16;
 const MAX_CONCURRENT_MAC_FS_PULLS: usize = 4;
 
 struct PhoneHandle {
-    /// The phone's own `hello.name` — used as the photo-sync ledger's device
-    /// key (see `photo_sync.rs`) since it's the only per-phone identifier
-    /// available on every connection, ADB-paired or not.
+    /// Tier C: present only when both sides negotiated `"enc"` — see
+    /// `crate::crypto`. `None` means this session runs in plaintext, which is
+    /// the default and the behaviour every build before Tier C had.
+    key: Option<crate::crypto::LinkKey>,
+    /// The phone's own `hello.name` — display only ("MANUFACTURER MODEL").
     name: String,
+    /// A stable per-install identifier the phone generates once and persists.
+    /// This, not `name`, keys the photo-sync ledger: two phones of the same
+    /// model report an identical `name`, so keying on that made each of them
+    /// skip the other's photos as "already synced". Absent on phone builds
+    /// older than this fix, where we fall back to `name` and keep the old
+    /// (imperfect but unchanged) behaviour.
+    device_id: Option<String>,
     caps: Vec<String>,
     outbox: mpsc::Sender<WsMessage>,
     kill: oneshot::Sender<()>,
 }
 
-/// The currently connected phone's `hello.name`, or `None` if nothing's
-/// linked right now. Used to key the photo-sync ledger by device.
-pub async fn current_phone_name(state: &SharedState) -> Option<String> {
-    state.phone.lock().await.as_ref().map(|p| p.name.clone())
+/// The connected phone's display name, read synchronously.
+///
+/// The async accessors below can't be used from the tray's title setter (not an
+/// async context), so this mirrors the last name onto a plain mutex that
+/// `emit_status` keeps current.
+pub fn last_phone_name(app: &AppHandle) -> Option<String> {
+    app.state::<LastPhoneName>().0.lock().unwrap().clone()
+}
+
+/// Sync mirror of the connected phone's name — see `last_phone_name`.
+#[derive(Default)]
+pub struct LastPhoneName(pub std::sync::Mutex<Option<String>>);
+
+/// `(ledger key, legacy name key)` — the pair `photo_sync` needs to migrate a
+/// ledger written before the key changed from display name to device id.
+/// `None` for the legacy half when the phone never sent a device id, since then
+/// the two keys are already the same thing.
+pub async fn current_phone_keys(state: &SharedState) -> Option<(String, Option<String>)> {
+    let phone = state.phone.lock().await;
+    let p = phone.as_ref()?;
+    match &p.device_id {
+        Some(id) => Some((id.clone(), Some(p.name.clone()))),
+        None => Some((p.name.clone(), None)),
+    }
 }
 
 /// Whether a phone is linked right now — the `if (!phone) return` guard some
@@ -51,10 +80,25 @@ pub async fn is_connected(state: &SharedState) -> bool {
     state.phone.lock().await.is_some()
 }
 
+/// The link state as it stands right now.
+///
+/// `wifi-status` is only *emitted* on a change, so anything that mounts after
+/// the phone connected — the Dashboard on its second visit, the menu-bar panel,
+/// the status widget — starts at "not linked" and stays there until the link
+/// next changes. They call this on mount to get the truth up front.
+pub async fn status(state: &SharedState) -> WifiStatus {
+    match state.phone.lock().await.as_ref() {
+        Some(p) => WifiStatus { connected: true, phone_name: Some(p.name.clone()) },
+        None => WifiStatus { connected: false, phone_name: None },
+    }
+}
+
 pub struct ServerState {
     phone: Mutex<Option<PhoneHandle>>,
-    /// reqId → waiter, for JSON request/response (sms, contacts, fs-list, …).
-    pending: Mutex<HashMap<u64, oneshot::Sender<Value>>>,
+    /// reqId → (expected reply family, waiter) for JSON request/response
+    /// (sms, contacts, fs-list, …). The family is carried so a reply can only
+    /// resolve the request it actually belongs to — see `reply_matches`.
+    pending: Mutex<HashMap<u64, (String, oneshot::Sender<Value>)>>,
     req_seq: AtomicU64,
     /// Numeric thumb reqId → waiter, resolved by the KIND_THUMB binary frame.
     pending_thumb: Mutex<HashMap<u32, oneshot::Sender<Result<Vec<u8>, String>>>>,
@@ -64,6 +108,9 @@ pub struct ServerState {
     /// Bounds concurrent `mac-fs-pull` transfers (Phase 19) — see
     /// `MAX_CONCURRENT_MAC_FS_PULLS`.
     mac_fs_pull_limit: Semaphore,
+    /// reqId → waiter for the phone's `mac-fs-pull-ready` handshake, so chunks
+    /// never start before the phone's receiver exists.
+    mac_fs_ready: Mutex<HashMap<String, oneshot::Sender<()>>>,
 }
 
 impl Default for ServerState {
@@ -76,6 +123,7 @@ impl Default for ServerState {
             thumb_seq: AtomicU32::default(),
             transfers: TransferRegistry::default(),
             mac_fs_pull_limit: Semaphore::new(MAX_CONCURRENT_MAC_FS_PULLS),
+            mac_fs_ready: Mutex::default(),
         }
     }
 }
@@ -115,10 +163,13 @@ pub async fn request(
     timeout: Duration,
 ) -> Result<Value, String> {
     let req_id = state.req_seq.fetch_add(1, Ordering::Relaxed) + 1;
+    let family = reply_family(
+        body.get("type").and_then(Value::as_str).unwrap_or_default(),
+    );
     body.insert("reqId".into(), Value::from(req_id));
 
     let (tx, rx) = oneshot::channel();
-    state.pending.lock().await.insert(req_id, tx);
+    state.pending.lock().await.insert(req_id, (family, tx));
 
     if !send_json(state, Value::Object(body)).await {
         state.pending.lock().await.remove(&req_id);
@@ -153,12 +204,33 @@ pub async fn request_thumb(state: &SharedState, id: i64, kind: &str) -> Result<V
     // keeps them from ever colliding with `request()`'s low-range reqIds — a
     // `photo-thumb-error` carries a thumb reqId, and without disjoint ranges
     // route_text's JSON `pending` fast-path could misroute it to a real request.
+    request_binary_thumb(state, |req_id| {
+        json!({ "type": "photo-thumb", "reqId": req_id, "id": id, "kind": kind })
+    })
+    .await
+}
+
+/// Tier B: an app icon, over the same KIND_THUMB binary frame photo thumbnails
+/// use. Sharing the transport means app icons inherit the disjoint thumb-reqId
+/// namespace, the timeout, and the `*-error` failure path for free.
+pub async fn request_app_icon(state: &SharedState, pkg: &str) -> Result<Vec<u8>, String> {
+    request_binary_thumb(state, |req_id| {
+        json!({ "type": "app-icon", "reqId": req_id, "pkg": pkg })
+    })
+    .await
+}
+
+/// Shared core: allocate a thumb-namespace reqId, register the waiter, send the
+/// caller's message, and await the binary frame that answers it.
+async fn request_binary_thumb(
+    state: &SharedState,
+    build: impl FnOnce(u32) -> Value,
+) -> Result<Vec<u8>, String> {
     let req_id = (state.thumb_seq.fetch_add(1, Ordering::Relaxed) & 0x3fff_ffff) | 0x4000_0000;
     let (tx, rx) = oneshot::channel();
     state.pending_thumb.lock().await.insert(req_id, tx);
 
-    let msg = json!({ "type": "photo-thumb", "reqId": req_id, "id": id, "kind": kind });
-    if !send_json(state, msg).await {
+    if !send_json(state, build(req_id)).await {
         state.pending_thumb.lock().await.remove(&req_id);
         return Err("Phone not connected over Wi-Fi".into());
     }
@@ -173,16 +245,50 @@ pub async fn request_thumb(state: &SharedState, id: i64, kind: &str) -> Result<V
 }
 
 async fn send_json(state: &SharedState, value: Value) -> bool {
-    // Clone the sender out from under the lock so we never hold the phone mutex
-    // across the (potentially back-pressured) bounded-channel await.
-    let tx = state.phone.lock().await.as_ref().map(|p| p.outbox.clone());
-    match tx {
-        Some(tx) => tx.send(WsMessage::text(value.to_string())).await.is_ok(),
-        None => false,
-    }
+    // Clone the sender AND the session key out from under the lock so we never
+    // hold the phone mutex across the (potentially back-pressured) await.
+    let session = state
+        .phone
+        .lock()
+        .await
+        .as_ref()
+        .map(|p| (p.outbox.clone(), p.key.clone()));
+    let Some((tx, key)) = session else { return false };
+
+    // Tier C: seal when this session negotiated encryption. A seal failure is
+    // treated as a send failure rather than silently falling back to plaintext —
+    // quietly downgrading is exactly the bug that makes optional crypto useless.
+    let payload = match &key {
+        None => value,
+        Some(k) => match crate::crypto::seal(k, &value) {
+            Ok(envelope) => envelope,
+            Err(e) => {
+                eprintln!("[ws] encrypt failed, dropping message: {e}");
+                return false;
+            }
+        },
+    };
+    tx.send(WsMessage::text(payload.to_string())).await.is_ok()
 }
 
 fn emit_status(app: &AppHandle, connected: bool, phone_name: Option<String>) {
+    let state = app.state::<LastPhoneName>();
+    let mut guard = state.0.lock().unwrap();
+    if !connected && guard.is_none() {
+        return;
+    }
+    if connected && *guard == phone_name {
+        return;
+    }
+    *guard = if connected { phone_name.clone() } else { None };
+    drop(guard);
+
+    if !connected {
+        // Clears the menu-bar title and re-arms the low-battery alert.
+        crate::statusbar::on_disconnect(app);
+    } else {
+        crate::statusbar::refresh_title(app);
+    }
     let _ = app.emit("wifi-status", WifiStatus { connected, phone_name });
 }
 
@@ -193,24 +299,47 @@ fn emit_event(app: &AppHandle, channel: &str, payload: &Value) {
 }
 
 pub async fn run(app: AppHandle, state: SharedState, port: u16) {
-    let listener = match TcpListener::bind(("0.0.0.0", port)).await {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("ws_server: failed to bind 0.0.0.0:{port}: {e}");
+    let mut listener = None;
+    for _ in 0..10 {
+        match TcpListener::bind(("0.0.0.0", port)).await {
+            Ok(l) => {
+                listener = Some(l);
+                break;
+            }
+            Err(_) => tokio::time::sleep(Duration::from_millis(500)).await,
+        }
+    }
+    let listener = match listener {
+        Some(l) => l,
+        None => {
+            eprintln!("ws_server: failed to bind 0.0.0.0:{port} after 10 retries");
             return;
         }
     };
+    eprintln!("[ws] listening on 0.0.0.0:{port}");
     loop {
-        let Ok((stream, _)) = listener.accept().await else {
-            continue;
-        };
-        tauri::async_runtime::spawn(handle_connection(app.clone(), state.clone(), stream));
+        match listener.accept().await {
+            Ok((stream, _peer)) => {
+                tokio::spawn(handle_connection(app.clone(), state.clone(), stream));
+            }
+            Err(e) => {
+                eprintln!("[ws] accept error: {e}");
+                continue;
+            }
+        }
     }
 }
 
 async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream) {
-    let Ok(ws_stream) = tokio_tungstenite::accept_async(stream).await else {
-        return;
+    let ws_stream = match tokio_tungstenite::accept_async(stream).await {
+        Ok(s) => s,
+        Err(e) => {
+            // Was a silent `else { return }`. A failed upgrade is the one error
+            // that makes the whole app look dead — the TCP connect succeeds, the
+            // phone waits for a welcome that never comes, and nothing is logged.
+            eprintln!("[ws] WebSocket upgrade failed: {e}");
+            return;
+        }
     };
     let (mut write, mut read) = ws_stream.split();
     let (outbox_tx, mut outbox_rx) = mpsc::channel::<WsMessage>(OUTBOX_CAP);
@@ -219,7 +348,7 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
 
     // Funnel every outbound send (welcome, pushes, replies, binary chunks)
     // through one writer task so nothing races on the socket's write half.
-    let writer = tauri::async_runtime::spawn(async move {
+    let writer = tokio::spawn(async move {
         while let Some(msg) = outbox_rx.recv().await {
             if write.send(msg).await.is_err() {
                 break;
@@ -252,15 +381,30 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                 let Ok(raw): Result<Value, _> = serde_json::from_str(&text) else { continue };
 
                 if !authed {
-                    let Ok(Message::Hello { token, name: hello_name, caps }) =
-                        serde_json::from_value::<Message>(raw)
+                    let parsed = serde_json::from_value::<Message>(raw.clone());
+                    let Ok(Message::Hello { token, name: hello_name, caps, device_id }) = parsed
                     else {
+                        eprintln!("[ws] HANDSHAKE REJECT: first message was not a valid hello: {raw}");
+                        tokio::time::sleep(Duration::from_millis(1000)).await;
                         break; // not a valid hello — close, matching wifi.js
                     };
                     if token != live_config(&app).token {
+                        eprintln!("[ws] HANDSHAKE REJECT: token mismatch from {hello_name:?}");
+                        tokio::time::sleep(Duration::from_millis(1000)).await;
                         break;
                     }
+                    eprintln!("[ws] HANDSHAKE OK: {hello_name:?} caps={caps:?} deviceId={device_id:?}");
                     authed = true;
+
+                    // Tier C: encryption engages only when the phone asked for
+                    // it AND the user enabled it here. Either side silent →
+                    // plaintext, exactly as before, so turning this on can
+                    // never strand an older phone build.
+                    let cfg = live_config(&app);
+                    let want_enc =
+                        cfg.encrypt_link && caps.iter().any(|c| c == crate::crypto::CAP);
+                    let session_key =
+                        want_enc.then(|| crate::crypto::derive(&cfg.token));
 
                     // Single phone: a new valid hello closes the previous phone's
                     // socket. take+insert under ONE lock acquisition so two
@@ -270,6 +414,8 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                         &mut *state.phone.lock().await,
                         Some(PhoneHandle {
                             name: hello_name.clone(),
+                            device_id: device_id.clone(),
+                            key: session_key,
                             caps,
                             outbox: outbox_tx.clone(),
                             kill: kill_tx.take().expect("hello only authenticates once per connection"),
@@ -291,7 +437,26 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                     // Mac always sends "macfs" once this feature exists in the
                     // binary (no feature flag / half-built gating). Additive
                     // field: an older phone build ignores it safely.
-                    let welcome = json!({ "type": "welcome", "name": mac_name(&app), "caps": ["macfs"] });
+                    let mut welcome_caps: Vec<String> = Vec::new();
+                    // Reverse file browsing is now opt-in, matching photo-sync's
+                    // posture. Not advertising the cap makes the phone's tab
+                    // disappear entirely rather than fail on use.
+                    if cfg.mac_fs_enabled {
+                        welcome_caps.push("macfs".to_string());
+                    }
+                    if want_enc {
+                        welcome_caps.push(crate::crypto::CAP.to_string());
+                    }
+                    // Tier D: the phone can't even see the remote-control
+                    // surface unless the user switched it on here.
+                    if crate::mac_remote::enabled(&app) {
+                        welcome_caps.push(crate::mac_remote::CAP.to_string());
+                    }
+                    // Deliberately sent unsealed: it is the message that tells
+                    // the phone encryption is on, so it cannot itself be
+                    // encrypted. Everything after it is sealed.
+                    let welcome =
+                        json!({ "type": "welcome", "name": mac_name(&app), "caps": welcome_caps });
                     if outbox_tx.send(WsMessage::text(welcome.to_string())).await.is_err() {
                         break;
                     }
@@ -305,7 +470,7 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                     if let Some(cache) = app.state::<Option<crate::edit_cache::EditCache>>().inner().clone() {
                         let app2 = app.clone();
                         let state2 = state.clone();
-                        tauri::async_runtime::spawn(crate::edit_cache::retry_pending(app2, state2, cache));
+                        tokio::spawn(crate::edit_cache::retry_pending(app2, state2, cache));
                     }
                     // Phase 18: a (re)connect is also the "went offline, took
                     // photos, came back" backfill signal — caps-gated so an
@@ -323,8 +488,16 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                             if let Some(photo) = app.state::<Option<crate::photo_sync::PhotoSync>>().inner().clone() {
                                 let app2 = app.clone();
                                 let state2 = state.clone();
-                                let device_key = hello_name.clone();
-                                tauri::async_runtime::spawn(crate::photo_sync::check(app2, state2, photo, cfg, device_key));
+                                // Was `hello_name` — that's the *display* name,
+                                // which is what the ledger used to be keyed on
+                                // and is exactly the collision this fixed.
+                                let (device_key, legacy) = match &device_id {
+                                    Some(id) => (id.clone(), Some(hello_name.clone())),
+                                    None => (hello_name.clone(), None),
+                                };
+                                tokio::spawn(crate::photo_sync::check(
+                                    app2, state2, photo, cfg, device_key, legacy,
+                                ));
                             }
                         }
                     }
@@ -351,6 +524,29 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
 /// `ws.on('message')` switch: first the reqId reply table, then per-type
 /// handling / forwarding to the frontend.
 async fn route_text(app: &AppHandle, state: &SharedState, raw: Value) {
+    // Tier C: unwrap first, so every downstream branch keeps seeing plaintext
+    // and no feature had to learn about encryption. An envelope that fails to
+    // open is dropped rather than routed — a bad tag means tampering or a key
+    // mismatch, and neither is something to act on.
+    let raw = if raw.get("type").and_then(Value::as_str) == Some("enc") {
+        let key = state.phone.lock().await.as_ref().and_then(|p| p.key.clone());
+        match key {
+            Some(k) => match crate::crypto::open(&k, &raw) {
+                Ok(inner) => inner,
+                Err(e) => {
+                    eprintln!("[ws] dropping undecryptable message: {e}");
+                    return;
+                }
+            },
+            None => {
+                eprintln!("[ws] dropping encrypted message on a plaintext session");
+                return;
+            }
+        }
+    } else {
+        raw
+    };
+
     // 1. request/response replies (wifi.js: msg.reqId && pending.has(...)).
     //    NOTE: TransferManager.kt reads reqId via `optString` and echoes it back
     //    as a STRING (e.g. "5"), whereas ConnectionManager.respond() echoes it
@@ -360,10 +556,24 @@ async fn route_text(app: &AppHandle, state: &SharedState, raw: Value) {
     //    reqId like "pp1"; that fails the parse and correctly falls through to
     //    type routing → transfer::on_control.)
     if let Some(req_id) = raw.get("reqId").and_then(reqid_key) {
-        if let Some(tx) = state.pending.lock().await.remove(&req_id) {
-            let _ = tx.send(raw);
-            return;
+        let ty = raw.get("type").and_then(Value::as_str).unwrap_or("");
+        let mut pending = state.pending.lock().await;
+        // Only resolve when the reply belongs to the request family that
+        // allocated this reqId. Without that check, a phone could craft a
+        // message with a small numeric reqId and have it delivered as the
+        // answer to an unrelated in-flight request (contacts, sms, fs-list…),
+        // which the whole feature layer above would then trust.
+        let matches = pending
+            .get(&req_id)
+            .is_some_and(|(family, _)| reply_matches(family, ty));
+        if matches {
+            if let Some((_, tx)) = pending.remove(&req_id) {
+                drop(pending);
+                let _ = tx.send(raw);
+                return;
+            }
         }
+        drop(pending);
     }
 
     let msg_type = raw.get("type").and_then(Value::as_str).unwrap_or("");
@@ -385,6 +595,11 @@ async fn route_text(app: &AppHandle, state: &SharedState, raw: Value) {
                 }
             }
             crate::notifications::on_notification(app, &m);
+            // Backfill is a replay of what's already on the phone, not new
+            // arrivals — counting it would badge the menu bar on every connect.
+            if m.get("backfill").and_then(Value::as_bool) != Some(true) {
+                crate::statusbar::on_notification(app);
+            }
             emit_event(app, "notification", &m);
         }
         "notification-removed" => {
@@ -392,6 +607,21 @@ async fn route_text(app: &AppHandle, state: &SharedState, raw: Value) {
             crate::notifications::on_removed(app, key.as_str());
             emit_event(app, "notification-removed", &json!({ "key": key }));
         }
+        // The phone got a tap/swipe/nav press it cannot perform, because its
+        // accessibility service is off. Mirror video keeps flowing in that
+        // state, so without this the Mac looks like it simply isn't sending —
+        // the phone throttles these to one per 5s.
+        "control-unavailable" => {
+            emit_event(
+                app,
+                "wifi-event",
+                &json!({
+                    "kind": "bad",
+                    "text": "Phone screen control is off — enable Accessibility for DroidDock on your phone (Settings › Auto Clipboard › Enable)",
+                }),
+            );
+        }
+
         // wifi.js turns reply-result into a wifi-event toast (there is no
         // renderer 'reply-result' channel): ok → "Reply sent from Mac".
         "reply-result" => {
@@ -426,10 +656,17 @@ async fn route_text(app: &AppHandle, state: &SharedState, raw: Value) {
         }
 
         // Media now-playing metadata push.
-        "media" => emit_event(app, "media", &raw),
+        "media" => {
+            crate::statusbar::on_media(app, &raw);
+            emit_event(app, "media", &raw)
+        }
 
         // Device info (battery/model/etc) — forwarded verbatim.
-        "device-info" => emit_event(app, "device-info", &raw),
+        "device-info" => {
+            // Drives the menu-bar title and the low-battery alert.
+            crate::statusbar::on_device_info(app, &raw);
+            emit_event(app, "device-info", &raw)
+        }
 
         // SMS content changed on the phone — bare ping, UI refetches.
         "sms-changed" => emit_event(app, "sms-changed", &json!({})),
@@ -441,13 +678,15 @@ async fn route_text(app: &AppHandle, state: &SharedState, raw: Value) {
         "photos-changed" => {
             let cfg = live_config(app);
             if cfg.photo_sync_enabled {
-                if let (Some(photo), Some(device_key)) = (
+                if let (Some(photo), Some((device_key, legacy))) = (
                     app.state::<Option<crate::photo_sync::PhotoSync>>().inner().clone(),
-                    current_phone_name(state).await,
+                    current_phone_keys(state).await,
                 ) {
                     let app2 = app.clone();
                     let state2 = state.clone();
-                    tauri::async_runtime::spawn(crate::photo_sync::check(app2, state2, photo, cfg, device_key));
+                    tokio::spawn(crate::photo_sync::check(
+                        app2, state2, photo, cfg, device_key, legacy,
+                    ));
                 }
             }
         }
@@ -463,34 +702,63 @@ async fn route_text(app: &AppHandle, state: &SharedState, raw: Value) {
             let Some(req_id) = raw.get("reqId").and_then(Value::as_str).map(str::to_string) else {
                 return;
             };
+            let cfg = live_config(app);
+            if !cfg.mac_fs_enabled || cfg.is_paused() {
+                let _ = send_json(
+                    state,
+                    json!({ "type": "mac-fs-list-error", "reqId": req_id,
+                            "error": "Mac file browsing is turned off" }),
+                )
+                .await;
+                return;
+            }
             let path = raw.get("path").and_then(Value::as_str).unwrap_or("").to_string();
-            let roots = live_config(app).mac_fs_roots;
-            match crate::mac_fs::list(&roots, &path).await {
+            let roots = cfg.mac_fs_roots;
+            // Spawned, not awaited inline: a slow or hung root would otherwise
+            // stall the whole inbound read loop for every other feature.
+            let state2 = state.clone();
+            tokio::spawn(async move {
+            match if path.is_empty() {
+                Ok(crate::mac_fs::list_roots(&roots))
+            } else {
+                crate::mac_fs::list(&roots, &path).await
+            } {
                 Ok(entries) => {
                     let _ = send_json(
-                        state,
+                        &state2,
                         json!({ "type": "mac-fs-list-result", "reqId": req_id, "entries": entries }),
                     )
                     .await;
                 }
                 Err(error) => {
                     let _ = send_json(
-                        state,
+                        &state2,
                         json!({ "type": "mac-fs-list-error", "reqId": req_id, "error": error }),
                     )
                     .await;
                 }
             }
+            });
         }
         "mac-fs-pull" => {
             let Some(req_id) = raw.get("reqId").and_then(Value::as_str).map(str::to_string) else {
                 return;
             };
+            let cfg = live_config(app);
+            if !cfg.mac_fs_enabled || cfg.is_paused() {
+                let _ = send_json(
+                    state,
+                    json!({ "type": "mac-fs-pull-error", "reqId": req_id,
+                            "error": "Mac file browsing is turned off" }),
+                )
+                .await;
+                return;
+            }
             let path = raw.get("path").and_then(Value::as_str).unwrap_or("").to_string();
-            let roots = live_config(app).mac_fs_roots;
+            let roots = cfg.mac_fs_roots;
             let app2 = app.clone();
             let state2 = state.clone();
-            tauri::async_runtime::spawn(async move {
+            tokio::spawn(async move {
                 // A phone can spam this request unlike the Mac-initiated
                 // fs-pull/fs-push paths (one at a time, from a user click) —
                 // reject outright over the cap instead of queueing unbounded
@@ -526,7 +794,10 @@ async fn route_text(app: &AppHandle, state: &SharedState, raw: Value) {
         other
             if other.starts_with("fs-")
                 || other.starts_with("phone-push")
-                || other == "photo-thumb-error" =>
+                || other == "photo-thumb-error"
+                // Tier B app icons share the thumb transport, so they share its
+                // failure path too.
+                || other == "app-icon-error" =>
         {
             transfer::on_control(app, state, &raw).await;
         }
@@ -535,6 +806,21 @@ async fn route_text(app: &AppHandle, state: &SharedState, raw: Value) {
         // uses OkHttp protocol-level pings instead, so this is never observed).
         "ping" => {
             let _ = send_json(state, json!({ "type": "pong" })).await;
+        }
+        // Tier C: the echo of our own link-quality probe. `t` is the timestamp
+        // we sent, so the phone needs no synchronised clock to answer usefully.
+        "pong" => app.state::<crate::link_quality::LinkQuality>().on_pong(&raw),
+        // Tier D: phone → Mac input. `mac_remote` re-checks the enable flag
+        // itself rather than trusting that the caps advert was ever sent.
+        "remote" => crate::mac_remote::on_message(app, &raw),
+        // The phone's receiver for a `mac-fs-pull` is now registered; releasing
+        // this lets `mac_fs::pull_to_phone` start streaming chunks.
+        "mac-fs-pull-ready" => {
+            if let Some(req_id) = raw.get("reqId").and_then(Value::as_str) {
+                if let Some(tx) = state.mac_fs_ready.lock().await.remove(req_id) {
+                    let _ = tx.send(());
+                }
+            }
         }
 
         // Screen mirroring / camera streaming (Phase 11): forwarded to the
@@ -604,6 +890,49 @@ pub async fn fail_thumb(state: &SharedState, req_id: u32, error: String) {
 
 /// Extract a pending-table reqId from a reply, accepting either a JSON number
 /// or a numeric JSON string (the transfer path echoes reqId as a string).
+/// How long to wait for the phone's `mac-fs-pull-ready`. Generous, because it
+/// only has to cover the phone registering a receiver — and on expiry we stream
+/// anyway, so an older phone build that never sends it still works exactly as
+/// it did before, race and all, rather than hanging forever.
+const MAC_FS_READY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Register interest in a `mac-fs-pull-ready` before announcing the transfer.
+/// The returned future resolves when the phone acks, or on timeout.
+pub async fn arm_mac_fs_ready(
+    state: &SharedState,
+    req_id: &str,
+) -> impl std::future::Future<Output = ()> {
+    let (tx, rx) = oneshot::channel();
+    state.mac_fs_ready.lock().await.insert(req_id.to_string(), tx);
+    let state = state.clone();
+    let req_id = req_id.to_string();
+    async move {
+        let _ = tokio::time::timeout(MAC_FS_READY_TIMEOUT, rx).await;
+        state.mac_fs_ready.lock().await.remove(&req_id);
+    }
+}
+
+/// The reply family a request type expects back. `fs-push-begin` is answered
+/// with `fs-push`/`fs-push-error`, so the trailing `-begin` is stripped;
+/// everything else is answered with its own type or a `<type>-…` variant.
+fn reply_family(request_type: &str) -> String {
+    request_type
+        .strip_suffix("-begin")
+        .unwrap_or(request_type)
+        .to_string()
+}
+
+/// Whether `reply_type` is a legitimate answer for a request of `family`.
+fn reply_matches(family: &str, reply_type: &str) -> bool {
+    if family.is_empty() {
+        return false;
+    }
+    reply_type == family
+        || (reply_type.len() > family.len()
+            && reply_type.starts_with(family)
+            && reply_type.as_bytes()[family.len()] == b'-')
+}
+
 fn reqid_key(v: &Value) -> Option<u64> {
     v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse::<u64>().ok()))
 }
@@ -622,4 +951,53 @@ fn mac_name(app: &AppHandle) -> String {
                 .trim_end_matches(".local")
                 .to_string()
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{reply_family, reply_matches};
+
+    #[test]
+    fn push_begin_is_answered_by_the_push_family() {
+        // `fs-push-begin` is answered with `fs-push` / `fs-push-error`, so the
+        // trailing `-begin` has to be stripped or those replies never match.
+        assert_eq!(reply_family("fs-push-begin"), "fs-push");
+        assert!(reply_matches("fs-push", "fs-push"));
+        assert!(reply_matches("fs-push", "fs-push-error"));
+    }
+
+    #[test]
+    fn pull_is_answered_by_its_own_variants() {
+        assert_eq!(reply_family("fs-pull"), "fs-pull");
+        assert!(reply_matches("fs-pull", "fs-pull-begin"));
+        assert!(reply_matches("fs-pull", "fs-pull-error"));
+    }
+
+    #[test]
+    fn plain_request_types_match_themselves() {
+        for ty in ["contacts", "sms-threads", "photos-list", "wallpaper", "apps-list", "fs-list"] {
+            assert!(reply_matches(&reply_family(ty), ty), "{ty} should match itself");
+        }
+    }
+
+    #[test]
+    fn a_crafted_reply_cannot_hijack_an_unrelated_request() {
+        // The pre-existing hole: any message carrying a small numeric reqId
+        // used to resolve whatever request happened to hold that id.
+        assert!(!reply_matches("contacts", "clipboard"));
+        assert!(!reply_matches("contacts", "notification"));
+        assert!(!reply_matches("fs-list", "fs-delete"));
+        // Prefix-but-not-a-family-member must not match either: `fs-pull` is
+        // not a reply to `fs-push`, and `contacts-x` is a different type from
+        // a shared-prefix string with no separator.
+        assert!(!reply_matches("fs-push", "fs-pull"));
+        assert!(!reply_matches("sms", "smsthreads"));
+    }
+
+    #[test]
+    fn an_untyped_request_can_never_be_resolved() {
+        // No type on the way out means nothing can be trusted on the way back.
+        assert!(!reply_matches("", "anything"));
+        assert!(!reply_matches("", ""));
+    }
 }

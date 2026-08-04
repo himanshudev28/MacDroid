@@ -106,7 +106,8 @@ object TransferManager {
     }
 
     private fun send(obj: JSONObject) {
-        ws?.send(obj.toString())
+        // Through ConnectionManager so an encrypted session seals these too.
+        ws?.send(ConnectionManager.wire(obj))
     }
 
     fun onControl(msg: JSONObject) {
@@ -256,6 +257,11 @@ object TransferManager {
         incomingMacFs[transferId] = MacFsPullReceiver(dest, size, onProgress)
         val completion = CompletableDeferred<Result<File>>()
         pendingMacFsPull[reqId] = MacFsPullEntry(transferId, completion)
+        // Only now is it safe for the Mac to start sending. Before this ack
+        // existed it streamed immediately after mac-fs-pull-begin, so the
+        // leading chunks arrived before this receiver was registered and were
+        // dropped — producing a silently truncated file.
+        send(JSONObject().put("type", "mac-fs-pull-ready").put("reqId", reqId))
         return completion.await()
     }
 
@@ -268,8 +274,18 @@ object TransferManager {
         if (msg.optString("type") == "mac-fs-pull-done") {
             val file = receiver?.finish()
             entry.completion.complete(
-                if (file != null) Result.success(file)
-                else Result.failure(IllegalStateException("no receiver for transfer"))
+                when {
+                    file == null -> Result.failure(IllegalStateException("no receiver for transfer"))
+                    // Never report success on a short file. Without this a
+                    // dropped chunk looked exactly like a completed download.
+                    receiver.expected > 0 && file.length() != receiver.expected ->
+                        Result.failure(
+                            IllegalStateException(
+                                "incomplete download (${file.length()}/${receiver.expected} bytes)"
+                            )
+                        )
+                    else -> Result.success(file)
+                }
             )
         } else {
             receiver?.abort()
@@ -365,7 +381,13 @@ object TransferManager {
         try {
             if (!FileRepo.hasAllFiles()) throw SecurityException("Grant All-files access in the DroidDock app")
             val dir = File(msg.optString("dest", "/sdcard/Download/").ifBlank { "/sdcard/Download/" })
-            val dest = FileRepo.uniqueDest(dir, msg.optString("name", "file"))
+            val name = msg.optString("name", "file")
+            // The Mac sets overwrite=true only for edit-in-place writeback,
+            // where the whole point is to replace the file the user opened.
+            // uniqueDest() would instead fork every save into "name (2).ext"
+            // and leave the original untouched while reporting success.
+            val dest = if (msg.optBoolean("overwrite", false)) File(dir, name)
+                       else FileRepo.uniqueDest(dir, name)
             val tid = nextTid.getAndIncrement()
             incoming[tid] = PushReceiver(tid, dest, msg.optLong("size"), socket)
             send(JSONObject().put("type", "fs-push").put("reqId", reqId).put("transferId", tid))
@@ -404,9 +426,9 @@ object TransferManager {
             val target = if (size > 0) size else expected
             if (received != target) {
                 dest.delete()
-                socket.send(result(false, "size mismatch ($received/$target)"))
+                socket.send(ConnectionManager.wire(result(false, "size mismatch ($received/$target)")))
             } else {
-                socket.send(result(true, null))
+                socket.send(ConnectionManager.wire(result(true, null)))
             }
         }
 
@@ -423,12 +445,14 @@ object TransferManager {
             done = true
             runCatching { out.close() }
             dest.delete()
-            socket.send(result(false, err))
+            socket.send(ConnectionManager.wire(result(false, err)))
         }
 
-        private fun result(ok: Boolean, err: String?) =
+        /** Returns the JSONObject rather than a String so callers can hand it to
+         *  ConnectionManager.wire() and have it sealed on an encrypted session. */
+        private fun result(ok: Boolean, err: String?): JSONObject =
             JSONObject().put("type", "fs-push-result").put("transferId", transferId)
-                .put("ok", ok).apply { if (err != null) put("error", err) }.toString()
+                .put("ok", ok).apply { if (err != null) put("error", err) }
     }
 
     /* ---- helpers ---- */

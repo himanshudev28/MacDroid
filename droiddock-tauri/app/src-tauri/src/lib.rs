@@ -2,13 +2,18 @@ mod adb;
 mod appearance;
 mod clipboard;
 mod config;
+mod crypto;
 mod discovery;
 mod edit_cache;
+mod link_quality;
 mod mac_fs;
+mod mac_remote;
+mod mdns;
 mod mirror;
 mod notifications;
 mod photo_sync;
 mod protocol;
+mod statusbar;
 mod transfer;
 mod tray;
 mod ws_server;
@@ -35,6 +40,11 @@ pub struct AppState {
 /// contacts (up to 3000 rows) and sending an SMS (SmsManager round-trip) —
 /// matching index.js's raised timeouts for `contacts:list` and `sms:send`.
 const SLOW_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// A string setting, falling back when the frontend sends something unexpected.
+fn str_setting(v: &Value, fallback: &str) -> String {
+    v.as_str().filter(|s| !s.is_empty()).unwrap_or(fallback).to_string()
+}
 
 fn map_of(v: Value) -> Map<String, Value> {
     match v {
@@ -84,16 +94,39 @@ fn set_setting(app: AppHandle, state: State<AppState>, key: String, value: Value
         // Phase 19: the reverse-file-browsing root allowlist — a plain string
         // list edited wholesale from Settings (add/remove folder), same as
         // any other setting here, just array-shaped instead of scalar.
+        "macFsEnabled" => cfg.mac_fs_enabled = value.as_bool().unwrap_or(false),
         "macFsRoots" => {
             cfg.mac_fs_roots = value
                 .as_array()
                 .map(|arr| arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
                 .unwrap_or_default()
         }
+        "encryptLink" => cfg.encrypt_link = value.as_bool().unwrap_or(false),
+        "remoteControl" => cfg.remote_control = value.as_bool().unwrap_or(false),
+        "menubarText" => cfg.menubar_text = str_setting(&value, "battery"),
+        "menubarBatteryStyle" => cfg.menubar_battery_style = str_setting(&value, "percent"),
+        "menubarMaxLen" => cfg.menubar_max_len = value.as_u64().unwrap_or(28).clamp(6, 60) as u32,
+        "menubarAlbumArt" => cfg.menubar_album_art = str_setting(&value, "thumb"),
+        "lowBatteryAlert" => cfg.low_battery_alert = value.as_bool().unwrap_or(true),
+        "lowBatteryPct" => cfg.low_battery_pct = value.as_u64().unwrap_or(20).clamp(5, 50) as u8,
+        "desktopDisplaySize" => cfg.desktop_display_size = value.as_str().unwrap_or("").trim().to_string(),
+        "defaultMirrorMode" => cfg.default_mirror_mode = str_setting(&value, "wifi"),
+        "mutedApps" => {
+            cfg.muted_apps = value
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_default()
+        }
         other => return Err(format!("unknown setting: {other}")),
     }
     config::save(&app, &cfg);
-    Ok(cfg.clone())
+    let updated = cfg.clone();
+    // Drop the lock before repainting: statusbar::refresh_title re-reads config.
+    drop(cfg);
+    if key.starts_with("menubar") {
+        statusbar::refresh_title(&app);
+    }
+    Ok(updated)
 }
 
 #[derive(Serialize)]
@@ -134,6 +167,21 @@ fn get_pairing_info(state: State<AppState>) -> PairingInfo {
 #[tauri::command]
 async fn notif_reply(state: State<'_, SharedState>, key: String, text: String) -> Result<(), String> {
     ws_server::push(&state, json!({ "type": "reply", "key": key, "text": text })).await;
+    Ok(())
+}
+
+/// The current link state, for views that mount after the phone connected —
+/// `wifi-status` only fires on a *change*, so subscribing is not enough.
+#[tauri::command]
+async fn wifi_status(state: State<'_, SharedState>) -> Result<ws_server::WifiStatus, String> {
+    Ok(ws_server::status(state.inner()).await)
+}
+
+/// Fire the Nth action button of a notification back on the phone. Index-based
+/// because the Mac only ever received labels, and two buttons can share one.
+#[tauri::command]
+async fn notif_action(state: State<'_, SharedState>, key: String, index: u32) -> Result<(), String> {
+    ws_server::push(&state, json!({ "type": "notif-action", "key": key, "index": index })).await;
     Ok(())
 }
 
@@ -185,7 +233,9 @@ async fn fs_pull(app: AppHandle, state: State<'_, SharedState>, path: String, na
 /// Upload a local file to the phone under `dest` (a phone directory path).
 #[tauri::command]
 async fn fs_push(app: AppHandle, state: State<'_, SharedState>, local_path: String, dest: String) -> Result<(), String> {
-    transfer::push(app.clone(), state.inner().clone(), local_path, dest).await
+    // Not an overwrite: a user dropping a file into a folder expects the phone's
+    // existing same-named file to survive, which is what uniqueDest() gives.
+    transfer::push(app.clone(), state.inner().clone(), local_path, dest, false).await
 }
 
 #[tauri::command]
@@ -326,10 +376,10 @@ async fn photo_sync_backfill(
 ) -> Result<(), String> {
     let photo = photo.inner().clone().ok_or("Photo sync unavailable")?;
     let cfg = app_state.config.lock().unwrap().clone();
-    let device_key = ws_server::current_phone_name(state.inner())
+    let (device_key, legacy) = ws_server::current_phone_keys(state.inner())
         .await
         .ok_or("No phone connected — pair a phone before backfilling")?;
-    photo_sync::backfill(app, state.inner().clone(), photo, cfg, device_key).await
+    photo_sync::backfill(app, state.inner().clone(), photo, cfg, device_key, legacy).await
 }
 
 // ── Phase 8: contacts ────────────────────────────────────────────────────
@@ -377,7 +427,80 @@ async fn media_cmd(state: State<'_, SharedState>, cmd: String, value: i64) -> Re
     Ok(())
 }
 
+// ── Tier B: wallpaper + apps ─────────────────────────────────────────────
+
+/// The phone's wallpaper as a data URL, for the phone card's backdrop.
+/// Requested once per connection by the frontend and cached there — the image
+/// changes rarely and costs ~100 KB, so it is deliberately not pushed.
+#[tauri::command]
+async fn wallpaper_get(state: State<'_, SharedState>) -> Result<String, String> {
+    let reply = ws_server::request_default(&state, json_map(json!({ "type": "wallpaper" }))).await?;
+    if let Some(err) = reply.get("error").and_then(Value::as_str) {
+        return Err(err.to_string());
+    }
+    let data = reply
+        .get("data")
+        .and_then(Value::as_str)
+        .ok_or("Phone sent no wallpaper")?;
+    Ok(format!("data:image/jpeg;base64,{data}"))
+}
+
+#[derive(serde::Serialize)]
+struct PhoneApp {
+    pkg: String,
+    label: String,
+}
+
+/// Every launchable app on the phone, sorted by label (the phone sorts; this
+/// just forwards). Backs the Apps grid.
+#[tauri::command]
+async fn apps_list(state: State<'_, SharedState>) -> Result<Vec<PhoneApp>, String> {
+    let reply = ws_server::request_default(&state, json_map(json!({ "type": "apps-list" }))).await?;
+    if let Some(err) = reply.get("error").and_then(Value::as_str) {
+        return Err(err.to_string());
+    }
+    let apps = reply
+        .get("apps")
+        .and_then(Value::as_array)
+        .ok_or("Phone sent no app list")?;
+    Ok(apps
+        .iter()
+        .filter_map(|a| {
+            Some(PhoneApp {
+                pkg: a.get("pkg")?.as_str()?.to_string(),
+                label: a.get("label").and_then(Value::as_str).unwrap_or_default().to_string(),
+            })
+        })
+        .collect())
+}
+
+/// One app's icon as a PNG data URL. PNG, not JPEG: adaptive icons are
+/// transparent outside the mask and a JPEG matte would render as a box.
+#[tauri::command]
+async fn app_icon(state: State<'_, SharedState>, pkg: String) -> Result<String, String> {
+    let bytes = ws_server::request_app_icon(&state, &pkg).await?;
+    Ok(format!("data:image/png;base64,{}", base64_encode(&bytes)))
+}
+
+/// Open an app on the phone. Fire-and-forget — the phone has no reply for this,
+/// and the observable result is the phone's own screen.
+#[tauri::command]
+async fn app_launch(state: State<'_, SharedState>, pkg: String) -> Result<(), String> {
+    if !ws_server::push(&state, json!({ "type": "app-launch", "pkg": pkg })).await {
+        return Err("Phone not connected over Wi-Fi".into());
+    }
+    Ok(())
+}
+
 // ── helpers ──────────────────────────────────────────────────────────────
+
+/// `json!({...})` → the owned field map `ws_server::request` takes.
+fn json_map(value: Value) -> serde_json::Map<String, Value> {
+    match value {
+        Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    }
+}
 
 fn sanitize(name: &str) -> String {
     name.replace(['/', '\\'], "_")
@@ -425,6 +548,9 @@ pub fn run() {
             app.manage(ClipboardGuard::default());
             app.manage(NotifState::default());
             app.manage(MirrorState::default());
+            app.manage(link_quality::LinkQuality::default());
+            app.manage(statusbar::StatusState::default());
+            app.manage(ws_server::LastPhoneName::default());
             app.manage(AdbState::default());
 
             // Phase 17: clears stale edit-cache sessions (keeping any still-pending
@@ -454,27 +580,69 @@ pub fn run() {
             let ws_state: SharedState = SharedState::default();
             app.manage(ws_state.clone());
             let app_handle: AppHandle = app.handle().clone();
-            tauri::async_runtime::spawn(ws_server::run(app_handle.clone(), ws_state.clone(), port));
-            tauri::async_runtime::spawn(discovery::run(app_handle.clone(), port + 1));
-            // Phase 3: 1s clipboard watcher (outbound Mac→phone).
-            tauri::async_runtime::spawn(clipboard::run(app_handle.clone(), ws_state));
+            // Every long-lived networking task runs on a runtime this thread
+            // owns and blocks on for the app's lifetime, isolating the link from
+            // whatever else the app's shared runtime is doing.
+            //
+            // Historical note, because the comment here used to claim otherwise:
+            // the "`TcpListener::accept()` is entered and never wakes" symptom
+            // that motivated this thread was NOT a Tauri runtime defect. Its
+            // cause was `adb::tools_status` locking one `std::sync::Mutex` twice
+            // inside a single struct literal (see `adb.rs`) — that deadlocked the
+            // main thread, and every async worker that subsequently called into
+            // the tray blocked behind it, until no thread was left to poll the
+            // runtime's IO driver and `accept()` stopped waking. The lock bug is
+            // fixed; this thread is kept for the isolation, not as a workaround.
+            {
+                let h = app_handle.clone();
+                let ws = ws_state.clone();
+                std::thread::Builder::new()
+                    .name("droiddock-net".into())
+                    .spawn(move || {
+                        let rt = tokio::runtime::Builder::new_multi_thread()
+                            .enable_all()
+                            .thread_name("droiddock-net")
+                            .build()
+                            .expect("failed to build the networking runtime");
+                        rt.block_on(async move {
+                            tokio::spawn(discovery::run(h.clone(), port + 1));
+                            // Second discovery path: works on networks that drop
+                            // directed broadcast. Additive — the UDP responder
+                            // above is unchanged.
+                            tokio::spawn(mdns::run(h.clone(), port));
+                            tokio::spawn(link_quality::run(h.clone(), ws.clone()));
+                            // Phase 3: 1s clipboard watcher (outbound Mac→phone).
+                            tokio::spawn(clipboard::run(h.clone(), ws.clone()));
+                            // Awaited directly (not spawned) so this thread
+                            // drives the accept loop itself for the app's life.
+                            ws_server::run(h, ws, port).await;
+                        });
+                    })
+                    .expect("failed to start the networking thread");
+            }
 
             // Phase 13: resolve/auto-download adb + scrcpy in the background —
             // Wi-Fi features (everything through Phase 12) work with none of
             // this installed; ADB just unlocks the power-user extras.
             if let Ok(data_dir) = app_handle.path().app_data_dir() {
+                // Same runtime as the networking thread: adb shells out to
+                // child processes, which need a working I/O driver too.
                 tauri::async_runtime::spawn(adb::init(app_handle.clone(), data_dir.join("tools")));
             }
 
             // Phase 14: auto-resume a timed Mac-initiated pause once it expires.
+            // Reopen the widget where it was, and paint the menu-bar title
+            // from the persisted settings before any phone connects.
+            tray::apply_widget(&app_handle);
+            statusbar::refresh_title(&app_handle);
             tauri::async_runtime::spawn(tray::expire_loop(app_handle.clone()));
 
             let system_appearance = appearance::read();
             // Respect the user's actual "reduce transparency" setting: WebKit has no
             // CSS media query for it, so this is the only place it can be honored —
             // clearing effects here means the window falls back to a solid background.
-            if system_appearance.reduce_transparency {
-                if let Some(window) = app.get_webview_window("main") {
+            if let Some(window) = app.get_webview_window("main") {
+                if system_appearance.reduce_transparency {
                     let _ = window.set_effects(None);
                 }
             }
@@ -491,6 +659,8 @@ pub fn run() {
             set_setting,
             notif_reply,
             notif_dismiss,
+            notif_action,
+            wifi_status,
             fs_list,
             fs_delete,
             fs_rename,
@@ -509,6 +679,11 @@ pub fn run() {
             contacts_list,
             action_call,
             media_cmd,
+            clipboard::clipboard_push_now,
+            wallpaper_get,
+            apps_list,
+            app_icon,
+            app_launch,
             mirror::mirror_popout,
             mirror::mirror_stop,
             mirror::mirror_focus,
@@ -528,6 +703,8 @@ pub fn run() {
             adb::adb_qr_pair_cancel,
             adb::adb_camera,
             adb::adb_mirror,
+            adb::adb_desktop,
+            adb::adb_mirror_app,
             adb::adb_screenshot,
             adb::adb_volume_get,
             adb::adb_volume_set,
@@ -539,6 +716,9 @@ pub fn run() {
             tray::pause_set,
             tray::autostart_get,
             tray::autostart_set,
+            tray::menubar_hide,
+            tray::open_main_window,
+            tray::widget_set,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

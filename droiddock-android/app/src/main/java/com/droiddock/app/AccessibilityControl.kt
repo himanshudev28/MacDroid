@@ -25,6 +25,19 @@ object AccessibilityControl {
     @Volatile var service: AccessibilityService? = null
     private val main = Handler(Looper.getMainLooper())
 
+    /**
+     * Whether Mac-side screen control can actually do anything right now.
+     *
+     * Every method below begins `service ?: return@post`, so with the
+     * accessibility service switched off each tap, swipe and nav press is
+     * discarded in silence — the mirror keeps streaming video, which makes it
+     * look like the Mac isn't sending anything. Android also turns an
+     * accessibility service off whenever its app is reinstalled, so this goes
+     * from working to not working with no user action at all. Callers use this
+     * to say so instead of dropping the message.
+     */
+    fun available(): Boolean = service != null
+
     private fun realSize(svc: AccessibilityService): Pair<Int, Int> {
         val wm = svc.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val m = DisplayMetrics()

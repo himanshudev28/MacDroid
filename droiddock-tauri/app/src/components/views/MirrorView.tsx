@@ -19,12 +19,17 @@ export default function MirrorView({
   adbSerial,
   scrcpyReady,
   onAdbMirror,
+  onAdbDesktop,
+  defaultMode,
   onToast,
 }: {
   linked: boolean;
   adbSerial: string | null;
   scrcpyReady: boolean;
   onAdbMirror: () => void;
+  onAdbDesktop: () => void;
+  /// Which card is highlighted as the primary route (Settings › Mirroring).
+  defaultMode: "wifi" | "adb" | "desktop";
   onToast: (kind: "ok" | "bad" | "info", text: string) => void;
 }) {
   const [active, setActive] = useState<"screen" | "camera" | null>(null);
@@ -93,10 +98,10 @@ export default function MirrorView({
 
         <div className="mt-4 space-y-3">
           <LaunchCard
-            primary
             title="Wi-Fi mirror"
             subtitle="Opens a phone-shaped pop-out window over Wi-Fi. No ADB, scrcpy, or Developer Options needed."
             tag="Wi-Fi"
+            primary={defaultMode === "wifi"}
             live={linked}
             requirement={linked ? null : "Phone app link required"}
             requirementHint="Pair the DroidDock phone app from the Dashboard to mirror over Wi-Fi."
@@ -107,6 +112,7 @@ export default function MirrorView({
 
           <LaunchCard
             title="ADB mirror"
+            primary={defaultMode === "adb"}
             subtitle="Full-quality, low-latency mirroring over USB or wireless ADB via scrcpy — opens in its own window."
             tag="ADB"
             live={!!adbSerial}
@@ -119,6 +125,22 @@ export default function MirrorView({
             buttonLabel="Mirror via ADB"
             onClick={onAdbMirror}
           />
+
+          <LaunchCard
+            title="Desktop mode"
+            primary={defaultMode === "desktop"}
+            subtitle="Mirrors a second, virtual Android display instead of the phone's own screen — a real desktop with freeform windows, while the phone stays usable. Needs Android 11+ and scrcpy 2.5 or newer."
+            tag="ADB"
+            live={!!adbSerial}
+            requirement={adbSerial ? null : "No ADB device connected"}
+            requirementHint={
+              scrcpyReady
+                ? "Connect a phone via USB or wireless ADB from the Devices tab."
+                : "Install scrcpy first (Devices tab → Tools)."
+            }
+            buttonLabel="Start desktop"
+            onClick={onAdbDesktop}
+          />
         </div>
       </div>
     </div>
@@ -129,23 +151,25 @@ function LaunchCard({
   title,
   subtitle,
   tag,
+  primary,
   live,
   requirement,
   requirementHint,
   buttonLabel,
   buttonBusy,
-  primary,
   onClick,
 }: {
   title: string;
   subtitle: string;
   tag: string;
+  /// The route chosen in Settings › Mirroring — badged so the intended one is
+  /// obvious among three near-identical cards.
+  primary?: boolean;
   live?: boolean;
   requirement: string | null;
   requirementHint: string;
   buttonLabel: string;
   buttonBusy?: boolean;
-  primary?: boolean;
   onClick: () => void;
 }) {
   return (

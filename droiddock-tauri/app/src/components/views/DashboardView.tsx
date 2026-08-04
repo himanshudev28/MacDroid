@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { getPairingInfo, pairingUrl, type PairingInfo } from "../../lib/pairing";
-import { onWifiStatus, type WifiStatus } from "../../lib/wifi";
+import { onWifiStatus, wifiStatus, type WifiStatus } from "../../lib/wifi";
 import { onAppDeviceInfo, type AppDeviceInfo } from "../../lib/bridge";
-import type { ViewId } from "../Sidebar";
+import type { ViewId } from "../../lib/nav";
 import LinkPulse from "../LinkPulse";
 import Icon from "../Icon";
 
@@ -19,6 +19,10 @@ export default function DashboardView({ onNavigate }: { onNavigate?: (v: ViewId)
 
   useEffect(() => {
     getPairingInfo().then(setInfo).catch(console.error);
+    // Seed from the live state: this view unmounts whenever you visit another
+    // page, so on the way back it would otherwise sit at `connected: false` and
+    // show the pairing QR for an already-linked phone until the link changed.
+    wifiStatus().then(setStatus).catch(() => {});
     const offInfo = onAppDeviceInfo(setDevice);
     const offStatus = onWifiStatus((s) => {
       setStatus(s);

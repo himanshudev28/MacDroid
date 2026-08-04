@@ -26,6 +26,18 @@ pub enum Message {
         name: String,
         #[serde(default)]
         caps: Vec<String>,
+        /// A stable per-install id the phone generates once and persists.
+        /// Additive and optional so a captured corpus hello (and any older
+        /// phone build) still round-trips byte-for-byte.
+        ///
+        /// The explicit rename is load-bearing: the enum's `rename_all` applies
+        /// to *variant* names, not to struct-variant *fields*, so without this
+        /// serde looks for `device_id` while ConnectionManager.kt sends
+        /// `deviceId` — and `#[serde(default)]` then swallows the mismatch
+        /// silently, leaving the photo-sync ledger keyed on the display name
+        /// exactly as before. Caught by running the real app against the phone.
+        #[serde(rename = "deviceId", default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
     },
     Welcome {
         name: String,
@@ -36,8 +48,18 @@ pub enum Message {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         caps: Vec<String>,
     },
-    Ping,
-    Pong,
+    /// Tier C link-quality probe. `t` is the Mac's epoch-ms at send time,
+    /// echoed verbatim in the `Pong` so the phone needs no synchronised clock.
+    /// Optional + skip-if-none so a bare `{"type":"ping"}` (wifi.js parity,
+    /// and what the captured corpus contains) still round-trips byte-for-byte.
+    Ping {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        t: Option<i64>,
+    },
+    Pong {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        t: Option<i64>,
+    },
     Pause {
         until: i64,
     },
@@ -92,6 +114,18 @@ pub enum Message {
     PhotoThumb(Extra),
     PhotoThumbError(Extra),
 
+    // Tier B: the phone's wallpaper and its launchable apps. All four are
+    // caps-gated (`"wallpaper"` / `"apps"` in the phone's hello) and follow
+    // shapes that already exist here — `wallpaper`/`apps-list` are numeric-reqId
+    // request/reply pairs like `photos-list`, and `app-icon` answers over the
+    // existing KIND_THUMB binary frame exactly like `photo-thumb`.
+    Wallpaper(Extra),
+    AppsList(Extra),
+    AppIcon(Extra),
+    AppIconError(Extra),
+    /// Fire-and-forget: open a package on the phone. No reply.
+    AppLaunch(Extra),
+
     PhonePush(Extra),
     PhonePushBegin(Extra),
     PhonePushDone(Extra),
@@ -111,6 +145,10 @@ pub enum Message {
     CameraStart(Extra),
     CameraStop(Extra),
     CameraFlip(Extra),
+    /// Tier D: phone→Mac input (`mac_remote`). Caps-gated behind `"remote"`,
+    /// which the Mac only advertises while the feature is switched on.
+    Remote(Extra),
+
     MirrorTap(Extra),
     MirrorSwipe(Extra),
     MirrorKey(Extra),
@@ -171,6 +209,23 @@ mod tests {
     }
 
     #[test]
+    fn hello_accepts_the_camelcase_deviceid_the_phone_actually_sends() {
+        // ConnectionManager.kt puts "deviceId". If serde is expecting the
+        // snake_case field name, this silently deserializes to None and the
+        // photo-sync ledger keeps falling back to the display name.
+        let json = serde_json::json!({
+            "type": "hello", "token": "t", "name": "Pixel", "deviceId": "uuid-1"
+        });
+        let msg: Message = serde_json::from_value(json).unwrap();
+        match msg {
+            Message::Hello { device_id, .. } => {
+                assert_eq!(device_id.as_deref(), Some("uuid-1"), "deviceId was dropped on the floor");
+            }
+            _ => panic!("not a hello"),
+        }
+    }
+
+    #[test]
     fn hello_round_trips() {
         let json = serde_json::json!({
             "type": "hello",
@@ -185,6 +240,7 @@ mod tests {
                 token: "abc".into(),
                 name: "Pixel".into(),
                 caps: vec!["fs".into(), "photos".into()],
+                device_id: None,
             }
         );
         assert_eq!(serde_json::to_value(&msg).unwrap(), json);
@@ -217,8 +273,19 @@ mod tests {
     #[test]
     fn ping_pong_round_trip() {
         let ping: Message = serde_json::from_value(serde_json::json!({ "type": "ping" })).unwrap();
-        assert_eq!(ping, Message::Ping);
+        assert_eq!(ping, Message::Ping { t: None });
         let pong: Message = serde_json::from_value(serde_json::json!({ "type": "pong" })).unwrap();
-        assert_eq!(pong, Message::Pong);
+        assert_eq!(pong, Message::Pong { t: None });
+
+        // Tier C: the timestamped forms round-trip too, and a bare ping still
+        // re-serializes without injecting a null `t`.
+        let stamped = serde_json::json!({ "type": "ping", "t": 1_700_000_000_000i64 });
+        let msg: Message = serde_json::from_value(stamped.clone()).unwrap();
+        assert_eq!(msg, Message::Ping { t: Some(1_700_000_000_000) });
+        assert_eq!(serde_json::to_value(&msg).unwrap(), stamped);
+        assert_eq!(
+            serde_json::to_value(&Message::Ping { t: None }).unwrap(),
+            serde_json::json!({ "type": "ping" })
+        );
     }
 }

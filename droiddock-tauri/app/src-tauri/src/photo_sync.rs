@@ -39,6 +39,27 @@ struct Ledger {
     by_device: HashMap<String, HashSet<i64>>,
 }
 
+impl Ledger {
+    /// Move a device's synced-id set from an old key to a new one.
+    ///
+    /// Returns whether anything moved, so the caller only rewrites the file
+    /// when it must. No-ops when the destination already exists (migration has
+    /// run) or the source doesn't (nothing to move), which makes it safe to
+    /// call on every sync pass.
+    fn migrate_key(&mut self, from: &str, to: &str) -> bool {
+        if from == to || self.by_device.contains_key(to) {
+            return false;
+        }
+        match self.by_device.remove(from) {
+            Some(ids) => {
+                self.by_device.insert(to.to_string(), ids);
+                true
+            }
+            None => false,
+        }
+    }
+}
+
 pub struct PhotoSyncState {
     ledger_path: PathBuf,
     ledger: Mutex<Ledger>,
@@ -92,6 +113,21 @@ impl PhotoSyncState {
 
     async fn already_synced(&self, device_key: &str) -> HashSet<i64> {
         self.ledger.lock().await.by_device.get(device_key).cloned().unwrap_or_default()
+    }
+
+    /// One-time migration for ledgers written before the key changed from the
+    /// phone's display name to its persisted device id.
+    ///
+    /// Without this, the first sync after that change sees an unknown key, finds
+    /// nothing "already synced", and re-downloads the entire library — landing
+    /// every photo a second time as `name (2).jpg`, since `unique_dest` never
+    /// overwrites. Moves the entries rather than copying so it can only run once.
+    async fn migrate_key(&self, from: &str, to: &str) {
+        let mut l = self.ledger.lock().await;
+        if l.migrate_key(from, to) {
+            eprintln!("[photo-sync] migrated ledger key {from:?} → device id");
+            save_ledger(&self.ledger_path, &l);
+        }
     }
 }
 
@@ -270,9 +306,16 @@ pub async fn check(
     photo: PhotoSync,
     cfg: crate::config::Config,
     device_key: String,
+    // The phone's display name, when it differs from `device_key` — i.e. when
+    // the phone now sends a device id. Used once to migrate a ledger written
+    // under the old name-based key; `None` means there is nothing to migrate.
+    legacy_key: Option<String>,
 ) {
     if !cfg.photo_sync_enabled || cfg.is_paused() {
         return;
+    }
+    if let Some(legacy) = legacy_key.as_deref() {
+        photo.migrate_key(legacy, &device_key).await;
     }
     let dest = resolve_dest(&app, cfg.photo_sync_dest.as_deref());
     let _ = run_sync(app, ws_state, photo, dest, device_key).await;
@@ -290,9 +333,16 @@ pub async fn backfill(
     photo: PhotoSync,
     cfg: crate::config::Config,
     device_key: String,
+    // The phone's display name, when it differs from `device_key` — i.e. when
+    // the phone now sends a device id. Used once to migrate a ledger written
+    // under the old name-based key; `None` means there is nothing to migrate.
+    legacy_key: Option<String>,
 ) -> Result<(), String> {
     if cfg.is_paused() {
         return Err("DroidDock is paused — resume it first".into());
+    }
+    if let Some(legacy) = legacy_key.as_deref() {
+        photo.migrate_key(legacy, &device_key).await;
     }
     let dest = resolve_dest(&app, cfg.photo_sync_dest.as_deref());
     run_sync(app, ws_state, photo, dest, device_key).await
@@ -307,6 +357,43 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("droiddock-photo-sync-test-{tag}-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn migrating_the_ledger_key_preserves_already_synced_ids() {
+        let mut ledger = Ledger::default();
+        ledger.by_device.entry("Google Pixel 7".into()).or_default().extend([1, 2]);
+
+        // The state that would have re-downloaded the whole library: the new
+        // id-based key knows nothing about what the name-based key synced.
+        assert!(!ledger.by_device.contains_key("uuid-abc"));
+
+        assert!(ledger.migrate_key("Google Pixel 7", "uuid-abc"));
+        assert_eq!(ledger.by_device["uuid-abc"].len(), 2);
+        // Source removed, so a second pass can't duplicate or resurrect it.
+        assert!(!ledger.by_device.contains_key("Google Pixel 7"));
+        assert!(!ledger.migrate_key("Google Pixel 7", "uuid-abc"));
+    }
+
+    #[test]
+    fn migration_never_clobbers_an_existing_id_keyed_entry() {
+        let mut ledger = Ledger::default();
+        ledger.by_device.entry("Pixel".into()).or_default().extend([1]);
+        ledger.by_device.entry("uuid-abc".into()).or_default().extend([9]);
+
+        // Already migrated (or a genuinely different phone) — the id-keyed set
+        // is authoritative and must not be overwritten by the stale name one.
+        assert!(!ledger.migrate_key("Pixel", "uuid-abc"));
+        assert_eq!(ledger.by_device["uuid-abc"], [9].into_iter().collect());
+    }
+
+    #[test]
+    fn migration_is_a_noop_when_the_keys_are_the_same() {
+        let mut ledger = Ledger::default();
+        ledger.by_device.entry("Pixel".into()).or_default().extend([1]);
+        // An older phone with no device id keys on its name already.
+        assert!(!ledger.migrate_key("Pixel", "Pixel"));
+        assert_eq!(ledger.by_device["Pixel"].len(), 1);
     }
 
     #[test]

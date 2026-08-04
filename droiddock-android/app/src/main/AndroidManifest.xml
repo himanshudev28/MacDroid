@@ -20,6 +20,17 @@
     <!-- Auto mode: lets the Mac start mirroring/camera without a tap on the phone. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
+    <!-- Tier B (Apps grid): makes launchable apps visible to package queries on
+         Android 11+. Deliberately scoped to the LAUNCHER intent rather than
+         requesting QUERY_ALL_PACKAGES — the grid only ever shows apps you can
+         actually open, so the broad "see every package" permission buys nothing. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:icon="@drawable/ic_launcher"

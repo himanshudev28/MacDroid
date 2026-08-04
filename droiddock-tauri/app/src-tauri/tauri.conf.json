@@ -13,6 +13,8 @@
     "macOSPrivateApi": true,
     "windows": [
       {
+        "label": "main",
+        "url": "index.html",
         "title": "DroidDock",
         "width": 1120,
         "height": 720,
@@ -20,16 +22,17 @@
         "minHeight": 600,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "transparent": true,
+        "transparent": false,
         "windowEffects": {
           "effects": ["sidebar"],
           "state": "followsWindowActiveState",
           "radius": 12.0
         }
+
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self'"
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost ws://localhost:1420; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self'"
     }
   },
   "bundle": {

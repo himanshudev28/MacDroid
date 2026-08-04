@@ -64,12 +64,16 @@ export default function Icon({
   className = "",
   strokeWidth = 1.75,
   fill = "none",
+  title,
 }: {
   name: keyof typeof PATHS | string;
   size?: number;
   className?: string;
   strokeWidth?: number;
   fill?: string;
+  /// Renders an SVG <title>, which is both the tooltip and the accessible
+  /// name. Without it the glyph stays `aria-hidden` — decorative by default.
+  title?: string;
 }) {
   const d = PATHS[name] ?? "";
   return (
@@ -83,8 +87,10 @@ export default function Icon({
       strokeLinecap="round"
       strokeLinejoin="round"
       className={className}
-      aria-hidden="true"
+      role={title ? "img" : undefined}
+      aria-hidden={title ? undefined : true}
     >
+      {title && <title>{title}</title>}
       <path d={d} />
     </svg>
   );

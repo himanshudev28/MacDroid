@@ -23,6 +23,8 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -30,6 +32,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
@@ -135,6 +138,7 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
     // tab immediately rather than leaving it selected but absent from the nav bar.
     LaunchedEffect(macCaps) {
         if (currentTab == "macfs" && !macCaps.contains("macfs")) currentTab = "home"
+        if (currentTab == "remote" && !macCaps.contains("remote")) currentTab = "home"
     }
 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -279,6 +283,12 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
                     if (macCaps.contains("macfs")) {
                         add(Triple("macfs", "Mac Files", Icons.Outlined.LaptopMac))
                     }
+                    // Tier D — same pattern: entirely absent unless the Mac
+                    // advertised "remote", which it only does while the user
+                    // has remote control switched on over there.
+                    if (macCaps.contains("remote")) {
+                        add(Triple("remote", "Remote", Icons.Outlined.Mouse))
+                    }
                     add(Triple("mirror",   "Mirror",   Icons.Outlined.ScreenShare))
                     add(Triple("settings", "Settings", Icons.Outlined.Settings))
                 }
@@ -356,6 +366,7 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
                     },
                 )
                 "macfs" -> MacFilesTab(connected = connected)
+                "remote" -> MacRemoteTab(connected = connected)
                 "mirror" -> MirrorTab(
                     connected   = connected,
                     overlayOk   = overlayOk,
@@ -1158,7 +1169,115 @@ private fun RecentTransferRow(record: TransferRecord) {
 
 // ── Mac Files tab (Phase 19 — reverse file browsing) ───────────────────────
 
+/**
+ * Tier D — a trackpad for the Mac.
+ *
+ * Deliberately thin: it translates gestures into the fixed `remote` vocabulary
+ * `mac_remote.rs` accepts and sends them fire-and-forget. There is no state to
+ * keep in sync, and nothing here can express an action the Mac's allow-list
+ * doesn't already permit.
+ */
+@Composable
+private fun MacRemoteTab(connected: Boolean) {
+    var typed by remember { mutableStateOf("") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text("Mac Remote", color = Fg, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+            if (connected) "Drag to move the pointer. Tap to click."
+            else "Not connected to your Mac.",
+            color = Dim,
+            fontSize = 13.sp
+        )
+
+        // Trackpad. Relative deltas are accumulated into absolute moves by
+        // tracking the pointer here — the Mac's `mouse_move` takes screen
+        // coordinates, so the phone owns the cursor position while dragging.
+        var cursorX by remember { mutableStateOf(600f) }
+        var cursorY by remember { mutableStateOf(400f) }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Surface2)
+                .pointerInput(connected) {
+                    if (!connected) return@pointerInput
+                    detectDragGestures { change, drag ->
+                        change.consume()
+                        // 1.6× so a short phone drag crosses a large display.
+                        cursorX = (cursorX + drag.x * 1.6f).coerceAtLeast(0f)
+                        cursorY = (cursorY + drag.y * 1.6f).coerceAtLeast(0f)
+                        ConnectionManager.sendRemote("mouse_move") {
+                            it.put("x", cursorX.toDouble()).put("y", cursorY.toDouble())
+                        }
+                    }
+                }
+                .pointerInput(connected) {
+                    if (!connected) return@pointerInput
+                    detectTapGestures(
+                        onTap = { ConnectionManager.sendRemote("mouse_click") { it.put("button", "left") } },
+                        onLongPress = { ConnectionManager.sendRemote("mouse_click") { it.put("button", "right") } }
+                    )
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Text("Trackpad", color = Dim, fontSize = 13.sp)
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            RemoteKey("↑", Modifier.weight(1f)) { ConnectionManager.sendRemote("key") { it.put("key", "up") } }
+            RemoteKey("↓", Modifier.weight(1f)) { ConnectionManager.sendRemote("key") { it.put("key", "down") } }
+            RemoteKey("←", Modifier.weight(1f)) { ConnectionManager.sendRemote("key") { it.put("key", "left") } }
+            RemoteKey("→", Modifier.weight(1f)) { ConnectionManager.sendRemote("key") { it.put("key", "right") } }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            RemoteKey("Enter", Modifier.weight(1f)) { ConnectionManager.sendRemote("key") { it.put("key", "enter") } }
+            RemoteKey("Space", Modifier.weight(1f)) { ConnectionManager.sendRemote("key") { it.put("key", "space") } }
+            RemoteKey("Esc", Modifier.weight(1f)) { ConnectionManager.sendRemote("key") { it.put("key", "escape") } }
+            RemoteKey("Tab", Modifier.weight(1f)) { ConnectionManager.sendRemote("key") { it.put("key", "tab") } }
+        }
+
+        OutlinedTextField(
+            value = typed,
+            onValueChange = { typed = it },
+            label = { Text("Type on the Mac") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Button(
+            onClick = {
+                if (typed.isNotEmpty()) {
+                    ConnectionManager.sendRemote("text") { it.put("text", typed) }
+                    typed = ""
+                }
+            },
+            enabled = connected && typed.isNotEmpty(),
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("Send text") }
+    }
+}
+
+@Composable
+private fun RemoteKey(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        modifier = modifier,
+        colors = ButtonDefaults.buttonColors(containerColor = Surface3, contentColor = Fg)
+    ) { Text(label, fontSize = 13.sp) }
+}
+
 private fun macFsEntryPath(base: String, entry: JSONObject): String {
+    // The synthetic root listing (base == "") carries an absolute `path` per
+    // entry, because a root's display name is only its basename and there is
+    // no base to join it to. Ordinary entries have no `path` and are joined.
+    entry.optString("path").takeIf { it.isNotEmpty() }?.let { return it }
     val name = entry.optString("name")
     return if (base.isEmpty()) name else "$base/$name"
 }
@@ -1665,12 +1784,17 @@ private fun AutoClipRow(
         IconBadge(Icons.Default.ContentCopy, Purple)
         Spacer(Modifier.width(13.dp))
         Column(Modifier.weight(1f)) {
-            Text("Auto Clipboard", color = Fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text("Clipboard & Screen Control", color = Fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            // The same accessibility service backs Mac-side taps, swipes and the
+            // nav buttons in the Wi-Fi mirror. Labelling it "Auto Clipboard"
+            // hid that: turn it off (or reinstall the app, which turns it off
+            // for you) and the mirror still streams while every click is
+            // discarded, with nothing on either device saying why.
             Text(
                 when {
-                    !a11yOn -> "Enable accessibility to auto-send copies to Mac"
-                    auto    -> "On — copies on this phone appear on Mac instantly"
-                    else    -> "Manual — use share sheet to push copies"
+                    !a11yOn -> "Enable accessibility for Mac screen control + auto-copy"
+                    auto    -> "On — Mac can control this screen; copies sync instantly"
+                    else    -> "On — Mac can control this screen; copies are manual"
                 },
                 color = Dim, fontSize = 11.sp, lineHeight = 15.sp,
                 maxLines = 2, overflow = TextOverflow.Ellipsis

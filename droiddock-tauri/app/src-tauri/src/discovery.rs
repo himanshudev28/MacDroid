@@ -6,10 +6,20 @@ use tokio::net::UdpSocket;
 /// we reply `DROIDDOCK:HERE` so it learns our current IP without re-pairing.
 /// Byte-for-byte match to wifi.js — see CLAUDE.md's compatibility mandate.
 pub async fn run(app: AppHandle, discovery_port: u16) {
-    let socket = match UdpSocket::bind(("0.0.0.0", discovery_port)).await {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("discovery: failed to bind 0.0.0.0:{discovery_port}: {e}");
+    let mut socket = None;
+    for _ in 0..10 {
+        match UdpSocket::bind(("0.0.0.0", discovery_port)).await {
+            Ok(s) => {
+                socket = Some(s);
+                break;
+            }
+            Err(_) => tokio::time::sleep(std::time::Duration::from_millis(500)).await,
+        }
+    }
+    let socket = match socket {
+        Some(s) => s,
+        None => {
+            eprintln!("discovery: failed to bind 0.0.0.0:{discovery_port}");
             return;
         }
     };

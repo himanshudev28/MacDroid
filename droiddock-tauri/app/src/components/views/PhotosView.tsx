@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, memo } from "react";
 import Icon from "../Icon";
 import EmptyState from "../EmptyState";
 import { fmtDuration } from "../../lib/ui";
@@ -10,7 +10,7 @@ const PAGE = 500; // matches the Electron client's single 500-item page
 /// Phase 6 — the photo/video grid. Thumbnails stream in lazily (Intersection
 /// observer, 3-at-a-time) exactly like the Electron PhotosView; clicking a tile
 /// pulls the full-res file to a temp dir and opens it in Preview/QuickTime.
-export default function PhotosView({
+function PhotosView({
   linked,
   onToast,
 }: {
@@ -242,3 +242,10 @@ function Tile({
     </div>
   );
 }
+
+/* Memoised: App holds `media`, which the phone pushes once a second while
+   something is playing. Without this, every one of those ticks re-rendered this
+   whole view (thumbnail grids, file lists) even though none of its props
+   changed. All props here are primitives or stable useCallback refs, so the
+   comparison is sound. */
+export default memo(PhotosView);

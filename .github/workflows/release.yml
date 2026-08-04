@@ -13,8 +13,11 @@ jobs:
   # Builds the Tauri rewrite (droiddock-tauri/app) — the Electron app
   # (droiddock 2/) is retired from this job once Phase 16 parity validation
   # passes; until then it stays buildable locally, just not in CI.
+  # Named "DroidDock Tauri" throughout: the macOS client has been both an
+  # Electron and a Tauri app, and once a build is a bare .dmg in a release
+  # there is nothing left to say which stack produced it.
   mac:
-    name: Build macOS app
+    name: Build DroidDock Tauri (macOS)
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -38,13 +41,17 @@ jobs:
         with:
           projectPath: droiddock-tauri/app
           tagName: ${{ github.ref_name }}
-          releaseName: 'DroidDock ${{ github.ref_name }}'
-          releaseBody: 'See the assets below to download this version.'
+          releaseName: 'DroidDock Tauri ${{ github.ref_name }}'
+          releaseBody: |
+            DroidDock ${{ github.ref_name }}
+
+            * **macOS** — DroidDock Tauri (`.dmg` / `.app`), built from `droiddock-tauri/`.
+            * **Android** — `DroidDock-Android.apk`, built from `droiddock-android/`.
           releaseDraft: false
           prerelease: false
 
   android:
-    name: Build Android APK
+    name: Build DroidDock Android (APK)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -57,8 +64,9 @@ jobs:
           java-version: '17'
       # ubuntu-latest ships the Android SDK; the Gradle wrapper is in the repo.
       - run: chmod +x gradlew && ./gradlew assembleDebug
-      - run: cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/DroidDock.apk"
+      # Named to sit unambiguously beside the macOS "DroidDock Tauri" assets.
+      - run: cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/DroidDock-Android.apk"
       - name: Publish APK to the release
         uses: softprops/action-gh-release@v2
         with:
-          files: DroidDock.apk
+          files: DroidDock-Android.apk

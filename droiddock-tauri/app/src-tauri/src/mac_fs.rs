@@ -19,6 +19,12 @@ pub struct Entry {
     pub name: String,
     pub dir: bool,
     pub size: u64,
+    /// Absolute path, sent ONLY for the synthetic root listing — a root's
+    /// display name is its basename, but the phone has no base to join it to,
+    /// so it needs the full path to navigate into. Omitted for ordinary
+    /// entries, which the phone joins onto the directory it asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
     /// Epoch milliseconds, same unit as the rest of the config/protocol code
     /// (see `config::now_ms`).
     pub modified: i64,
@@ -79,9 +85,46 @@ pub async fn list(roots: &[String], path: &str) -> Result<Vec<Entry>, String> {
             dir: meta.is_dir(),
             size: if meta.is_dir() { 0 } else { meta.len() },
             modified,
+            path: None,
         });
     }
     Ok(entries)
+}
+
+/// The synthetic top level: the configured roots themselves.
+///
+/// The phone's Mac Files tab opens with `path: ""`, which has no directory to
+/// list — `canonicalize("")` fails, so before this the feature errored the
+/// instant it was opened. An empty path now means "show me what I'm allowed to
+/// see", which is also the only way to discover the roots without hardcoding
+/// them phone-side.
+pub fn list_roots(roots: &[String]) -> Vec<Entry> {
+    roots
+        .iter()
+        .filter_map(|root| {
+            // Skip roots that don't resolve — listing one would only produce an
+            // entry that errors when tapped.
+            let canon = std::fs::canonicalize(root).ok()?;
+            let name = canon
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| canon.to_string_lossy().to_string());
+            let modified = canon
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            Some(Entry {
+                name,
+                dir: true,
+                size: 0,
+                modified,
+                path: Some(canon.to_string_lossy().to_string()),
+            })
+        })
+        .collect()
 }
 
 /// Send a file from an allowed root to the phone: `mac-fs-pull-begin` (with a
@@ -109,6 +152,10 @@ pub async fn pull_to_phone(
     let size = meta.len();
     let transfer_id = ws_state.transfers.alloc_mac_id();
 
+    // Arm the ready-waiter BEFORE announcing the transfer, so a phone that
+    // answers instantly can't beat us to the registration.
+    let ready = ws_server::arm_mac_fs_ready(&ws_state, &req_id).await;
+
     ws_server::push(
         &ws_state,
         serde_json::json!({
@@ -119,6 +166,13 @@ pub async fn pull_to_phone(
         }),
     )
     .await;
+
+    // Wait for the phone to say its receiver is registered. Without this the
+    // first chunks race the phone's own `receiveMacFsPull` registration and are
+    // dropped on the floor — the file lands truncated and still reports success.
+    // An older phone build never sends `mac-fs-pull-ready`; the timeout below
+    // makes that degrade to the previous (racy) behaviour rather than hanging.
+    ready.await;
 
     let mut file = tokio::fs::File::open(&file_path)
         .await
@@ -149,6 +203,40 @@ pub async fn pull_to_phone(
 
 #[cfg(test)]
 mod tests {
+    /// The phone's Mac Files tab opens with `path: ""`. Before the root
+    /// listing existed that hit `canonicalize("")` and errored instantly, so
+    /// the feature was unusable from the moment it was opened.
+    #[test]
+    fn empty_path_lists_the_configured_roots_with_absolute_paths() {
+        let dir = std::env::temp_dir().join("droiddock-roots-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let roots = vec![dir.to_string_lossy().to_string()];
+
+        let entries = super::list_roots(&roots);
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].dir);
+        // Display name is the basename…
+        assert_eq!(entries[0].name, "droiddock-roots-test");
+        // …but an absolute path rides along, because the phone has no base to
+        // join the basename onto at the top level.
+        let path = entries[0].path.as_deref().expect("root entries carry a path");
+        assert!(std::path::Path::new(path).is_absolute());
+        // And that path must itself pass the security check.
+        assert!(super::check_root(&roots, path).is_ok());
+    }
+
+    #[test]
+    fn roots_that_do_not_resolve_are_skipped_not_listed() {
+        // Listing a broken root would only produce an entry that errors on tap.
+        let entries = super::list_roots(&vec!["/definitely/not/a/real/path".to_string()]);
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn an_empty_root_list_yields_nothing() {
+        assert!(super::list_roots(&[]).is_empty());
+    }
+
     use super::*;
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};

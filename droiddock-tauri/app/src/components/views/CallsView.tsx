@@ -1,3 +1,4 @@
+import { memo } from "react";
 import EmptyState from "../EmptyState";
 import Icon from "../Icon";
 
@@ -8,7 +9,7 @@ import Icon from "../Icon";
 /// ADB-only (Phase 13) — when a live ADB device is connected, dialing from
 /// Contacts now upgrades the call overlay automatically; this tab itself
 /// stays the same informational summary as the reference.
-export default function CallsView({ linked }: { linked: boolean }) {
+function CallsView({ linked }: { linked: boolean }) {
   if (!linked) {
     return (
       <EmptyState
@@ -59,3 +60,10 @@ export default function CallsView({ linked }: { linked: boolean }) {
     </div>
   );
 }
+
+/* Memoised: App holds `media`, which the phone pushes once a second while
+   something is playing. Without this, every one of those ticks re-rendered this
+   whole view (thumbnail grids, file lists) even though none of its props
+   changed. All props here are primitives or stable useCallback refs, so the
+   comparison is sound. */
+export default memo(CallsView);
