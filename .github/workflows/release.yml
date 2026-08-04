@@ -72,3 +72,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: DroidDock-Android.apk
+          # MUST match the mac job's `releaseDraft`. Both jobs write the same
+          # release for this tag, and this action defaults to `draft: false` —
+          # so on the v1.0.0 run it took the draft the mac job had just created
+          # and published it, silently overriding the intent. Whichever job
+          # finishes last decides, so the two settings have to agree.
+          draft: true
