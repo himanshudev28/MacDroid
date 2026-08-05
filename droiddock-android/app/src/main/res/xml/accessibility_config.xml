@@ -1,6 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- DroidDock clipboard auto-capture. We only listen for clipboard changes via
-     ClipboardManager; we do NOT read window content (canRetrieveWindowContent=false). -->
+<!-- One service, three jobs: clipboard auto-capture, Mac→phone screen control
+     (tap/swipe/type/back/home/recents), and the Mac's Lock button.
+
+     `canRetrieveWindowContent` is genuinely required — `AccessibilityControl
+     .typeText` finds the focused input via `findFocus(FOCUS_INPUT)` and calls
+     ACTION_SET_TEXT on it, which is impossible without it. The comment that
+     used to sit here said the opposite ("we do NOT read window content
+     (canRetrieveWindowContent=false)") while the attribute below has always
+     been `true`. Don't reintroduce that claim.
+
+     Note for anyone hunting the banking-app problem: many banking apps refuse
+     to run while *any* accessibility service is enabled — they enumerate
+     `AccessibilityManager.getEnabledAccessibilityServiceList()` and don't care
+     which service it is. Narrowing the flags here does not help; only turning
+     the service off does. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeViewLongClicked|typeViewTextSelectionChanged|typeNotificationStateChanged"
     android:accessibilityFeedbackType="feedbackGeneric"

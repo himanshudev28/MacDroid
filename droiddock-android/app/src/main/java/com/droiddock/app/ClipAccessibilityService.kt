@@ -44,6 +44,7 @@ class ClipAccessibilityService : AccessibilityService() {
         clipboard = cm
         listener = l
         AccessibilityControl.service = this // enable Mac-side screen control (gestures)
+        AccessibilityControl.enabled = Prefs.screenControl(applicationContext)
     }
 
     /** Path 1 — direct clipboard read (works while DroidDock is focused). */
@@ -140,4 +141,5 @@ class ClipAccessibilityService : AccessibilityService() {
         if (AccessibilityControl.service === this) AccessibilityControl.service = null
         super.onDestroy()
     }
+
 }

@@ -28,6 +28,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,7 +45,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -52,51 +59,73 @@ import androidx.compose.ui.unit.sp
 import android.content.pm.PackageManager
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import java.io.File
 
-private val Ink        = Color(0xFF0D0D12)
-private val Surface1   = Color(0xFF14141B)
-private val Surface2   = Color(0xFF1C1C26)
-private val Surface3   = Color(0xFF222230)
-private val Amber      = Color(0xFFF5A623)
-private val AmberDim   = Color(0xFFCC7B0E)
-private val Ok         = Color(0xFF34C759)
-private val Bad        = Color(0xFFFF453A)
-private val Fg         = Color(0xFFF0EFE9)
-private val Dim        = Color(0xFF72728A)
-private val LineColor  = Color(0xFF22222F)
-private val Purple     = Color(0xFFAA84FF)
-private val Blue       = Color(0xFF5B8FFF)
-private val Orange     = Color(0xFFF0934C)
+// The palette these names used to hold now lives in Theme.kt, one instance per
+// theme. Reading them through the CompositionLocal keeps every `color = Fg` in
+// this file working untouched while making all of them theme-aware; the cost is
+// that a colour is only legible from inside a composable, which the compiler
+// enforces for us.
+private val Ink:       Color @Composable get() = LocalDroidColors.current.ink
+private val Surface1:  Color @Composable get() = LocalDroidColors.current.surface1
+private val Surface2:  Color @Composable get() = LocalDroidColors.current.surface2
+private val Surface3:  Color @Composable get() = LocalDroidColors.current.surface3
+private val Amber:     Color @Composable get() = LocalDroidColors.current.amber
+private val AmberDim:  Color @Composable get() = LocalDroidColors.current.amberDim
+private val OnAmber:   Color @Composable get() = LocalDroidColors.current.onAmber
+private val Ok:        Color @Composable get() = LocalDroidColors.current.ok
+private val OnOk:      Color @Composable get() = LocalDroidColors.current.onOk
+private val Bad:       Color @Composable get() = LocalDroidColors.current.bad
+private val Fg:        Color @Composable get() = LocalDroidColors.current.fg
+private val Dim:       Color @Composable get() = LocalDroidColors.current.dim
+private val LineColor: Color @Composable get() = LocalDroidColors.current.line
+private val Purple:    Color @Composable get() = LocalDroidColors.current.purple
+private val Blue:      Color @Composable get() = LocalDroidColors.current.blue
+private val Orange:    Color @Composable get() = LocalDroidColors.current.orange
 
 class MainActivity : ComponentActivity() {
     private val pairFlow = MutableStateFlow<String?>(null)
 
+    /** Theme choice, hoisted here so the Settings picker can change it live
+     *  rather than only on next launch. */
+    private val themeFlow = MutableStateFlow(ThemeMode.SYSTEM)
+    private val pitchBlackFlow = MutableStateFlow(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        CrashNotifier.install(this)
+        themeFlow.value = Prefs.themeMode(this)
+        pitchBlackFlow.value = Prefs.pitchBlack(this)
         if (Prefs.load(this) != null) BridgeService.start(this)
         intent?.data?.toString()?.takeIf { it.startsWith("droiddock://pair") }
             ?.let { pairFlow.value = it }
         setContent {
             val pairUri by pairFlow.collectAsState()
-            MaterialTheme(
-                colorScheme = darkColorScheme(
-                    background      = Ink,
-                    surface         = Surface1,
-                    surfaceVariant  = Surface2,
-                    primary         = Amber,
-                    onPrimary       = Color(0xFF1A0E00),
-                    secondary       = Ok,
-                    onSecondary     = Color(0xFF002210),
-                    onBackground    = Fg,
-                    onSurface       = Fg,
-                    outline         = LineColor,
-                    outlineVariant  = LineColor.copy(alpha = 0.6f),
+            val theme by themeFlow.collectAsState()
+            val pitchBlack by pitchBlackFlow.collectAsState()
+            DroidDockTheme(theme, pitchBlack) {
+                SystemBarsFollowTheme()
+                DroidDockScreen(
+                    pairUri = pairUri,
+                    clearPairUri = { pairFlow.value = null },
+                    themeMode = theme,
+                    onThemeMode = { mode ->
+                        Prefs.setThemeMode(this, mode)
+                        themeFlow.value = mode
+                    },
+                    pitchBlack = pitchBlack,
+                    onPitchBlack = { v ->
+                        Prefs.setPitchBlack(this, v)
+                        pitchBlackFlow.value = v
+                    },
                 )
-            ) { DroidDockScreen(pairUri) { pairFlow.value = null } }
+            }
         }
     }
 
@@ -107,8 +136,39 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/**
+ * Flips the status/navigation bar icons to match the theme.
+ *
+ * `enableEdgeToEdge()` draws the app behind both bars, so on a light page the
+ * default light-on-transparent glyphs land on cream and vanish. This has to run
+ * as a side effect rather than at `onCreate`, since the resolved theme can
+ * change under us — SYSTEM mode following the OS, or the user picking another
+ * option in Settings.
+ */
 @Composable
-private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = {}) {
+private fun SystemBarsFollowTheme() {
+    val dark = LocalDroidColors.current.isDark
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as? android.app.Activity)?.window ?: return@SideEffect
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !dark
+                isAppearanceLightNavigationBars = !dark
+            }
+        }
+    }
+}
+
+@Composable
+private fun DroidDockScreen(
+    pairUri: String? = null,
+    clearPairUri: () -> Unit = {},
+    themeMode: ThemeMode = ThemeMode.SYSTEM,
+    onThemeMode: (ThemeMode) -> Unit = {},
+    pitchBlack: Boolean = false,
+    onPitchBlack: (Boolean) -> Unit = {},
+) {
     val ctx         = LocalContext.current
     val connected   by ConnectionManager.connected.collectAsState()
     val macName     by ConnectionManager.macName.collectAsState()
@@ -116,30 +176,63 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
     val pausedUntil by ConnectionManager.pausedUntil.collectAsState()
     val isPaused    = pausedUntil != 0L
     val macCaps     by ConnectionManager.macCaps.collectAsState()
+    val macInfo     by ConnectionManager.macInfo.collectAsState()
+    val macMedia    by ConnectionManager.macMedia.collectAsState()
+    val knownDevices by ConnectionManager.knownDevices.collectAsState()
+    val disconnected by ConnectionManager.manuallyDisconnected.collectAsState()
 
     var paired      by remember { mutableStateOf(Prefs.load(ctx) != null) }
+    /** Which known device the connect loop is currently pointed at. */
+    var activeToken by remember { mutableStateOf(Prefs.load(ctx)?.token) }
     var notifAccess by remember { mutableStateOf(notifAccessGranted(ctx)) }
     var phonePerms  by remember { mutableStateOf(phonePermsGranted(ctx)) }
     var allFiles    by remember { mutableStateOf(FileRepo.hasAllFiles()) }
     var clipA11y    by remember { mutableStateOf(clipAccessibilityEnabled(ctx)) }
+    // Hoisted, and refreshed by the poll below rather than in composition:
+    // `isAdminActive` is a binder round trip, and its only consumer sits inside
+    // a lazily-composed Settings row that re-enters composition every time it
+    // scrolls back into view. Seeded once here — like `clipA11y` above — so the
+    // row's first frame is already right instead of flashing "Grant" at someone
+    // who granted it months ago.
+    var deviceAdmin by remember { mutableStateOf(LockAdmin.isActive(ctx)) }
     var clipAuto    by remember { mutableStateOf(Prefs.clipboardAuto(ctx)) }
     var overlayOk   by remember { mutableStateOf(Settings.canDrawOverlays(ctx)) }
     var autoMirror  by remember { mutableStateOf(Prefs.autoMirror(ctx)) }
+    var expandNet   by remember { mutableStateOf(Prefs.expandNetworking(ctx)) }
+    var clipKeepHistory by remember { mutableStateOf(Prefs.clipboardHistory(ctx)) }
+    var defaultTab  by remember { mutableStateOf(Prefs.defaultTab(ctx)) }
+    var crashNotify by remember { mutableStateOf(Prefs.notifyOnCrash(ctx)) }
+    val clipHistory by ConnectionManager.clipHistory.collectAsState()
     var showManual  by remember { mutableStateOf(false) }
     var showGuide   by remember { mutableStateOf(false) }
     var showPause   by remember { mutableStateOf(false) }
+    // Found by the throttled check below. Its only job out here is the dot on
+    // the Settings nav item — the row that acts on it lives in SettingsTab.
+    var newRelease  by remember { mutableStateOf<UpdateChecker.Release?>(null) }
     var sending         by remember { mutableStateOf(false) }
     val activeTransfers by TransferManager.activeTransfers.collectAsState()
     val recentTransfers by TransferManager.recentTransfers.collectAsState()
-    var currentTab      by remember { mutableStateOf("home") }
+    // Resolved once, at first composition, from the saved preference. "dynamic"
+    // reads the link state rather than a fixed choice: land on Connect when
+    // there's nothing linked to act on, Home when there is. Evaluated eagerly
+    // rather than in an effect so the first frame is already the right tab —
+    // a visible flick from Home to Connect would be worse than either.
+    var currentTab by remember {
+        mutableStateOf(
+            when (val saved = Prefs.defaultTab(ctx)) {
+                "dynamic" -> if (Prefs.load(ctx) == null) "connect" else "home"
+                else -> saved
+            }
+        )
+    }
 
     // The "macfs" tab only exists while the connected Mac advertises the "macfs" cap
     // (Phase 19). If it disappears — reconnect to an older Mac build — bounce off the
     // tab immediately rather than leaving it selected but absent from the nav bar.
-    LaunchedEffect(macCaps) {
-        if (currentTab == "macfs" && !macCaps.contains("macfs")) currentTab = "home"
-        if (currentTab == "remote" && !macCaps.contains("remote")) currentTab = "home"
-    }
+    // Mac Files and Remote are no longer destinations of their own — they're
+    // sub-views of Files and Control, which handle a capability disappearing
+    // themselves. Nothing left to bounce off.
+
 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -155,21 +248,42 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
     }
 
     val applyPairing: (Pairing) -> Unit = { pairing ->
-        Prefs.save(ctx, pairing)
-        paired = true
         BridgeService.start(ctx)
-        ConnectionManager.restart(ctx)
+        ConnectionManager.onPaired(ctx, pairing)
+        paired = true
+        activeToken = pairing.token
         Toast.makeText(ctx, "Paired with ${pairing.macName}", Toast.LENGTH_SHORT).show()
     }
 
-    LaunchedEffect(Unit) {
+    // Permission state, re-read only while a screen that shows it is open.
+    //
+    // This was the app's main source of jank: five synchronous binder round
+    // trips — two `Settings.Secure` reads, `canDrawOverlays`,
+    // `isExternalStorageManager` and five permission checks — running on the
+    // **main thread** every 2s, forever, no matter which tab was on screen. A
+    // tab switch landing on one of those ticks stalled the frame that was
+    // trying to draw the new screen. Now: off the main thread, and only for the
+    // two screens that actually render these values.
+    LaunchedEffect(currentTab) {
+        if (currentTab != "settings" && currentTab != "control") return@LaunchedEffect
         while (true) {
-            notifAccess = notifAccessGranted(ctx)
-            phonePerms  = phonePermsGranted(ctx)
-            allFiles    = FileRepo.hasAllFiles()
-            clipA11y    = clipAccessibilityEnabled(ctx)
-            overlayOk   = Settings.canDrawOverlays(ctx)
-            kotlinx.coroutines.delay(2000)
+            val snapshot = withContext(Dispatchers.IO) {
+                PermissionSnapshot(
+                    notifAccess = notifAccessGranted(ctx),
+                    phonePerms  = phonePermsGranted(ctx),
+                    allFiles    = FileRepo.hasAllFiles(),
+                    clipA11y    = clipAccessibilityEnabled(ctx),
+                    overlayOk   = Settings.canDrawOverlays(ctx),
+                    deviceAdmin = LockAdmin.isActive(ctx),
+                )
+            }
+            notifAccess = snapshot.notifAccess
+            phonePerms  = snapshot.phonePerms
+            allFiles    = snapshot.allFiles
+            clipA11y    = snapshot.clipA11y
+            overlayOk   = snapshot.overlayOk
+            deviceAdmin = snapshot.deviceAdmin
+            kotlinx.coroutines.delay(2_000)
         }
     }
 
@@ -237,6 +351,23 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
         }
     }
 
+    // Look for a new release once a day, silently. Nothing downloads here — a
+    // dot appears on Settings and that is the whole of it, because installing
+    // restarts the app and that is never something to do unprompted.
+    //
+    // A failure is deliberately swallowed: the user didn't ask, and the manual
+    // button in Settings reports properly when they do.
+    LaunchedEffect(Unit) {
+        if (!Prefs.autoCheckUpdates(ctx)) return@LaunchedEffect
+        val since = System.currentTimeMillis() - Prefs.lastUpdateCheck(ctx)
+        if (since < UpdateChecker.CHECK_INTERVAL_MS) return@LaunchedEffect
+        runCatching { UpdateChecker.check() }
+            .onSuccess {
+                Prefs.setLastUpdateCheck(ctx, System.currentTimeMillis())
+                newRelease = it
+            }
+    }
+
     val launchScan = {
         val hasCam = ctx.checkSelfPermission(Manifest.permission.CAMERA) ==
                 PackageManager.PERMISSION_GRANTED
@@ -274,32 +405,45 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
                 modifier = Modifier
                     .navigationBarsPadding()
             ) {
-                val navItems = buildList {
-                    add(Triple("home",     "Home",     Icons.Filled.Home))
-                    add(Triple("connect",  "Connect",  Icons.Outlined.WifiTethering))
-                    add(Triple("files",    "Files",    Icons.Outlined.Folder))
-                    // Phase 19 — entirely absent (not just disabled) unless the connected
-                    // Mac advertised the "macfs" cap in its `welcome`.
-                    if (macCaps.contains("macfs")) {
-                        add(Triple("macfs", "Mac Files", Icons.Outlined.LaptopMac))
-                    }
-                    // Tier D — same pattern: entirely absent unless the Mac
-                    // advertised "remote", which it only does while the user
-                    // has remote control switched on over there.
-                    if (macCaps.contains("remote")) {
-                        add(Triple("remote", "Remote", Icons.Outlined.Mouse))
-                    }
-                    add(Triple("mirror",   "Mirror",   Icons.Outlined.ScreenShare))
-                    add(Triple("settings", "Settings", Icons.Outlined.Settings))
-                }
+                // Five fixed destinations.
+                //
+                // This had grown to eight — Home, Connect, Files, Clipboard,
+                // Mac Files, Remote, Mirror, Settings — two of them appearing
+                // and vanishing with the Mac's capabilities, so the bar
+                // reshuffled under your thumb mid-session. Material's
+                // NavigationBar is specified for three to five; at eight the
+                // labels wrapped ("Clipboar/d") and every icon shrank.
+                //
+                // Nothing was removed, only regrouped: Mac Files is a source
+                // toggle inside Files, Remote joins Mirror and Camera under
+                // Control (they are all "the other device's screen"), and
+                // Connect is reached from Home, since pairing is setup rather
+                // than a daily destination.
+                val navItems = listOf(
+                    Triple("home",      "Home",      Icons.Filled.Home),
+                    Triple("files",     "Files",     Icons.Outlined.Folder),
+                    Triple("clipboard", "Clipboard", Icons.Outlined.ContentPaste),
+                    Triple("control",   "Control",   Icons.Outlined.ScreenShare),
+                    Triple("settings",  "Settings",  Icons.Outlined.Settings),
+                )
                 navItems.forEach { (id, label, icon) ->
                     NavigationBarItem(
                         selected = currentTab == id,
                         onClick  = { currentTab = id },
-                        icon     = { Icon(icon, contentDescription = label, modifier = Modifier.size(22.dp)) },
+                        icon     = {
+                            // A dot, not a count: there is only ever one update,
+                            // and a "1" here reads as an unread message.
+                            if (id == "settings" && newRelease != null) {
+                                BadgedBox(badge = { Badge(containerColor = Amber) }) {
+                                    Icon(icon, contentDescription = label, modifier = Modifier.size(22.dp))
+                                }
+                            } else {
+                                Icon(icon, contentDescription = label, modifier = Modifier.size(22.dp))
+                            }
+                        },
                         label    = { Text(label, fontSize = 10.sp) },
                         colors   = NavigationBarItemDefaults.colors(
-                            selectedIconColor   = Color(0xFF1A0E00),
+                            selectedIconColor   = OnAmber,
                             selectedTextColor   = Amber,
                             indicatorColor      = Amber,
                             unselectedIconColor = Dim,
@@ -316,35 +460,78 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
                 .padding(innerPadding)
                 .background(Ink)
         ) {
-            when (currentTab) {
+            // A short crossfade, not a slide: tabs here have no left/right
+            // relationship to imply, and 120ms is under the threshold where a
+            // transition starts to feel like waiting. It also covers the one
+            // frame a heavier screen needs to compose, which is what made
+            // switching feel abrupt rather than slow.
+            AnimatedContent(
+                targetState = currentTab,
+                transitionSpec = {
+                    fadeIn(animationSpec = tween(120)) togetherWith
+                        fadeOut(animationSpec = tween(90))
+                },
+                label = "tab"
+            ) { tab ->
+            when (tab) {
                 "home" -> HomeTab(
                     connected   = connected,
                     isPaused    = isPaused,
                     paired      = paired,
                     macName     = macName,
+                    macInfo     = macInfo,
                     event       = event,
                     pausedUntil = pausedUntil,
+                    devices     = knownDevices,
+                    activeToken = activeToken,
+                    disconnected = disconnected,
+                    canControlMac = macCaps.contains("remote"),
+                    macMedia    = macMedia,
                     onPause     = { showPause = true },
                     onResume    = { ConnectionManager.resume(ctx) },
+                    onQuickConnect = { ConnectionManager.quickConnect(ctx) },
+                    onDisconnect   = { ConnectionManager.disconnect(ctx) },
+                    onPickDevice   = { device ->
+                        ConnectionManager.connectTo(ctx, device)
+                        activeToken = device.token
+                        paired = true
+                    },
                     onGoToConnect = { currentTab = "connect" },
                     onGoToMirror  = { currentTab = "mirror" },
                     onGoToFiles   = { currentTab = "files" },
                 )
                 "connect" -> ConnectTab(
+                    onBack      = { currentTab = "home" },
                     connected   = connected,
                     paired      = paired,
                     macName     = macName,
                     onScan      = launchScan,
                     onManual    = { showManual = true },
                     onForget    = {
-                        Prefs.clear(ctx)
+                        Prefs.clear(ctx) // drops the active pairing + its address-book entry
                         ConnectionManager.shutdown()
-                        BridgeService.stop(ctx)
+                        val remaining = Prefs.knownDevices(ctx)
+                        ConnectionManager.knownDevices.value = remaining
+                        activeToken = null
                         paired = false
+                        // Another Mac is still known — keep the bridge up and
+                        // switch to it rather than dropping the user onto a
+                        // pairing screen they don't need.
+                        val next = remaining.firstOrNull()
+                        if (next != null) {
+                            ConnectionManager.connectTo(ctx, next)
+                            activeToken = next.token
+                            paired = true
+                        } else {
+                            BridgeService.stop(ctx)
+                        }
                         Toast.makeText(ctx, "Forgot this Mac", Toast.LENGTH_SHORT).show()
                     },
                 )
-                "files" -> FilesTab(
+                "files" -> FilesScreen(
+                    macFsAvailable = macCaps.contains("macfs"),
+                    connected      = connected,
+                ) { FilesTab(
                     connected       = connected,
                     sending         = sending,
                     activeTransfers = activeTransfers,
@@ -352,7 +539,7 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
                     onSendFile = { if (!sending) filePicker.launch("*/*") },
                     onSendClipboard = {
                         val cm   = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        val text = cm.primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
+                        val text = readClipboardText(cm, ctx)
                         val sent = text.isNotEmpty() && ConnectionManager.sendClipboardText(text)
                         Toast.makeText(
                             ctx,
@@ -364,10 +551,21 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
                             Toast.LENGTH_SHORT
                         ).show()
                     },
+                ) }
+                "clipboard" -> ClipboardTab(
+                    connected     = connected,
+                    history       = clipHistory,
+                    keepHistory   = clipKeepHistory,
+                    onKeepHistory = { v ->
+                        clipKeepHistory = v
+                        Prefs.setClipboardHistory(ctx, v)
+                        if (!v) ConnectionManager.clearClipHistory()
+                    },
                 )
-                "macfs" -> MacFilesTab(connected = connected)
-                "remote" -> MacRemoteTab(connected = connected)
-                "mirror" -> MirrorTab(
+                "control" -> ControlScreen(
+                    remoteAvailable = macCaps.contains("remote"),
+                    connected       = connected,
+                ) { MirrorTab(
                     connected   = connected,
                     overlayOk   = overlayOk,
                     autoMirror  = autoMirror,
@@ -384,13 +582,34 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
                         autoMirror = v; Prefs.setAutoMirror(ctx, v)
                         if (!v) MirrorService.stop(ctx)
                     },
-                )
+                ) }
                 "settings" -> SettingsTab(
                     clipA11y    = clipA11y,
                     clipAuto    = clipAuto,
                     notifAccess = notifAccess,
                     phonePerms  = phonePerms,
                     allFiles    = allFiles,
+                    deviceAdmin = deviceAdmin,
+                    themeMode   = themeMode,
+                    onThemeMode = onThemeMode,
+                    pitchBlack  = pitchBlack,
+                    onPitchBlack = onPitchBlack,
+                    onOpenConnect = { currentTab = "connect" },
+                    crashNotify = crashNotify,
+                    onCrashNotify = { v ->
+                        crashNotify = v
+                        Prefs.setNotifyOnCrash(ctx, v)
+                    },
+                    defaultTab  = defaultTab,
+                    onDefaultTab = { t ->
+                        defaultTab = t
+                        Prefs.setDefaultTab(ctx, t)
+                    },
+                    expandNet   = expandNet,
+                    onExpandNet = { v ->
+                        expandNet = v
+                        Prefs.setExpandNetworking(ctx, v)
+                    },
                     onEnableClip = {
                         runCatching { ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
                         Toast.makeText(ctx, "Find DroidDock Clipboard and turn it on", Toast.LENGTH_LONG).show()
@@ -419,7 +638,9 @@ private fun DroidDockScreen(pairUri: String? = null, clearPairUri: () -> Unit = 
                         }
                     },
                     onOpenGuide = { showGuide = true },
+                    knownUpdate = newRelease,
                 )
+            }
             }
         }
     }
@@ -433,10 +654,19 @@ private fun HomeTab(
     isPaused:     Boolean,
     paired:       Boolean,
     macName:      String?,
+    macInfo:      ConnectionManager.MacInfo?,
     event:        String?,
     pausedUntil:  Long,
+    devices:      List<KnownDevice>,
+    activeToken:  String?,
+    disconnected: Boolean,
+    canControlMac: Boolean,
+    macMedia:     ConnectionManager.MacMedia?,
     onPause:      () -> Unit,
     onResume:     () -> Unit,
+    onQuickConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+    onPickDevice: (KnownDevice) -> Unit,
     onGoToConnect: () -> Unit,
     onGoToMirror:  () -> Unit,
     onGoToFiles:   () -> Unit,
@@ -460,7 +690,7 @@ private fun HomeTab(
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Default.PhoneAndroid, null, tint = Color(0xFF2A1900),
+                Icon(Icons.Default.PhoneAndroid, null, tint = OnAmber,
                     modifier = Modifier.size(20.dp))
             }
             Spacer(Modifier.width(10.dp))
@@ -481,6 +711,41 @@ private fun HomeTab(
             onResume     = onResume,
             onGoConnect  = onGoToConnect,
         )
+
+        // The Mac reporting back. Absent entirely on an older Mac build, or
+        // when the user turned the sync off there — an empty card would just
+        // look broken, so there isn't one.
+        // Only when there is no device card to fold it into — otherwise the
+        // Mac's name would appear twice, one card above the other.
+        if (devices.isEmpty()) {
+            macInfo?.let {
+                Spacer(Modifier.height(10.dp))
+                MacStatusCard(it)
+            }
+        }
+
+        if (devices.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            DevicesCard(
+                devices        = devices,
+                connected      = connected,
+                disconnected   = disconnected,
+                activeToken    = activeToken,
+                macInfo        = macInfo,
+                onQuickConnect = onQuickConnect,
+                onDisconnect   = onDisconnect,
+                onPickDevice   = onPickDevice,
+            )
+        }
+
+        // Only while the Mac says it will accept input — same gate the Remote
+        // tab uses, so the two can never disagree about whether it's available.
+        if (connected && canControlMac) {
+            Spacer(Modifier.height(10.dp))
+            MacNowPlayingCard(media = macMedia)
+            Spacer(Modifier.height(10.dp))
+            MacControlsCard(volume = macInfo?.volume)
+        }
 
         Spacer(Modifier.height(14.dp))
 
@@ -508,50 +773,15 @@ private fun HomeTab(
             )
         }
 
-        Spacer(Modifier.height(16.dp))
-
-        Text(
-            text          = "SYNC & SHARING",
-            color         = Dim,
-            fontSize      = 10.sp,
-            letterSpacing = 1.2.sp,
-            fontWeight    = FontWeight.SemiBold,
-            modifier      = Modifier.padding(start = 4.dp, bottom = 8.dp)
-        )
-
-        val features = listOf(
-            FeatureTile("Notifications", "Phone alerts on Mac", Icons.Outlined.Notifications, Blue, connected),
-            FeatureTile("Messages",      "SMS from your Mac",   Icons.Outlined.Message,       Ok,   connected),
-            FeatureTile("Calls",         "Call log & alerts",   Icons.Outlined.Call,          Ok,   connected),
-            FeatureTile("Clipboard",     "Copy between devices",Icons.Outlined.ContentCopy,   Purple, connected),
-            FeatureTile("Files",         "Transfer anything",   Icons.Outlined.Folder,        Orange, true),
-            FeatureTile("Photos",        "Browse phone gallery",Icons.Outlined.Photo,         Blue, connected),
-            FeatureTile("Camera",        "Use phone as webcam", Icons.Outlined.Videocam,      Orange, true),
-            FeatureTile("Screen Mirror", "Project to Mac",      Icons.Outlined.ScreenShare,   Purple, true),
-        )
-
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            features.chunked(2).forEach { row ->
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    row.forEach { tile ->
-                        FeatureTileCard(tile = tile, modifier = Modifier.weight(1f))
-                    }
-                    if (row.size == 1) Spacer(Modifier.weight(1f))
-                }
-            }
-        }
+        // The "SYNC & SHARING" grid that stood here — eight tiles, each a
+        // title, a subtitle and a status dot — was removed. None of them did
+        // anything when tapped; they restated features the nav bar already
+        // reaches and pushed the cards that *are* interactive a full screen
+        // further down. Connection state is already on the hero card above.
 
         Spacer(Modifier.height(24.dp))
     }
 }
-
-private data class FeatureTile(
-    val title:   String,
-    val status:  String,
-    val icon:    ImageVector,
-    val tint:    Color,
-    val active:  Boolean,
-)
 
 @Composable
 private fun ConnectionHeroCard(
@@ -570,16 +800,22 @@ private fun ConnectionHeroCard(
         connected -> Ok
         else      -> Dim
     }
+    // While paired-but-offline the card used to say only "Searching…", which
+    // dropped the one fact worth showing — *which* Mac it is looking for. The
+    // stored pairing name is right there.
+    val knownName = ConnectionManager.knownDevices.collectAsState().value
+        .firstOrNull()?.macName?.takeIf { it.isNotBlank() && it != "Mac" }
     val headline = when {
         isPaused  -> "Paused"
-        connected -> macName ?: "Mac"
-        paired    -> "Searching…"
+        connected -> macName ?: knownName ?: "Mac"
+        paired    -> knownName ?: "Searching…"
         else      -> "Not paired"
     }
     val subline = when {
         isPaused  -> pauseSubtitle(pausedUntil)
         connected -> if (event.isNullOrBlank()) "Connected · Wi-Fi" else "Connected · $event"
-        paired    -> "Waiting for Mac to come online"
+        paired    -> if (knownName != null) "Searching for this Mac…"
+                     else "Waiting for Mac to come online"
         else      -> "Pair with your Mac to get started"
     }
 
@@ -656,11 +892,472 @@ private fun ConnectionHeroCard(
                         Icon(Icons.Default.QrCodeScanner, null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
                         Text("Pair with Mac", fontWeight = FontWeight.SemiBold, fontSize = 15.sp,
-                            color = Color(0xFF1A0E00))
+                            color = OnAmber)
                     }
                 }
             }
         }
+    }
+}
+
+/**
+ * Phase 3 — what's playing on the Mac, and the transport for it.
+ *
+ * Shown whenever the Mac accepts remote control, not only when a track could be
+ * named. That asymmetry is the whole design: play/pause/next/prev are posted as
+ * real HID media keys, so they drive *whatever* owns the Mac's now-playing
+ * session — YouTube in Chrome, VLC, a podcast app — while the title above them
+ * can only be filled in for sources the Mac can actually read. Hiding the
+ * buttons whenever the label is unknown would take away working controls.
+ */
+@Composable
+private fun MacNowPlayingCard(media: ConnectionManager.MacMedia?) {
+    // Flip the glyph on tap and let the Mac's next report confirm it.
+    //
+    // Two reasons the reported state can't drive this alone. The Mac polls
+    // every 3s, so the button would sit wrong for up to three seconds after
+    // every press. And for a browser tab there is no state to report at all —
+    // AppleScript exposes a tab's title and URL, not whether its video is
+    // playing — so a YouTube pause would never be reflected however long you
+    // waited. `remember(media)` clears the guess the moment a fresh report
+    // arrives, so the Mac still wins for the players it can actually read.
+    var optimistic by remember(media) { mutableStateOf<Boolean?>(null) }
+
+    val playing = optimistic ?: (media?.playing == true)
+    val title = media?.title.orEmpty()
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape    = RoundedCornerShape(24.dp),
+        color    = Surface1,
+        tonalElevation = 0.dp
+    ) {
+        Column(Modifier.padding(18.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .background(
+                            (if (playing) Ok else Dim).copy(alpha = 0.14f),
+                            RoundedCornerShape(13.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        if (playing) Icons.Outlined.MusicNote else Icons.Outlined.Headphones,
+                        null,
+                        tint = if (playing) Ok else Dim,
+                        modifier = Modifier.size(21.dp)
+                    )
+                }
+                Spacer(Modifier.width(13.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        when {
+                            title.isNotEmpty() -> title
+                            playing            -> "Playing on your Mac"
+                            else               -> "Nothing Playing"
+                        },
+                        color = Fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        // "from your Mac" matches the reference's own subtitle
+                        // when there's nothing more specific to say.
+                        listOfNotNull(
+                            media?.artist?.takeIf { it.isNotBlank() },
+                            media?.app?.takeIf { it.isNotBlank() },
+                        ).joinToString(" · ").ifEmpty { "from your Mac" },
+                        color = Dim, fontSize = 11.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TransportButton(Icons.Outlined.SkipPrevious, "Previous", Modifier.weight(1f)) {
+                    ConnectionManager.sendRemote("media") { it.put("key", "prev") }
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1.4f)
+                        .height(46.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Amber)
+                        .clickable {
+                            optimistic = !playing
+                            ConnectionManager.sendRemote("media") { it.put("key", "playpause") }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
+                        contentDescription = "Play or pause",
+                        tint = OnAmber,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                TransportButton(Icons.Outlined.SkipNext, "Next", Modifier.weight(1f)) {
+                    ConnectionManager.sendRemote("media") { it.put("key", "next") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TransportButton(
+    icon: ImageVector,
+    label: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .height(46.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Surface2)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = label, tint = Fg, modifier = Modifier.size(21.dp))
+    }
+}
+
+/**
+ * Phase 2 — controlling the Mac from the phone.
+ *
+ * Gated on the Mac advertising `remote`, which it only does while the user has
+ * remote control switched on over there; an older or opted-out Mac never shows
+ * this card at all rather than showing buttons that quietly do nothing.
+ *
+ * Brightness is stepped rather than absolute because setting a display's level
+ * outright needs private CoreDisplay calls — these post the same HID keys the
+ * keyboard's own brightness keys do. Volume *is* absolute, so it gets a slider,
+ * seeded from the level the Mac reports in `mac-info`.
+ */
+@Composable
+private fun MacControlsCard(volume: Int?) {
+    var slider by remember(volume) { mutableStateOf((volume ?: 50).toFloat()) }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape    = RoundedCornerShape(24.dp),
+        color    = Surface1,
+        tonalElevation = 0.dp
+    ) {
+        Column(Modifier.padding(18.dp)) {
+            Text(
+                "MAC CONTROLS",
+                color = Dim, fontSize = 10.sp, letterSpacing = 1.2.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(12.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MacActionChip(
+                    icon = Icons.Outlined.Lock, label = "Lock",
+                    tint = Blue, modifier = Modifier.weight(1f)
+                ) { ConnectionManager.sendRemote("lock") }
+                MacActionChip(
+                    icon = Icons.Outlined.DesktopWindows, label = "Screensaver",
+                    tint = Purple, modifier = Modifier.weight(1f)
+                ) { ConnectionManager.sendRemote("screensaver") }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.BrightnessMedium, null, tint = Orange,
+                    modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(10.dp))
+                Text("Brightness", color = Fg, fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                StepButton("−") {
+                    ConnectionManager.sendRemote("brightness") { it.put("dir", "down") }
+                }
+                Spacer(Modifier.width(8.dp))
+                StepButton("+") {
+                    ConnectionManager.sendRemote("brightness") { it.put("dir", "up") }
+                }
+            }
+
+            if (volume != null) {
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.VolumeUp, null, tint = Ok,
+                        modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Text("Volume", color = Fg, fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.width(10.dp))
+                    Slider(
+                        value = slider,
+                        onValueChange = { slider = it },
+                        // Only the settled value is sent: dragging emits a value
+                        // per frame, and each one is an osascript process on the
+                        // Mac. The label tracks the drag so it still feels live.
+                        onValueChangeFinished = {
+                            ConnectionManager.sendRemote("volume_set") {
+                                it.put("level", slider.toInt())
+                            }
+                        },
+                        valueRange = 0f..100f,
+                        modifier = Modifier.weight(1f),
+                        colors = SliderDefaults.colors(
+                            thumbColor = Amber,
+                            activeTrackColor = Amber,
+                            inactiveTrackColor = Surface3,
+                        )
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("${slider.toInt()}", color = Dim, fontSize = 12.sp,
+                        modifier = Modifier.width(28.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MacActionChip(
+    icon: ImageVector,
+    label: String,
+    tint: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        color = Surface2,
+        tonalElevation = 0.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(vertical = 12.dp, horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(icon, null, tint = tint, modifier = Modifier.size(17.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(label, color = Fg, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+@Composable
+private fun StepButton(label: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(34.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Surface2)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, color = Fg, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/**
+ * "Last Connected Device" — the reference's home card.
+ *
+ * The head of the list is whichever Mac the connect loop is currently pointed
+ * at; the rest are previous pairings, tappable to switch. Only rendered when at
+ * least one Mac is known, so a fresh install still sees the pairing prompt in
+ * the hero card above rather than an empty shell.
+ */
+@Composable
+private fun DevicesCard(
+    devices:        List<KnownDevice>,
+    connected:      Boolean,
+    disconnected:   Boolean,
+    activeToken:    String?,
+    macInfo:        ConnectionManager.MacInfo?,
+    onQuickConnect: () -> Unit,
+    onDisconnect:   () -> Unit,
+    onPickDevice:   (KnownDevice) -> Unit,
+) {
+    val active = devices.firstOrNull { it.token == activeToken } ?: devices.first()
+    val others = devices.filter { it.token != active.token }
+
+    // Prefer the name the Mac just told us over the one stored at pairing time —
+    // it's the one that reflects a rename on the Mac. Falls back to the stored
+    // name while disconnected, which is the whole point of a "last connected
+    // device" card: it should still say *which* Mac when the link is down.
+    val liveName by ConnectionManager.macName.collectAsState()
+    val displayName = (if (connected) liveName else null)
+        ?.takeIf { it.isNotBlank() }
+        ?: active.macName.takeIf { it.isNotBlank() && it != "Mac" }
+        ?: "Mac"
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape    = RoundedCornerShape(24.dp),
+        color    = Surface1,
+        tonalElevation = 0.dp
+    ) {
+        Column(Modifier.padding(18.dp)) {
+            Text(
+                "LAST CONNECTED DEVICE",
+                color = Dim, fontSize = 10.sp, letterSpacing = 1.2.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            // The reference leads with a large laptop illustration, and it's
+            // right to: this card is about *which machine*, so the device
+            // deserves more weight than a list-row icon gives it.
+            Spacer(Modifier.height(18.dp))
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier
+                        .size(96.dp)
+                        .background(Amber.copy(alpha = 0.12f), RoundedCornerShape(28.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Outlined.LaptopMac, null, tint = Amber,
+                        modifier = Modifier.size(52.dp))
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    displayName,
+                    color = Fg, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    when {
+                        connected -> "Connected · ${active.ips.first()}:${active.port}"
+                        else      -> lastSeenLabel(active.lastSeenAt)
+                    },
+                    color = if (connected) Ok else Dim,
+                    fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
+                // The Mac's battery lives here rather than in a card of its own.
+                // A separate status card repeated the machine's name directly
+                // under this one, which read as two devices rather than one.
+                macInfo?.let { info ->
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            when {
+                                !info.hasBattery || info.battery == null ->
+                                    Icons.Outlined.PowerSettingsNew
+                                info.charging -> Icons.Outlined.BatteryChargingFull
+                                else -> Icons.Outlined.BatteryFull
+                            },
+                            null,
+                            tint = when {
+                                info.battery != null && info.battery <= 20 && !info.charging -> Orange
+                                else -> Ok
+                            },
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            when {
+                                // A desktop Mac has no battery at all. "0%" would
+                                // be a lie; "Plugged in" is the whole truth.
+                                !info.hasBattery || info.battery == null ->
+                                    if (info.charging) "Plugged in" else "On mains"
+                                info.charging -> "${info.battery}% · charging"
+                                else          -> "${info.battery}%"
+                            },
+                            color = Dim, fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            if (connected) {
+                OutlinedButton(
+                    onClick  = onDisconnect,
+                    modifier = Modifier.fillMaxWidth().height(46.dp),
+                    shape    = RoundedCornerShape(12.dp),
+                    colors   = ButtonDefaults.outlinedButtonColors(contentColor = Dim),
+                    border   = androidx.compose.foundation.BorderStroke(0.5.dp, LineColor)
+                ) {
+                    Icon(Icons.Outlined.LinkOff, null, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Disconnect", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                }
+            } else {
+                Button(
+                    onClick   = onQuickConnect,
+                    modifier  = Modifier.fillMaxWidth().height(46.dp),
+                    colors    = ButtonDefaults.buttonColors(containerColor = Amber),
+                    shape     = RoundedCornerShape(12.dp),
+                    elevation = ButtonDefaults.buttonElevation(0.dp)
+                ) {
+                    Icon(Icons.Outlined.Cable, null, modifier = Modifier.size(17.dp),
+                        tint = OnAmber)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Quick Connect", fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold, color = OnAmber)
+                }
+                if (disconnected) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Auto-reconnect is off until you connect again.",
+                        color = Dim, fontSize = 11.sp, lineHeight = 15.sp
+                    )
+                }
+            }
+
+            if (others.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                others.forEach { device ->
+                    RowDivider()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onPickDevice(device) }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Outlined.LaptopMac, null, tint = Dim,
+                            modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(device.macName, color = Fg, fontSize = 13.sp,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(lastSeenLabel(device.lastSeenAt), color = Dim, fontSize = 11.sp)
+                        }
+                        Text("Connect", color = Amber, fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** "Last seen 4m ago" — matching the reference's wording, including its
+ *  "Just now" for anything under a minute. Never-linked reads as paired-only. */
+private fun lastSeenLabel(ts: Long): String {
+    if (ts <= 0L) return "Not connected yet"
+    val diff = System.currentTimeMillis() - ts
+    return "Last seen " + when {
+        diff < 60_000L     -> "just now"
+        diff < 3_600_000L  -> "${diff / 60_000L}m ago"
+        diff < 86_400_000L -> "${diff / 3_600_000L}h ago"
+        else               -> "${diff / 86_400_000L}d ago"
     }
 }
 
@@ -697,38 +1394,54 @@ private fun QuickActionBtn(
     }
 }
 
+
+/** The Mac's own name and battery, pushed over the link (`mac-info`).
+ *
+ *  Read-only by design — there is no control here. The Mac already knows the
+ *  phone's battery; this closes the loop so Home can show both. */
 @Composable
-private fun FeatureTileCard(tile: FeatureTile, modifier: Modifier = Modifier) {
+private fun MacStatusCard(info: ConnectionManager.MacInfo) {
     Surface(
-        modifier = modifier,
-        shape    = RoundedCornerShape(22.dp),
+        modifier = Modifier.fillMaxWidth(),
+        shape    = RoundedCornerShape(18.dp),
         color    = Surface1,
         tonalElevation = 0.dp
     ) {
-        Column(modifier = Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .background(Blue.copy(alpha = 0.14f), RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .background(tile.tint.copy(alpha = 0.14f), RoundedCornerShape(12.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(tile.icon, null, tint = tile.tint, modifier = Modifier.size(20.dp))
-                }
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .background(if (tile.active) Ok else Dim.copy(alpha = 0.3f), CircleShape)
+                Icon(Icons.Outlined.LaptopMac, null, tint = Blue, modifier = Modifier.size(20.dp))
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(info.name, color = Fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    when {
+                        // A desktop Mac has no battery at all. "0%" would be a
+                        // lie; "Plugged in" is the whole truth about its power.
+                        !info.hasBattery || info.battery == null ->
+                            if (info.charging) "Plugged in" else "On mains"
+                        info.charging -> "${info.battery}% · charging"
+                        else          -> "${info.battery}%"
+                    },
+                    color = Dim, fontSize = 12.sp
                 )
             }
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(tile.title, color = Fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                Text(tile.status, color = Dim, fontSize = 12.sp,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (info.hasBattery && info.battery != null) {
+                Icon(
+                    if (info.charging) Icons.Outlined.BatteryChargingFull else Icons.Outlined.BatteryFull,
+                    null,
+                    tint = if (info.battery <= 20 && !info.charging) Orange else Ok,
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
     }
@@ -744,7 +1457,21 @@ private fun ConnectTab(
     onScan:    () -> Unit,
     onManual:  () -> Unit,
     onForget:  () -> Unit,
+    onBack:    () -> Unit,
 ) {
+    val ctx = LocalContext.current
+    val discovered by ConnectionManager.discovered.collectAsState()
+    val scanning   by ConnectionManager.scanning.collectAsState()
+
+    // Sweep when the tab opens, then keep it fresh while the user is looking at
+    // it. Stops the moment they navigate away — this holds a multicast browse
+    // open, so it has no business running on a background tab.
+    LaunchedEffect(Unit) {
+        while (true) {
+            ConnectionManager.scanNow(ctx)
+            kotlinx.coroutines.delay(6_000)
+        }
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -753,10 +1480,20 @@ private fun ConnectTab(
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         Spacer(Modifier.height(12.dp))
-        Text("Connection", color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Bold,
-            letterSpacing = (-0.3).sp)
-        Spacer(Modifier.height(4.dp))
-        Text("Pair or manage your Mac link", color = Dim, fontSize = 13.sp)
+        // Reached from Home or Settings rather than the nav bar, so it carries
+        // its own back affordance.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.ArrowBack, "Back", tint = Fg,
+                    modifier = Modifier.size(19.dp))
+            }
+            Spacer(Modifier.width(8.dp))
+            Column {
+                Text("Connection", color = Fg, fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp)
+                Text("Pair or manage your Mac link", color = Dim, fontSize = 13.sp)
+            }
+        }
 
         Spacer(Modifier.height(20.dp))
 
@@ -793,7 +1530,7 @@ private fun ConnectTab(
                         text       = if (paired) "Re-pair with Mac" else "Scan QR code",
                         fontWeight = FontWeight.SemiBold,
                         fontSize   = 15.sp,
-                        color      = Color(0xFF1A0E00)
+                        color      = OnAmber
                     )
                 }
                 Row(
@@ -812,6 +1549,14 @@ private fun ConnectTab(
                 }
             }
         }
+
+        Spacer(Modifier.height(16.dp))
+
+        AvailableDevicesCard(
+            discovered = discovered,
+            scanning   = scanning,
+            onConnect  = { mac, known -> ConnectionManager.connectToDiscovered(ctx, mac, known) },
+        )
 
         Spacer(Modifier.height(16.dp))
 
@@ -861,6 +1606,380 @@ private fun ConnectTab(
         }
 
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+/**
+ * "Available Devices" — Macs currently advertising themselves over mDNS.
+ *
+ * The important limitation, stated in the UI rather than hidden: discovery
+ * hands back an address, never a token. A Mac this phone has paired with before
+ * can be connected to straight from here — which is the whole point, since it's
+ * how you recover when the Mac's IP changes — but an unrecognised one still has
+ * to go through QR or manual pairing, because that's the only place a token
+ * comes from.
+ */
+@Composable
+private fun AvailableDevicesCard(
+    discovered: List<DiscoveredMac>,
+    scanning:   Boolean,
+    onConnect:  (DiscoveredMac, KnownDevice) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 4.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            "AVAILABLE DEVICES",
+            color = Dim, fontSize = 10.sp, letterSpacing = 1.2.sp,
+            fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f)
+        )
+        if (scanning) Text("Scanning…", color = Dim, fontSize = 10.sp)
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape    = RoundedCornerShape(20.dp),
+        color    = Surface1,
+        tonalElevation = 0.dp
+    ) {
+        if (discovered.isEmpty()) {
+            Box(
+                Modifier.fillMaxWidth().padding(vertical = 22.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    if (scanning) "Looking for Macs on this network…"
+                    else "No Macs found on this network",
+                    color = Dim, fontSize = 12.sp
+                )
+            }
+        } else {
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                discovered.forEachIndexed { idx, mac ->
+                    if (idx > 0) RowDivider()
+                    val known = ConnectionManager.knownFor(mac)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(
+                                if (known != null) Modifier.clickable { onConnect(mac, known) }
+                                else Modifier
+                            )
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Outlined.LaptopMac, null,
+                            tint = if (known != null) Amber else Dim,
+                            modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(mac.name, color = Fg, fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("${mac.ip}:${mac.port}", color = Dim, fontSize = 11.sp)
+                                Spacer(Modifier.width(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .background(Amber.copy(alpha = 0.14f), RoundedCornerShape(5.dp))
+                                        .padding(horizontal = 5.dp, vertical = 1.dp)
+                                ) {
+                                    Text(mac.via, color = Amber, fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                        if (known != null) {
+                            Text("Connect", color = Amber, fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium)
+                        } else {
+                            Text("Scan QR to pair", color = Dim, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Clipboard tab — this session's traffic plus a compose box.
+ *
+ * The list is memory-only and dies with the process, which the empty state says
+ * out loud: everything copied on either device lands here, so a persisted
+ * version would be a plaintext log of passwords and one-time codes.
+ */
+@Composable
+private fun ClipboardTab(
+    connected:  Boolean,
+    history:    List<ConnectionManager.ClipEntry>,
+    keepHistory: Boolean,
+    onKeepHistory: (Boolean) -> Unit,
+) {
+    val ctx = LocalContext.current
+    var draft by remember { mutableStateOf("") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Clipboard", color = Fg, fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp)
+                Text(
+                    if (connected) "Copy on either device" else "Not connected to Mac",
+                    color = if (connected) Dim else Bad, fontSize = 13.sp
+                )
+            }
+            if (history.isNotEmpty()) {
+                IconButton(onClick = { ConnectionManager.clearClipHistory() }) {
+                    Icon(Icons.Outlined.Delete, "Clear history", tint = Dim,
+                        modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape    = RoundedCornerShape(18.dp),
+            color    = Surface1,
+            tonalElevation = 0.dp
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("History", color = Fg, fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium)
+                    Text("Cleared when the app closes", color = Dim, fontSize = 11.sp)
+                }
+                DroidSwitch(checked = keepHistory, onCheckedChange = onKeepHistory)
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        Box(Modifier.weight(1f)) {
+            if (history.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        if (keepHistory) "Nothing shared yet" else "History is off",
+                        color = Dim, fontSize = 13.sp
+                    )
+                }
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    history.forEach { entry -> ClipRow(entry) }
+                    Spacer(Modifier.height(8.dp))
+                }
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                placeholder = { Text("Type a message…", fontSize = 13.sp) },
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(22.dp),
+                maxLines = 3,
+            )
+            Spacer(Modifier.width(8.dp))
+            val canSend = connected && draft.isNotBlank()
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(if (canSend) Amber else Surface3)
+                    .clickable(enabled = canSend) {
+                        if (ConnectionManager.sendClipboardText(draft.trim())) {
+                            draft = ""
+                        } else {
+                            Toast.makeText(ctx, "Not connected to Mac", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Outlined.Send, "Send",
+                    tint = if (canSend) OnAmber else Dim, modifier = Modifier.size(19.dp))
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun ClipRow(entry: ConnectionManager.ClipEntry) {
+    val ctx = LocalContext.current
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape    = RoundedCornerShape(16.dp),
+        color    = Surface1,
+        tonalElevation = 0.dp
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    if (entry.fromMac) Icons.Outlined.LaptopMac else Icons.Outlined.PhoneAndroid,
+                    null,
+                    tint = if (entry.fromMac) Blue else Ok,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    if (entry.fromMac) "From Mac" else "Sent to Mac",
+                    color = Dim, fontSize = 10.sp, fontWeight = FontWeight.Medium
+                )
+                Spacer(Modifier.weight(1f))
+                Text(formatTimeAgo(entry.at), color = Dim, fontSize = 10.sp)
+                Spacer(Modifier.width(8.dp))
+                Icon(
+                    Icons.Outlined.ContentCopy, "Copy",
+                    tint = Dim,
+                    modifier = Modifier
+                        .size(15.dp)
+                        .clickable {
+                            runCatching {
+                                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE)
+                                    as android.content.ClipboardManager
+                                cm.setPrimaryClip(
+                                    android.content.ClipData.newPlainText("DroidDock", entry.text)
+                                )
+                            }
+                            Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show()
+                        }
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(entry.text, color = Fg, fontSize = 13.sp, lineHeight = 18.sp,
+                maxLines = 6, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+/**
+ * A segmented switch above a screen, for grouping destinations that belong
+ * together rather than giving each its own slot in the nav bar.
+ *
+ * Options that depend on a Mac capability are simply absent when it isn't
+ * advertised — same rule the nav bar used to follow — but here their coming and
+ * going only reshuffles a local control instead of the app's primary
+ * navigation.
+ */
+@Composable
+private fun SegmentedHeader(
+    options: List<Pair<String, String>>,
+    selected: String,
+    onSelect: (String) -> Unit,
+) {
+    if (options.size < 2) return
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Surface2)
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp)
+    ) {
+        options.forEach { (id, label) ->
+            val on = id == selected
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (on) Amber else Color.Transparent)
+                    .clickable { onSelect(id) }
+                    .padding(vertical = 9.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    label,
+                    color = if (on) OnAmber else Dim,
+                    fontSize = 12.sp,
+                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+/** Files — this phone's storage, or the Mac's when it offers it. */
+@Composable
+private fun FilesScreen(
+    macFsAvailable: Boolean,
+    connected: Boolean,
+    phoneFiles: @Composable () -> Unit,
+) {
+    var source by remember { mutableStateOf("phone") }
+    // Fall back rather than showing an empty screen if the Mac stops offering
+    // its filesystem while we're looking at it.
+    if (source == "mac" && !macFsAvailable) source = "phone"
+
+    // The status-bar inset is taken here, on the parent, rather than on the
+    // spacer below. `windowInsetsPadding` consumes what it applies for its
+    // *descendants*, so a sibling spacer would have left the inner tab free to
+    // apply the full inset a second time and push its content down twice.
+    Column(
+        Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.statusBars)
+    ) {
+        if (macFsAvailable) {
+            Spacer(Modifier.height(8.dp))
+            SegmentedHeader(
+                options = listOf("phone" to "This phone", "mac" to "Mac"),
+                selected = source,
+                onSelect = { source = it },
+            )
+        }
+        Box(Modifier.weight(1f)) {
+            if (source == "mac") MacFilesTab(connected = connected) else phoneFiles()
+        }
+    }
+}
+
+/** Control — the Mac's view of this phone, and this phone's control of the Mac. */
+@Composable
+private fun ControlScreen(
+    remoteAvailable: Boolean,
+    connected: Boolean,
+    mirror: @Composable () -> Unit,
+) {
+    var mode by remember { mutableStateOf("mirror") }
+    if (mode == "remote" && !remoteAvailable) mode = "mirror"
+
+    // Same inset ownership as FilesScreen above.
+    Column(
+        Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.statusBars)
+    ) {
+        if (remoteAvailable) {
+            Spacer(Modifier.height(8.dp))
+            SegmentedHeader(
+                options = listOf("mirror" to "Mirror & Camera", "remote" to "Mac Remote"),
+                selected = mode,
+                onSelect = { mode = it },
+            )
+        }
+        Box(Modifier.weight(1f)) {
+            if (mode == "remote") MacRemoteTab(connected = connected) else mirror()
+        }
     }
 }
 
@@ -961,9 +2080,9 @@ private fun FilesTab(
                     enabled = !sending,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Amber,
-                        contentColor = Color(0xFF1A0E00),
+                        contentColor = OnAmber,
                         disabledContainerColor = Amber.copy(alpha = 0.4f),
-                        disabledContentColor = Color(0xFF1A0E00).copy(alpha = 0.5f)
+                        disabledContentColor = OnAmber.copy(alpha = 0.5f)
                     ),
                     shape = RoundedCornerShape(12.dp),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
@@ -1180,32 +2299,34 @@ private fun RecentTransferRow(record: TransferRecord) {
 @Composable
 private fun MacRemoteTab(connected: Boolean) {
     var typed by remember { mutableStateOf("") }
+    // Relative deltas accumulated into absolute moves: the Mac's `mouse_move`
+    // takes screen coordinates, so the phone owns the cursor while dragging.
+    var cursorX by remember { mutableStateOf(600f) }
+    var cursorY by remember { mutableStateOf(400f) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .padding(horizontal = 16.dp)
+            .padding(top = 8.dp, bottom = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("Mac Remote", color = Fg, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
         Text(
-            if (connected) "Drag to move the pointer. Tap to click."
+            if (connected) "Drag to move · tap to click · long-press to right-click"
             else "Not connected to your Mac.",
-            color = Dim,
-            fontSize = 13.sp
+            color = if (connected) Dim else Bad,
+            fontSize = 12.sp
         )
 
-        // Trackpad. Relative deltas are accumulated into absolute moves by
-        // tracking the pointer here — the Mac's `mouse_move` takes screen
-        // coordinates, so the phone owns the cursor position while dragging.
-        var cursorX by remember { mutableStateOf(600f) }
-        var cursorY by remember { mutableStateOf(400f) }
-
+        // The trackpad is the point of this screen, so it takes the slack and
+        // is floored at a size worth dragging on. It used to share `weight(1f)`
+        // with nine fixed-height blocks below it and ended up a letterbox.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .clip(RoundedCornerShape(16.dp))
+                .heightIn(min = 240.dp)
+                .clip(RoundedCornerShape(20.dp))
                 .background(Surface2)
                 .pointerInput(connected) {
                     if (!connected) return@pointerInput
@@ -1222,55 +2343,156 @@ private fun MacRemoteTab(connected: Boolean) {
                 .pointerInput(connected) {
                     if (!connected) return@pointerInput
                     detectTapGestures(
-                        onTap = { ConnectionManager.sendRemote("mouse_click") { it.put("button", "left") } },
-                        onLongPress = { ConnectionManager.sendRemote("mouse_click") { it.put("button", "right") } }
+                        onTap = {
+                            ConnectionManager.sendRemote("mouse_click") { it.put("button", "left") }
+                        },
+                        onLongPress = {
+                            ConnectionManager.sendRemote("mouse_click") { it.put("button", "right") }
+                        }
                     )
                 },
             contentAlignment = Alignment.Center
         ) {
-            Text("Trackpad", color = Dim, fontSize = 13.sp)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Outlined.Mouse, null, tint = Dim.copy(alpha = 0.45f),
+                    modifier = Modifier.size(30.dp))
+                Spacer(Modifier.height(8.dp))
+                Text("Trackpad", color = Dim.copy(alpha = 0.7f), fontSize = 12.sp)
+            }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            RemoteKey("↑", Modifier.weight(1f)) { ConnectionManager.sendRemote("key") { it.put("key", "up") } }
-            RemoteKey("↓", Modifier.weight(1f)) { ConnectionManager.sendRemote("key") { it.put("key", "down") } }
-            RemoteKey("←", Modifier.weight(1f)) { ConnectionManager.sendRemote("key") { it.put("key", "left") } }
-            RemoteKey("→", Modifier.weight(1f)) { ConnectionManager.sendRemote("key") { it.put("key", "right") } }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            RemoteKey("Enter", Modifier.weight(1f)) { ConnectionManager.sendRemote("key") { it.put("key", "enter") } }
-            RemoteKey("Space", Modifier.weight(1f)) { ConnectionManager.sendRemote("key") { it.put("key", "space") } }
-            RemoteKey("Esc", Modifier.weight(1f)) { ConnectionManager.sendRemote("key") { it.put("key", "escape") } }
-            RemoteKey("Tab", Modifier.weight(1f)) { ConnectionManager.sendRemote("key") { it.put("key", "tab") } }
-        }
-
-        OutlinedTextField(
-            value = typed,
-            onValueChange = { typed = it },
-            label = { Text("Type on the Mac") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Button(
-            onClick = {
-                if (typed.isNotEmpty()) {
-                    ConnectionManager.sendRemote("text") { it.put("text", typed) }
-                    typed = ""
+        // Arrows as a d-pad rather than four equal slabs in a row — a cross is
+        // the shape the fingers already expect, and it halves the width the
+        // keys need.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Drawn icons rather than "↑←↓→" text: the arrow glyphs render at
+            // whatever weight the system font gives them, which on One UI is a
+            // thin, off-centre hairline inside a key cap.
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                RemoteKeyIcon(Icons.Outlined.KeyboardArrowUp, "Up", Modifier.size(46.dp)) {
+                    sendKey("up")
                 }
-            },
-            enabled = connected && typed.isNotEmpty(),
-            modifier = Modifier.fillMaxWidth()
-        ) { Text("Send text") }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    RemoteKeyIcon(Icons.Outlined.KeyboardArrowLeft, "Left", Modifier.size(46.dp)) {
+                        sendKey("left")
+                    }
+                    RemoteKeyIcon(Icons.Outlined.KeyboardArrowDown, "Down", Modifier.size(46.dp)) {
+                        sendKey("down")
+                    }
+                    RemoteKeyIcon(Icons.Outlined.KeyboardArrowRight, "Right", Modifier.size(46.dp)) {
+                        sendKey("right")
+                    }
+                }
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    RemoteKey("Enter", Modifier.weight(1f)) { sendKey("enter") }
+                    RemoteKey("Esc", Modifier.weight(1f)) { sendKey("escape") }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    RemoteKey("Space", Modifier.weight(1f)) { sendKey("space") }
+                    RemoteKey("Tab", Modifier.weight(1f)) { sendKey("tab") }
+                }
+            }
+        }
+
+        // The media transport that used to sit here was removed: the Now
+        // Playing card on Home carries the same six actions, next to the title
+        // they act on, which is where they belong.
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = typed,
+                onValueChange = { typed = it },
+                placeholder = { Text("Type on the Mac", fontSize = 13.sp) },
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.weight(1f)
+            )
+            val canSend = connected && typed.isNotBlank()
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (canSend) Amber else Surface3)
+                    .clickable(enabled = canSend) {
+                        ConnectionManager.sendRemote("text") { it.put("text", typed) }
+                        typed = ""
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Outlined.Send, "Send text",
+                    tint = if (canSend) OnAmber else Dim, modifier = Modifier.size(19.dp))
+            }
+        }
     }
 }
 
+private fun sendKey(name: String) {
+    ConnectionManager.sendRemote("key") { it.put("key", name) }
+}
+
 @Composable
-private fun RemoteKey(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        modifier = modifier,
-        colors = ButtonDefaults.buttonColors(containerColor = Surface3, contentColor = Fg)
-    ) { Text(label, fontSize = 13.sp) }
+private fun RemoteKey(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) =
+    RemoteKeyBase(modifier, onClick) {
+        Text(label, color = Fg, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+    }
+
+@Composable
+private fun RemoteKeyIcon(
+    icon: ImageVector,
+    description: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) = RemoteKeyBase(modifier, onClick) {
+    Icon(icon, description, tint = Fg, modifier = Modifier.size(22.dp))
+}
+
+/**
+ * A key cap.
+ *
+ * Deliberately not a Material `Button`: that carries 24dp of *content* padding
+ * on each side, so at the widths these sit at — a 46dp d-pad cell, or a quarter
+ * of a row — 48dp of mandatory padding exceeded the cap itself. "Enter" and
+ * "Space" wrapped to two lines and the arrows were squeezed into their
+ * corners, which is what made them read as unresponsive: they were being
+ * pressed, they just didn't look pressable.
+ *
+ * Haptic feedback on every press, because the result of a key lands on the
+ * *Mac* — often out of the corner of your eye, or on a screen you can't see at
+ * all. Without it there's no local evidence the tap registered.
+ */
+@Composable
+private fun RemoteKeyBase(
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val haptics = LocalHapticFeedback.current
+    Box(
+        modifier = modifier
+            .heightIn(min = 46.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Surface3)
+            .clickable {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                onClick()
+            },
+        contentAlignment = Alignment.Center
+    ) { content() }
 }
 
 private fun macFsEntryPath(base: String, entry: JSONObject): String {
@@ -1654,6 +2876,18 @@ private fun SettingsTab(
     notifAccess:      Boolean,
     phonePerms:       Boolean,
     allFiles:         Boolean,
+    deviceAdmin:      Boolean,
+    themeMode:        ThemeMode,
+    onThemeMode:      (ThemeMode) -> Unit,
+    pitchBlack:       Boolean,
+    onPitchBlack:     (Boolean) -> Unit,
+    defaultTab:       String,
+    onDefaultTab:     (String) -> Unit,
+    crashNotify:      Boolean,
+    onCrashNotify:    (Boolean) -> Unit,
+    onOpenConnect:    () -> Unit,
+    expandNet:        Boolean,
+    onExpandNet:      (Boolean) -> Unit,
     onEnableClip:     () -> Unit,
     onToggleClipAuto: (Boolean) -> Unit,
     onEnableNotif:    () -> Unit,
@@ -1661,88 +2895,247 @@ private fun SettingsTab(
     onGrantFiles:     () -> Unit,
     onBattery:        () -> Unit,
     onOpenGuide:      () -> Unit,
+    /// Seeded by the app-open check so a user who follows the nav-bar dot here
+    /// sees the result immediately, instead of being told to press Check to
+    /// learn what the dot already told them.
+    knownUpdate:      UpdateChecker.Release?,
 ) {
-    Column(
+    // LazyColumn, not Column(verticalScroll): this screen is eight section
+    // cards deep and a scrolling Column composes every one of them — including
+    // the six below the fold — on the frame you open it. Measured at 200ms for
+    // that frame, twelve dropped, easily the worst switch in the app. Lazy
+    // composition builds only what's on screen.
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
             .windowInsetsPadding(WindowInsets.statusBars)
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
-        Spacer(Modifier.height(12.dp))
-        Text("Settings", color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Bold,
-            letterSpacing = (-0.3).sp)
+        item {
+            Spacer(Modifier.height(12.dp))
+        }
+        item {
+            Text("Settings", color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.3).sp)
+        }
 
-        Spacer(Modifier.height(20.dp))
+        item {
+            Spacer(Modifier.height(20.dp))
+        }
 
-        SectionCard("PERMISSIONS") {
-            AutoClipRow(
-                a11yOn   = clipA11y,
-                auto     = clipAuto,
-                onEnable = onEnableClip,
-                onToggle = onToggleClipAuto,
+        item {
+            SectionCard("APPEARANCE") {
+                ThemeRow(mode = themeMode, onMode = onThemeMode)
+                RowDivider()
+                // Only meaningful on a dark surface, so it doesn't pretend to be
+                // available while the light theme is showing.
+                val darkNow = LocalDroidColors.current.isDark
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 13.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconBadge(Icons.Outlined.Contrast, Purple)
+                    Spacer(Modifier.width(13.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Pitch black", color = Fg, fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium)
+                        Text(
+                            if (darkNow) "True black backgrounds, for OLED screens"
+                            else "Applies when the dark theme is showing",
+                            color = Dim, fontSize = 11.sp, lineHeight = 15.sp
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    DroidSwitch(checked = pitchBlack, onCheckedChange = onPitchBlack)
+                }
+                RowDivider()
+                DefaultTabRow(selected = defaultTab, onSelect = onDefaultTab)
+                RowDivider()
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 13.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconBadge(Icons.Outlined.BugReport, Bad)
+                    Spacer(Modifier.width(13.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Notify on crash", color = Fg, fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium)
+                        Text(
+                            "Name the error in a notification if DroidDock stops. " +
+                                "It never hides a crash — only reports it.",
+                            color = Dim, fontSize = 11.sp, lineHeight = 15.sp
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    DroidSwitch(checked = crashNotify, onCheckedChange = onCrashNotify)
+                }
+            }
+        }
+
+        item {
+            Spacer(Modifier.height(12.dp))
+        }
+
+        item {
+            SectionCard("CONNECTION") {
+                ServiceRow(
+                    icon     = Icons.Outlined.WifiTethering,
+                    tint     = Amber,
+                    title    = "Pair or change Mac",
+                    subtitle = "Scan a QR code, enter an IP, or forget this Mac",
+                    granted  = null,
+                    action   = "Open"
+                ) { onOpenConnect() }
+            }
+        }
+
+        item {
+            Spacer(Modifier.height(12.dp))
+        }
+
+        item {
+            SectionCard("THIS PHONE") {
+                DeviceIdentityRows()
+            }
+        }
+
+        item {
+            Spacer(Modifier.height(12.dp))
+        }
+
+        item {
+            SectionCard("QUICK SETTINGS TILES") {
+                TileRows()
+            }
+        }
+
+        item {
+            Spacer(Modifier.height(12.dp))
+        }
+
+        item {
+            SectionCard("NETWORK") {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 13.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconBadge(Icons.Outlined.VpnKey, Ok)
+                    Spacer(Modifier.width(13.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Expand networking", color = Fg, fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium)
+                        Text(
+                            "Reach your Mac over a VPN such as Tailscale. Local " +
+                                "discovery can't cross a tailnet, so this stops " +
+                                "waiting on it and keeps dialling the saved addresses.",
+                            color = Dim, fontSize = 11.sp, lineHeight = 15.sp,
+                            maxLines = 3, overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    DroidSwitch(checked = expandNet, onCheckedChange = onExpandNet)
+                }
+            }
+        }
+
+        item {
+            Spacer(Modifier.height(12.dp))
+        }
+
+        item {
+            SectionCard("PERMISSIONS") {
+                AutoClipRow(
+                    a11yOn   = clipA11y,
+                    auto     = clipAuto,
+                    onEnable = onEnableClip,
+                    onToggle = onToggleClipAuto,
+                )
+                RowDivider()
+                ScreenControlRows(serviceOn = clipA11y, adminOn = deviceAdmin)
+                RowDivider()
+                ServiceRow(
+                    icon     = Icons.Outlined.Notifications,
+                    tint     = Blue,
+                    title    = "Notification Access",
+                    subtitle = "Show phone notifications on your Mac",
+                    granted  = notifAccess,
+                    action   = "Enable"
+                ) { onEnableNotif() }
+                RowDivider()
+                ServiceRow(
+                    icon     = Icons.Outlined.Message,
+                    tint     = Ok,
+                    title    = "SMS · Contacts · Calls",
+                    subtitle = "Texts, contacts and call alerts on Mac",
+                    granted  = phonePerms,
+                    action   = "Grant"
+                ) { onGrantPhonePerms() }
+                RowDivider()
+                ServiceRow(
+                    icon     = Icons.Outlined.FolderOpen,
+                    tint     = Orange,
+                    title    = "All-files Access",
+                    subtitle = "Browse and transfer your phone's files",
+                    granted  = allFiles,
+                    action   = "Grant"
+                ) { onGrantFiles() }
+                RowDivider()
+                ServiceRow(
+                    icon     = Icons.Outlined.BatteryChargingFull,
+                    tint     = Dim,
+                    title    = "Background (Battery)",
+                    subtitle = "Keep the link alive when screen is off",
+                    granted  = null,
+                    action   = "Allow"
+                ) { onBattery() }
+            }
+        }
+
+        item {
+            Spacer(Modifier.height(12.dp))
+        }
+
+        item {
+            SectionCard("HELP") {
+                ServiceRow(
+                    icon     = Icons.Outlined.LibraryBooks,
+                    tint     = Amber,
+                    title    = "Feature Guide",
+                    subtitle = "Step-by-step help for every feature",
+                    granted  = null,
+                    action   = "Open"
+                ) { onOpenGuide() }
+            }
+        }
+
+        item {
+            Spacer(Modifier.height(12.dp))
+        }
+
+        item {
+            SectionCard("UPDATES") {
+                UpdateRow(knownUpdate)
+                RowDivider()
+                AutoUpdateRow()
+            }
+        }
+
+        item {
+            Spacer(Modifier.height(12.dp))
+        }
+
+        item {
+            Text(
+                text     = "DroidDock · ${BuildConfig.VERSION_NAME}",
+                color    = Dim.copy(alpha = 0.5f),
+                fontSize = 11.sp,
+                modifier = Modifier.padding(start = 4.dp)
             )
-            RowDivider()
-            ServiceRow(
-                icon     = Icons.Outlined.Notifications,
-                tint     = Blue,
-                title    = "Notification Access",
-                subtitle = "Show phone notifications on your Mac",
-                granted  = notifAccess,
-                action   = "Enable"
-            ) { onEnableNotif() }
-            RowDivider()
-            ServiceRow(
-                icon     = Icons.Outlined.Message,
-                tint     = Ok,
-                title    = "SMS · Contacts · Calls",
-                subtitle = "Texts, contacts and call alerts on Mac",
-                granted  = phonePerms,
-                action   = "Grant"
-            ) { onGrantPhonePerms() }
-            RowDivider()
-            ServiceRow(
-                icon     = Icons.Outlined.FolderOpen,
-                tint     = Orange,
-                title    = "All-files Access",
-                subtitle = "Browse and transfer your phone's files",
-                granted  = allFiles,
-                action   = "Grant"
-            ) { onGrantFiles() }
-            RowDivider()
-            ServiceRow(
-                icon     = Icons.Outlined.BatteryChargingFull,
-                tint     = Dim,
-                title    = "Background (Battery)",
-                subtitle = "Keep the link alive when screen is off",
-                granted  = null,
-                action   = "Allow"
-            ) { onBattery() }
         }
 
-        Spacer(Modifier.height(12.dp))
-
-        SectionCard("HELP") {
-            ServiceRow(
-                icon     = Icons.Outlined.LibraryBooks,
-                tint     = Amber,
-                title    = "Feature Guide",
-                subtitle = "Step-by-step help for every feature",
-                granted  = null,
-                action   = "Open"
-            ) { onOpenGuide() }
+        item {
+            Spacer(Modifier.height(24.dp))
         }
-
-        Spacer(Modifier.height(12.dp))
-
-        Text(
-            text     = "DroidDock · 0.9.1",
-            color    = Dim.copy(alpha = 0.5f),
-            fontSize = 11.sp,
-            modifier = Modifier.padding(start = 4.dp)
-        )
-
-        Spacer(Modifier.height(24.dp))
     }
 }
 
@@ -1770,6 +3163,16 @@ private fun SectionCard(title: String, content: @Composable () -> Unit) {
     }
 }
 
+/**
+ * Auto-clipboard, as its own switch.
+ *
+ * It used to be titled "Clipboard & Screen Control" and carry both features on
+ * one control, because both ride the same accessibility service. But they are
+ * different grants in the user's mind — wanting the Mac to drive the phone
+ * while mirroring does not imply wanting every copy on this phone shipped to
+ * the Mac — and the service never required them to move together. They are two
+ * switches now; [ScreenControlRows] owns the other one.
+ */
 @Composable
 private fun AutoClipRow(
     a11yOn:   Boolean,
@@ -1784,17 +3187,12 @@ private fun AutoClipRow(
         IconBadge(Icons.Default.ContentCopy, Purple)
         Spacer(Modifier.width(13.dp))
         Column(Modifier.weight(1f)) {
-            Text("Clipboard & Screen Control", color = Fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            // The same accessibility service backs Mac-side taps, swipes and the
-            // nav buttons in the Wi-Fi mirror. Labelling it "Auto Clipboard"
-            // hid that: turn it off (or reinstall the app, which turns it off
-            // for you) and the mirror still streams while every click is
-            // discarded, with nothing on either device saying why.
+            Text("Auto clipboard", color = Fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
             Text(
                 when {
-                    !a11yOn -> "Enable accessibility for Mac screen control + auto-copy"
-                    auto    -> "On — Mac can control this screen; copies sync instantly"
-                    else    -> "On — Mac can control this screen; copies are manual"
+                    !a11yOn -> "Needs the accessibility service below"
+                    auto    -> "Copies on this phone go to the Mac automatically"
+                    else    -> "Off — send copies manually from the Clipboard tab"
                 },
                 color = Dim, fontSize = 11.sp, lineHeight = 15.sp,
                 maxLines = 2, overflow = TextOverflow.Ellipsis
@@ -1805,6 +3203,162 @@ private fun AutoClipRow(
             TonalChip("Enable", Purple, onEnable)
         } else {
             DroidSwitch(checked = auto, onCheckedChange = onToggle)
+        }
+    }
+}
+
+/**
+ * The two controls that exist because of one specific, recurring problem:
+ * banking apps refuse to run while *any* accessibility service is enabled.
+ *
+ * They enumerate `AccessibilityManager.getEnabledAccessibilityServiceList()`
+ * and don't care which service it is or what it's allowed to do — so nothing
+ * DroidDock declares about its own service avoids the conflict. Toggling it
+ * off is the only answer, and these two rows make that cost as little as
+ * possible:
+ *
+ *  · **Screen control** — off in one tap via `disableSelf()`. Android gives no
+ *    API to switch one back *on*, so that direction deep-links to the Settings
+ *    page rather than pretending.
+ *  · **Lock without accessibility** — device admin, whose `lockNow()` those
+ *    apps generally don't inspect. Grant it and the Mac's Lock button survives
+ *    accessibility being off.
+ *
+ * Self-contained (own state, own `LocalContext`) rather than threaded through
+ * `SettingsTab`'s parameter list, which is already twenty entries long.
+ */
+@Composable
+private fun ScreenControlRows(serviceOn: Boolean, adminOn: Boolean) {
+    val ctx = LocalContext.current
+    // Both flags are flipped in *other* apps' UI — Settings, and the system's
+    // device-admin prompt — so neither survives a trip away from this screen as
+    // remembered state. They used to be read right here, with `remember(tick)`.
+    // That put two binder round trips on the composition thread inside a
+    // *lazily* composed row: LazyColumn disposes an item once it leaves the
+    // viewport and composes it again on the way back, so scrolling Settings ran
+    // a `Settings.Secure` lookup and an `isAdminActive` call per pass. They now
+    // arrive from the caller's 2s off-thread permission poll.
+    //
+    // `justDisabled` is the one thing the poll can't cover: `disableSelf()`
+    // unbinds asynchronously, so for up to two seconds the system still reports
+    // the service as enabled and the row would sit there insisting nothing
+    // happened. Keyed on `serviceOn` so it clears itself the moment the poll
+    // catches up — and again if the service is switched back on in Settings.
+    var justDisabled by remember(serviceOn) { mutableStateOf(false) }
+    val a11yOn = serviceOn && !justDisabled
+
+    // The device-admin prompt is the one screen here that must NOT be launched
+    // with FLAG_ACTIVITY_NEW_TASK. `DeviceAdminAdd` returns a result to whoever
+    // asked, so it refuses to run in a task of its own and kills itself on
+    // sight — visibly: the activity starts and is destroyed in the same frame,
+    // so the Grant button looked completely dead.
+    //
+    //     W/SecDeviceAdminAdd: Cannot start ADD_DEVICE_ADMIN as a new task
+    //
+    // A result launcher is the fix and the proof: it can only start from the
+    // host activity's task, so the flag can never creep back in. The result
+    // itself is ignored — the caller's poll reports the grant either way, and
+    // the user can also cancel by pressing back, which returns nothing.
+    val adminPrompt = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { }
+
+    // The switch: does the Mac get to drive this screen? Independent of
+    // auto-clipboard, and of whether the service is running at all.
+    if (a11yOn) {
+        // SharedPreferences, not a binder call — served from the in-memory map
+        // after the first load, so this one is fine to read in composition.
+        var screenControl by remember { mutableStateOf(Prefs.screenControl(ctx)) }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconBadge(Icons.Outlined.TouchApp, Purple)
+            Spacer(Modifier.width(13.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Mac screen control", color = Fg, fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium)
+                Text(
+                    if (screenControl)
+                        "Mac can tap, swipe and type on this phone"
+                    else
+                        "Off — mirroring still streams, but the Mac can't touch it",
+                    color = Dim, fontSize = 11.sp, lineHeight = 15.sp,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            DroidSwitch(checked = screenControl, onCheckedChange = { v ->
+                screenControl = v
+                Prefs.setScreenControl(ctx, v)
+                // Mirrored into the dispatch path so a tap doesn't have to read
+                // SharedPreferences mid-gesture.
+                AccessibilityControl.enabled = v
+            })
+        }
+        RowDivider()
+    }
+
+    // The service itself — the prerequisite for both switches above, and the
+    // one thing to reach for when a banking app refuses to start.
+    ServiceRow(
+        icon     = Icons.Outlined.Accessibility,
+        tint     = if (a11yOn) Ok else Dim,
+        title    = "Accessibility service",
+        subtitle = if (a11yOn)
+            "Running. Powers auto clipboard and screen control."
+        else
+            "Off — auto clipboard and Mac screen control both need this",
+        granted  = null,
+        action   = if (a11yOn) "Turn off" else "Enable",
+    ) {
+        if (a11yOn) {
+            // Optimistic, then corrected by the poll: `disableSelf` unbinds the
+            // service asynchronously, so re-reading immediately still reports
+            // it enabled.
+            AccessibilityControl.disableSelf()
+            justDisabled = true
+        } else {
+            runCatching {
+                ctx.startActivity(
+                    Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+        }
+    }
+    RowDivider()
+    ServiceRow(
+        icon     = Icons.Outlined.Lock,
+        tint     = Blue,
+        title    = "Lock Without Accessibility",
+        subtitle = if (adminOn)
+            "Mac's Lock button works with Screen Control off"
+        else
+            "Optional. Lets the Mac lock this screen when Screen Control is off",
+        granted  = adminOn,
+        action   = "Grant",
+    ) {
+        runCatching { adminPrompt.launch(LockAdmin.enableIntent(ctx)) }
+            .onFailure {
+                Toast.makeText(
+                    ctx,
+                    "Couldn't open the device-admin screen on this phone",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+    }
+    if (adminOn) {
+        // Deactivating is only reachable here — the system's own screen for it
+        // is buried, and leaving an admin the user can't easily revoke is not
+        // a defensible place to leave them.
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+            horizontalArrangement = Arrangement.End
+        ) {
+            // No local echo needed: `removeActiveAdmin` takes effect
+            // synchronously, so the next poll tick reports it gone.
+            TonalChip("Revoke lock permission", Dim) { LockAdmin.disable(ctx) }
         }
     }
 }
@@ -1849,6 +3403,401 @@ private fun ServiceRow(
     }
 }
 
+/**
+ * Check → download → install, in one row that never moves.
+ *
+ * Built on [ServiceRow] so it sits in the Settings list exactly like the
+ * permission rows above it: same badge, same chip, same shape. The whole state
+ * machine is one sealed hierarchy rather than a handful of booleans — a flag
+ * soup lets "downloading" and "failed" both be true, which is a state this row
+ * has no sensible way to draw.
+ *
+ * The install path needs "install unknown apps", which is a per-app grant the
+ * user makes in system Settings. Rather than asking for it up front — before
+ * there is even an update to install — the row only routes there at the moment
+ * it's actually needed.
+ */
+@Composable
+private fun UpdateRow(known: UpdateChecker.Release?) {
+    val ctx   = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var state by remember { mutableStateOf<UpdateUi>(UpdateUi.Idle) }
+
+    // A background find is worth exactly as much as a manual one, so it lands
+    // in the same state. Guarded so it can't interrupt a download already
+    // running when the app-open check finally answers.
+    LaunchedEffect(known) {
+        if (known != null && state is UpdateUi.Idle) state = UpdateUi.Available(known)
+    }
+
+    val canInstall = Build.VERSION.SDK_INT < 26 || ctx.packageManager.canRequestPackageInstalls()
+
+    val subtitle = when (val s = state) {
+        is UpdateUi.Idle        -> stringResource(R.string.update_idle)
+        is UpdateUi.Checking    -> stringResource(R.string.update_checking)
+        is UpdateUi.Current     -> stringResource(R.string.update_current)
+        is UpdateUi.Available   ->
+            if (canInstall) stringResource(R.string.update_available, s.release.version)
+            else stringResource(R.string.update_needs_permission)
+        is UpdateUi.Downloading -> stringResource(R.string.update_downloading, s.release.version, s.percent)
+        is UpdateUi.Ready       -> stringResource(R.string.update_ready, s.release.version)
+        is UpdateUi.Failed      -> stringResource(R.string.update_failed, s.message)
+    }
+
+    val action = when (state) {
+        is UpdateUi.Available   -> if (canInstall) stringResource(R.string.update_action_download)
+                                   else stringResource(R.string.update_action_allow)
+        is UpdateUi.Ready       -> stringResource(R.string.update_action_install)
+        else                    -> stringResource(R.string.update_action_check)
+    }
+
+    val busy = state is UpdateUi.Checking || state is UpdateUi.Downloading
+
+    ServiceRow(
+        icon     = Icons.Outlined.SystemUpdate,
+        tint     = Blue,
+        title    = stringResource(R.string.update_title),
+        subtitle = subtitle,
+        granted  = null,
+        action   = action,
+    ) {
+        // A second tap while a download is in flight would start a second one.
+        if (busy) return@ServiceRow
+        when (val s = state) {
+            is UpdateUi.Available -> {
+                if (!canInstall) {
+                    runCatching {
+                        ctx.startActivity(
+                            Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
+                                .setData(Uri.parse("package:${ctx.packageName}"))
+                        )
+                    }
+                    return@ServiceRow
+                }
+                scope.launch {
+                    state = UpdateUi.Downloading(s.release, 0)
+                    runCatching {
+                        UpdateChecker.download(ctx, s.release) { done, total ->
+                            val pct = if (total > 0) (done * 100 / total).toInt() else 0
+                            state = UpdateUi.Downloading(s.release, pct)
+                        }
+                    }.onSuccess { state = UpdateUi.Ready(s.release, it) }
+                        .onFailure { state = UpdateUi.Failed(it.message ?: "download failed") }
+                }
+            }
+
+            is UpdateUi.Ready -> scope.launch {
+                // The system dialog UpdateInstallReceiver raises is the real
+                // confirmation; on approval this process is replaced, so there
+                // is no success state past here worth drawing.
+                runCatching { UpdateChecker.install(ctx, s.apk) }
+                    .onFailure { state = UpdateUi.Failed(it.message ?: "install failed") }
+            }
+
+            else -> scope.launch {
+                state = UpdateUi.Checking
+                runCatching { UpdateChecker.check() }
+                    .onSuccess {
+                        Prefs.setLastUpdateCheck(ctx, System.currentTimeMillis())
+                        state = if (it != null) UpdateUi.Available(it) else UpdateUi.Current
+                    }
+                    .onFailure { state = UpdateUi.Failed(it.message ?: "check failed") }
+            }
+        }
+    }
+}
+
+/**
+ * Whether the app looks for a new release on its own.
+ *
+ * Owns its own state rather than threading a pair through [SettingsTab]'s
+ * already long parameter list — nothing else in the app reads this preference,
+ * and the check that does reads it straight from [Prefs] at app open.
+ */
+@Composable
+private fun AutoUpdateRow() {
+    val ctx = LocalContext.current
+    var on by remember { mutableStateOf(Prefs.autoCheckUpdates(ctx)) }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconBadge(Icons.Outlined.Schedule, Dim)
+        Spacer(Modifier.width(13.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Check automatically", color = Fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(
+                "Looks for a new version when you open the app, at most once a day. " +
+                    "It only tells you — nothing downloads or installs on its own.",
+                color = Dim, fontSize = 11.sp, lineHeight = 15.sp
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        DroidSwitch(checked = on, onCheckedChange = { v -> on = v; Prefs.setAutoCheckUpdates(ctx, v) })
+    }
+}
+
+/** Every state [UpdateRow] can be in, and nothing else. */
+private sealed interface UpdateUi {
+    data object Idle : UpdateUi
+    data object Checking : UpdateUi
+    data object Current : UpdateUi
+    data class Available(val release: UpdateChecker.Release) : UpdateUi
+    data class Downloading(val release: UpdateChecker.Release, val percent: Int) : UpdateUi
+    data class Ready(val release: UpdateChecker.Release, val apk: File) : UpdateUi
+    data class Failed(val message: String) : UpdateUi
+}
+
+/**
+ * Light / Dark / System, as a segmented control.
+ *
+ * A three-way choice with a live preview attached to it — every surface behind
+ * this row repaints on tap — so it earns showing all options at once rather
+ * than hiding two of them behind a dialog.
+ */
+@Composable
+private fun ThemeRow(mode: ThemeMode, onMode: (ThemeMode) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 13.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconBadge(Icons.Outlined.DarkMode, Blue)
+            Spacer(Modifier.width(13.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Theme", color = Fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    when (mode) {
+                        ThemeMode.LIGHT  -> "Always light"
+                        ThemeMode.DARK   -> "Always dark"
+                        ThemeMode.SYSTEM -> "Follows your phone's setting"
+                    },
+                    color = Dim, fontSize = 11.sp, lineHeight = 15.sp
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(11.dp))
+                .background(Surface3)
+                .padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            ThemeMode.entries.forEach { option ->
+                val selected = option == mode
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(if (selected) Amber else Color.Transparent)
+                        .clickable { onMode(option) }
+                        .padding(vertical = 9.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = when (option) {
+                            ThemeMode.LIGHT  -> "Light"
+                            ThemeMode.DARK   -> "Dark"
+                            ThemeMode.SYSTEM -> "System"
+                        },
+                        color = if (selected) OnAmber else Dim,
+                        fontSize = 12.sp,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Editable phone name + the address the Mac would reach it on.
+ *
+ * The name is committed on focus-loss rather than per keystroke: it goes out in
+ * the `hello` frame, and rewriting it on every character would mean the stored
+ * value spends most of its life as a half-typed prefix.
+ */
+@Composable
+private fun DeviceIdentityRows() {
+    val ctx = LocalContext.current
+    var name by remember { mutableStateOf(Prefs.deviceName(ctx)) }
+    // Off the main thread, and seeded from the last answer.
+    //
+    // `localIpAddress()` enumerates every interface and asks each whether it is
+    // up — a handful of ioctls, more with a tailnet up — and this row lives in
+    // a LazyColumn item, so composing it ran the whole sweep on the composition
+    // thread every time the row scrolled back into view. Two bugs deep now: it
+    // was first keyed on `name`, which re-ran it per keystroke in the field
+    // below.
+    var resolved by remember { mutableStateOf(ConnectionManager.lastKnownLocalIp != null) }
+    var localIp by remember { mutableStateOf(ConnectionManager.lastKnownLocalIp) }
+    LaunchedEffect(Unit) {
+        localIp = withContext(Dispatchers.IO) { ConnectionManager.localIpAddress() }
+        resolved = true
+    }
+
+    Column(Modifier.fillMaxWidth().padding(vertical = 13.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconBadge(Icons.Outlined.PhoneAndroid, Ok)
+            Spacer(Modifier.width(13.dp))
+            Column(Modifier.weight(1f)) {
+                Text("This phone", color = Fg, fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium)
+                Text(
+                    when {
+                        localIp != null -> "Local IP: $localIp"
+                        resolved        -> "No network address"
+                        else            -> "Checking network…"
+                    },
+                    color = Dim, fontSize = 11.sp
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = it.take(60) },
+            label = { Text("Device name", fontSize = 12.sp) },
+            placeholder = { Text(ConnectionManager.hardwareName(), fontSize = 13.sp) },
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .onFocusChanged { state ->
+                    if (!state.isFocused) Prefs.setDeviceName(ctx, name)
+                },
+        )
+        Text(
+            "Shown on your Mac. Takes effect on the next reconnect.",
+            color = Dim, fontSize = 10.sp,
+            modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+        )
+    }
+}
+
+/**
+ * "Add tile" buttons, mirroring the reference's pair.
+ *
+ * `requestAddTileService` is API 33+; below that the OS has no way for an app to
+ * offer a tile, so the row explains where to find them by hand rather than
+ * showing a button that can't work.
+ */
+@Composable
+private fun TileRows() {
+    val ctx = LocalContext.current
+
+    if (Build.VERSION.SDK_INT < 33) {
+        Row(Modifier.fillMaxWidth().padding(vertical = 13.dp)) {
+            Text(
+                "Add DroidDock's Connection and Clipboard tiles by editing your " +
+                    "Quick Settings panel.",
+                color = Dim, fontSize = 12.sp, lineHeight = 16.sp
+            )
+        }
+        return
+    }
+
+    val addTile: (Class<*>, String) -> Unit = { cls, label ->
+        runCatching {
+            val sm = ctx.getSystemService(android.app.StatusBarManager::class.java)
+            sm?.requestAddTileService(
+                android.content.ComponentName(ctx, cls),
+                label,
+                android.graphics.drawable.Icon.createWithResource(ctx, R.drawable.ic_stat),
+                { it.run() },
+                { /* result code — the system already told the user */ }
+            )
+        }.onFailure {
+            Toast.makeText(ctx, "Add it from the Quick Settings editor", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    ServiceRow(
+        icon     = Icons.Outlined.LaptopMac,
+        tint     = Blue,
+        title    = "Connection tile",
+        subtitle = "Connect or disconnect from Quick Settings",
+        granted  = null,
+        action   = "Add"
+    ) { addTile(ConnectionTileService::class.java, "DroidDock") }
+    RowDivider()
+    ServiceRow(
+        icon     = Icons.Outlined.ContentPaste,
+        tint     = Purple,
+        title    = "Clipboard tile",
+        subtitle = "Send what you copied straight to the Mac",
+        granted  = null,
+        action   = "Add"
+    ) { addTile(ClipTileService::class.java, "Send to Mac") }
+    RowDivider()
+    ServiceRow(
+        icon     = Icons.Outlined.Accessibility,
+        tint     = Amber,
+        title    = "Accessibility tile",
+        subtitle = "Switch screen control off in one tap — for banking apps",
+        granted  = null,
+        action   = "Add"
+    ) { addTile(A11yTileService::class.java, "DroidDock Access") }
+}
+
+/**
+ * Which tab the app opens on. "Auto" is the reference's "Dynamic" — Connect
+ * while unpaired, Home once linked.
+ */
+@Composable
+private fun DefaultTabRow(selected: String, onSelect: (String) -> Unit) {
+    val options = listOf(
+        "dynamic" to "Auto",
+        "home" to "Home",
+        "connect" to "Connect",
+        "clipboard" to "Clipboard",
+    )
+    Column(Modifier.fillMaxWidth().padding(vertical = 13.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconBadge(Icons.Outlined.Dashboard, Orange)
+            Spacer(Modifier.width(13.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Opening tab", color = Fg, fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium)
+                Text(
+                    if (selected == "dynamic") "Connect until paired, then Home"
+                    else "Always open on ${options.firstOrNull { it.first == selected }?.second ?: "Home"}",
+                    color = Dim, fontSize = 11.sp
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(11.dp))
+                .background(Surface3)
+                .padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            options.forEach { (id, label) ->
+                val on = id == selected
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(if (on) Amber else Color.Transparent)
+                        .clickable { onSelect(id) }
+                        .padding(vertical = 9.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        label,
+                        color = if (on) OnAmber else Dim,
+                        fontSize = 11.sp,
+                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun IconBadge(icon: ImageVector, tint: Color) {
     Box(
@@ -1880,7 +3829,7 @@ private fun DroidSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
         checked         = checked,
         onCheckedChange = onCheckedChange,
         colors          = SwitchDefaults.colors(
-            checkedThumbColor     = Color(0xFF1A0E00),
+            checkedThumbColor     = OnAmber,
             checkedTrackColor     = Amber,
             uncheckedThumbColor   = Dim,
             uncheckedTrackColor   = Surface3,
@@ -2067,6 +4016,32 @@ private val PHONE_PERMS = arrayOf(
     Manifest.permission.READ_PHONE_STATE,
     Manifest.permission.READ_CALL_LOG,
     Manifest.permission.CALL_PHONE
+)
+
+/**
+ * The current clipboard as plain text, or "" when there is nothing readable.
+ *
+ * `primaryClip` is non-null whenever a clip *description* exists, which includes
+ * an emptied clip with zero items — and `getItemAt(0)` on that throws
+ * IndexOutOfBoundsException. Android also refuses background reads outright
+ * (13+, and every read on One UI when DroidDock isn't focused), which surfaces as
+ * a SecurityException rather than a null.
+ */
+private fun readClipboardText(cm: ClipboardManager, ctx: Context): String = runCatching {
+    val clip = cm.primaryClip ?: return@runCatching ""
+    if (clip.itemCount == 0) return@runCatching ""
+    clip.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
+}.getOrDefault("")
+
+/** The permission reads that cost a binder round trip, gathered off the main
+ *  thread in one pass so the UI applies them as a single state update. */
+private data class PermissionSnapshot(
+    val notifAccess: Boolean,
+    val phonePerms: Boolean,
+    val allFiles: Boolean,
+    val clipA11y: Boolean,
+    val overlayOk: Boolean,
+    val deviceAdmin: Boolean,
 )
 
 private fun phonePermsGranted(ctx: Context): Boolean =

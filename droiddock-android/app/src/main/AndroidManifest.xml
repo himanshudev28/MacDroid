@@ -5,9 +5,18 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- The Mac link is a long-lived connection to an external device, so the bridge
+         runs as a connectedDevice FGS. dataSync is kept only as a fallback for OEMs
+         that reject connectedDevice: since Android 15 a dataSync FGS is capped at
+         6 hours per day, and blowing that cap kills the process
+         (ForegroundServiceDidNotStopInTimeException). connectedDevice has no cap. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <!-- Prerequisite for the connectedDevice FGS type, and genuinely used: mDNS
+         discovery (MdnsDiscovery) browses the LAN over multicast. -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.READ_SMS" />
@@ -19,6 +28,11 @@
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <!-- Auto mode: lets the Mac start mirroring/camera without a tap on the phone. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- In-app updates. DroidDock is sideloaded, so nothing else will ever
+         offer it a new version. Holding the permission is not enough on its own:
+         the user still grants "install unknown apps" for this app, and still
+         confirms each install in a system dialog. See UpdateChecker.kt. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- Tier B (Apps grid): makes launchable apps visible to package queries on
          Android 11+. Deliberately scoped to the LAUNCHER intent rather than
@@ -126,7 +140,7 @@
         <service
             android:name=".BridgeService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="connectedDevice|dataSync" />
 
         <!-- screen mirroring over the app link (MediaProjection → H.264 → WebSocket) -->
         <service
@@ -151,9 +165,37 @@
             </intent-filter>
         </service>
 
+        <!-- Where PackageInstaller reports a session's status. Not exported:
+             the only sender is the system, replying to a PendingIntent this app
+             created. -->
+        <receiver android:name=".UpdateInstallReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="com.droiddock.app.INSTALL_RESULT" />
+            </intent-filter>
+        </receiver>
+
         <receiver android:name=".CallReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.PHONE_STATE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Opt-in, and only ever used for `lockNow()` — see LockAdmin.kt for
+             why the Lock button needs a route that doesn't go through the
+             accessibility service. `exported="true"` plus the BIND_DEVICE_ADMIN
+             permission is the required shape: the system is the only caller,
+             and that permission is what stops anyone else binding it. -->
+        <receiver
+            android:name=".LockAdminReceiver"
+            android:exported="true"
+            android:label="@string/admin_label"
+            android:description="@string/admin_desc"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
             </intent-filter>
         </receiver>
 
@@ -169,6 +211,32 @@
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_config" />
+        </service>
+
+        <!-- Second of the reference's two tiles: drop or restore the Mac link
+             without opening the app. -->
+        <!-- Revoke the accessibility service without digging through Settings.
+             It can only turn itself off; turning it on stays Settings-only. -->
+        <service
+            android:name=".A11yTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_stat"
+            android:label="@string/a11y_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".ConnectionTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_stat"
+            android:label="@string/conn_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
         </service>
 
         <service

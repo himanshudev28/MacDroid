@@ -32,7 +32,25 @@ object ConnectionManager {
     // "photosync" (Phase 18) — Mac only expects `photos-changed` pings if this is present.
     // "wallpaper"/"apps" (Tier B) — the Mac only asks for those if advertised here,
     // so an older phone build simply never gets the requests.
-    private val CAPS = listOf("info", "fs", "photos", "shot", "photosync", "wallpaper", "apps", LinkCrypto.CAP)
+    // "macinfo" is receive-only: it tells the Mac this build can display its
+    // status, so an older phone never gets the pushes at all.
+    // "lock" tells the Mac this build understands `mirror-key{key:"lock"}`
+    // (GLOBAL_ACTION_LOCK_SCREEN). Without it the Mac hides its lock button
+    // rather than showing one that silently does nothing on an older phone.
+    private fun caps(): List<String> = buildList {
+        addAll(listOf("info", "fs", "photos", "shot", "photosync", "wallpaper", "apps", "macinfo", "macmedia"))
+        // Two independent routes to locking, and the Mac only needs to know
+        // that *some* route exists. Evaluated per connection rather than once
+        // at class init, because granting device admin can happen at any time
+        // and the next handshake should reflect it.
+        //
+        // GLOBAL_ACTION_LOCK_SCREEN landed in Android 9 (API 28); device admin
+        // has no such floor. Advertising "lock" with neither available would
+        // put a button on the Mac that silently does nothing — the exact
+        // failure this capability exists to prevent.
+        if (Build.VERSION.SDK_INT >= 28 || LockAdmin.isActive(appCtx)) add("lock")
+        add(LinkCrypto.CAP)
+    }
 
     val connected = MutableStateFlow(false)
     val macName = MutableStateFlow<String?>(null)
@@ -42,6 +60,77 @@ object ConnectionManager {
     // Phase 19 — capabilities the connected Mac advertised in its `welcome` (e.g. "macfs").
     // Empty for an older Mac build that doesn't send `caps` at all.
     val macCaps = MutableStateFlow<List<String>>(emptyList())
+
+    /** The Mac's own status, as it last reported it. `null` until a Mac that
+     *  supports this sends one — the Home row stays hidden rather than showing
+     *  a card full of blanks. */
+    data class MacInfo(
+        val name: String,
+        val battery: Int?,
+        val charging: Boolean,
+        val hasBattery: Boolean,
+        /** Mac output volume 0–100. Null on a Mac build that predates Phase 2,
+         *  which is what keeps the slider hidden rather than showing a made-up
+         *  position. */
+        val volume: Int? = null,
+    )
+    val macInfo = MutableStateFlow<MacInfo?>(null)
+
+    /** What the Mac is playing, as it last reported it (Phase 3).
+     *
+     *  [title] is empty whenever the Mac couldn't name the source — a player we
+     *  can't read over AppleScript, or a browser tab that isn't on a media
+     *  site. That is not the same as "nothing is playing", and it is not a
+     *  reason to hide the transport controls: those work for every app on the
+     *  Mac regardless, because they're posted as real media keys. */
+    data class MacMedia(
+        val playing: Boolean,
+        val title: String,
+        val artist: String,
+        val app: String,
+    )
+    val macMedia = MutableStateFlow<MacMedia?>(null)
+
+    /** One clip that crossed the link, in either direction. */
+    data class ClipEntry(val text: String, val fromMac: Boolean, val at: Long)
+
+    /**
+     * This session's clipboard traffic, newest first.
+     *
+     * Deliberately in memory only, matching the reference's own promise that
+     * "clipboard will clear after the session": everything you copy on either
+     * device passes through here, so persisting it would turn a convenience
+     * feature into a plaintext log of passwords and one-time codes sitting in
+     * app storage. Killed with the process, and capped so a long session can't
+     * grow without bound.
+     */
+    val clipHistory = MutableStateFlow<List<ClipEntry>>(emptyList())
+    private const val CLIP_HISTORY_MAX = 50
+
+    private fun recordClip(text: String, fromMac: Boolean) {
+        if (text.isBlank()) return
+        if (!Prefs.clipboardHistory(appCtx)) return
+        val prev = clipHistory.value.firstOrNull()
+        // A copy that round-trips (phone → Mac → phone) would otherwise show up
+        // twice within a second of itself.
+        if (prev != null && prev.text == text) return
+        clipHistory.value =
+            (listOf(ClipEntry(text, fromMac, System.currentTimeMillis())) + clipHistory.value)
+                .take(CLIP_HISTORY_MAX)
+    }
+
+    fun clearClipHistory() {
+        clipHistory.value = emptyList()
+    }
+
+    /** Macs this phone has paired with, newest-seen first. Mirrors [Prefs] so the
+     *  UI can observe it; refreshed on link-up and whenever pairing changes. */
+    val knownDevices = MutableStateFlow<List<KnownDevice>>(emptyList())
+
+    /** True while the link is deliberately down because the user hit Disconnect,
+     *  as opposed to merely not having found the Mac yet. Drives whether Home
+     *  offers "Quick Connect" or shows "Searching…". */
+    val manuallyDisconnected = MutableStateFlow(false)
 
     // Phase 19 reverse file browsing: phone-originated mac-fs-* request/reply registry.
     // "pfs"-prefixed reqIds are a namespace deliberately separate from the Mac's own
@@ -72,8 +161,114 @@ object ConnectionManager {
     fun ensureLoop(ctx: Context) {
         appCtx = ctx.applicationContext
         pausedUntil.value = Prefs.pausedUntil(appCtx)
+        // Every entry point into the app funnels through here, so this is the
+        // one place a pre-address-book pairing is guaranteed to be seen.
+        Prefs.migrateLegacyPairing(appCtx)
+        knownDevices.value = Prefs.knownDevices(appCtx)
+        manuallyDisconnected.value = pausedUntil.value == Long.MAX_VALUE
         if (loopJob?.isActive == true) return
         loopJob = scope.launch { connectLoop() }
+    }
+
+    /**
+     * Drop the link and stop chasing the Mac until the user asks again.
+     *
+     * Deliberately implemented on top of [pause] rather than as a second
+     * teardown path: an indefinite pause already does exactly this — closes the
+     * socket, tells the Mac to stop its own reconnect attempts so it isn't left
+     * hammering a phone that hung up, and parks the loop idle. The only thing
+     * this adds is the flag that tells Home to offer Quick Connect instead of
+     * reporting a pause the user never chose.
+     */
+    fun disconnect(ctx: Context) {
+        pause(ctx, null)
+        manuallyDisconnected.value = true
+        lastEvent.value = "disconnected"
+    }
+
+    /** Reconnect now — the inverse of [disconnect]. Also clears a timed pause,
+     *  since "connect now" is an unambiguous instruction either way. */
+    fun quickConnect(ctx: Context) {
+        manuallyDisconnected.value = false
+        resume(ctx)
+    }
+
+    /** Make [device] the active Mac and connect to it immediately. */
+    fun connectTo(ctx: Context, device: KnownDevice) = onPaired(ctx, device.toPairing())
+
+    /**
+     * Single entry point for "this is the Mac now" — QR scan, manual entry, or
+     * picking another known device.
+     *
+     * All three previously had to remember to save the pairing, refresh the
+     * address book, clear any pause, drop stale Mac state and kick the loop; one
+     * of them forgetting a step is how a freshly-paired Mac ends up unreachable
+     * because an old Disconnect is still in force.
+     */
+    fun onPaired(ctx: Context, pairing: Pairing) {
+        appCtx = ctx.applicationContext
+        Prefs.save(appCtx, pairing) // also upserts into the known-devices list
+        knownDevices.value = Prefs.knownDevices(appCtx)
+        macInfo.value = null // belongs to the Mac we're leaving
+        macCaps.value = emptyList()
+        Prefs.setPausedUntil(appCtx, 0L)
+        pausedUntil.value = 0L
+        manuallyDisconnected.value = false
+        restart(appCtx)
+    }
+
+    /** Drop [token] from the address book, keeping the flow in step. */
+    fun forget(ctx: Context, token: String) {
+        appCtx = ctx.applicationContext
+        Prefs.forgetDevice(appCtx, token)
+        knownDevices.value = Prefs.knownDevices(appCtx)
+    }
+
+    // ── Available Devices ────────────────────────────────────────────────────
+
+    /** Macs currently advertising on this network. Addresses only — mDNS carries
+     *  no token, so an entry here is connectable only if it is also a known
+     *  device. */
+    val discovered = MutableStateFlow<List<DiscoveredMac>>(emptyList())
+    val scanning = MutableStateFlow(false)
+    @Volatile private var scanJob: Job? = null
+
+    /** Browse the LAN and publish the result to [discovered]. Cheap enough to
+     *  call when the Connect screen opens; re-entrant calls are ignored rather
+     *  than stacking multicast browses on top of each other. */
+    fun scanNow(ctx: Context) {
+        appCtx = ctx.applicationContext
+        if (scanJob?.isActive == true) return
+        scanJob = scope.launch {
+            scanning.value = true
+            try {
+                discovered.value = MdnsDiscovery.browse(appCtx)
+            } catch (_: Exception) {
+                // leave the previous list up; a failed sweep isn't evidence the
+                // Mac went away
+            } finally {
+                scanning.value = false
+            }
+        }
+    }
+
+    /** The known device an advertised address belongs to, if any — this is what
+     *  makes a discovered Mac actually connectable. Matched on address rather
+     *  than name because the name is cosmetic and the address is what changed. */
+    fun knownFor(mac: DiscoveredMac): KnownDevice? =
+        knownDevices.value.firstOrNull { it.ips.contains(mac.ip) && it.port == mac.port }
+            ?: knownDevices.value.firstOrNull { it.macName.equals(mac.name, ignoreCase = true) }
+
+    /** Point the active pairing at a freshly-discovered address for a Mac we
+     *  already hold a token for — the "it changed IP" recovery. */
+    fun connectToDiscovered(ctx: Context, mac: DiscoveredMac, known: KnownDevice) {
+        onPaired(
+            ctx,
+            known.toPairing().copy(
+                ips = listOf(mac.ip) + known.ips.filter { it != mac.ip },
+                port = mac.port,
+            )
+        )
     }
 
     /** Cancel the running loop and restart immediately — use after QR/manual re-pair
@@ -94,7 +289,9 @@ object ConnectionManager {
         ws = null
         connected.value = false
         macName.value = null
+        macInfo.value = null
         pausedUntil.value = 0L
+        manuallyDisconnected.value = false
         lastEvent.value = "not paired"
     }
 
@@ -121,6 +318,9 @@ object ConnectionManager {
         appCtx = ctx.applicationContext
         Prefs.setPausedUntil(appCtx, 0L)
         pausedUntil.value = 0L
+        // Resuming from the Pause dialog also ends a Disconnect — both park the
+        // loop the same way, so either "go again" affordance must clear both.
+        manuallyDisconnected.value = false
         lastEvent.value = "resuming…"
         loopJob?.cancel()
         loopJob = null
@@ -158,17 +358,29 @@ object ConnectionManager {
                     break
                 }
             }
+            // "Expand networking": both probes below are link-local — the UDP
+            // broadcast never leaves the subnet and mDNS multicast doesn't
+            // traverse a tailnet — so off-LAN they can only ever burn ~4.5s per
+            // round before failing. Skipping them makes retrying the stored
+            // Tailscale address the whole loop, which is the point.
+            val lanOnlyProbes = !Prefs.expandNetworking(appCtx)
+
             // Known IPs failed — broadcast on the LAN to find the Mac's current IP.
             // Handles WiFi-switch without re-pairing: both devices on new network,
             // Mac answers the broadcast, phone saves the fresh IP.
             var broadcastIp: String? = null
-            if (!linked) {
+            if (!linked && lanOnlyProbes) {
                 broadcastIp = discoverViaBroadcast(pairing.token, pairing.port + 1)
                 if (broadcastIp != null && !pairing.ips.contains(broadcastIp)) {
                     lastEvent.value = "found Mac at $broadcastIp"
                     if (attempt(broadcastIp, pairing)) {
                         linked = true
-                        Prefs.save(appCtx, pairing.copy(ips = listOf(broadcastIp) + pairing.ips.take(2)))
+                        Prefs.save(
+                            appCtx,
+                            pairing.copy(
+                                ips = trimAddresses(listOf(broadcastIp) + pairing.ips, 4)
+                            )
+                        )
                     }
                 }
             }
@@ -177,13 +389,18 @@ object ConnectionManager {
             // though the Mac is right there — multicast usually still works.
             // Auth is unchanged: this only supplies an address to try. Skip any
             // address the two paths above already exhausted this round.
-            if (!linked) {
+            if (!linked && lanOnlyProbes) {
                 val viaMdns = MdnsDiscovery.find(appCtx)
                 if (viaMdns != null && viaMdns != broadcastIp && !pairing.ips.contains(viaMdns)) {
                     lastEvent.value = "found Mac at $viaMdns (mDNS)"
                     if (attempt(viaMdns, pairing)) {
                         linked = true
-                        Prefs.save(appCtx, pairing.copy(ips = listOf(viaMdns) + pairing.ips.take(2)))
+                        Prefs.save(
+                            appCtx,
+                            pairing.copy(
+                                ips = trimAddresses(listOf(viaMdns) + pairing.ips, 4)
+                            )
+                        )
                     }
                 }
             }
@@ -205,14 +422,25 @@ object ConnectionManager {
                     .put("type", "hello")
                     .put("token", pairing.token)
                     .put("name", deviceName())
-                    .put("caps", JSONArray(CAPS))
+                    .put("caps", JSONArray(caps()))
                     // Stable across reconnects and re-pairs; the Mac keys its
                     // photo-sync ledger on this instead of the model name.
                     .put("deviceId", Prefs.deviceId(appCtx))
                 webSocket.send(hello.toString())
             }
 
+            // OkHttp delivers messages on its own reader thread and does not catch
+            // what a listener throws — anything escaping here reaches the thread's
+            // default handler and kills the process. One bad message from the Mac,
+            // one revoked permission, one OEM quirk in a handler below used to take
+            // the whole app down. Contain it: drop the message, keep the link.
             override fun onMessage(webSocket: WebSocket, text: String) {
+                runCatching { handleMessage(webSocket, text) }.onFailure { e ->
+                    lastEvent.value = "message failed: ${e.message ?: e.javaClass.simpleName}"
+                }
+            }
+
+            private fun handleMessage(webSocket: WebSocket, text: String) {
                 val outer = runCatching { JSONObject(text) }.getOrNull() ?: return
                 // Tier C: unwrap first so every branch below keeps seeing
                 // plaintext. An envelope that fails to authenticate is dropped,
@@ -237,6 +465,13 @@ object ConnectionManager {
                             LinkCrypto.derive(pairing.token)
                         } else null
                         lastEvent.value = "linked"
+                        // Stamp the address book: records "last seen" for the
+                        // Home card and promotes the address that actually
+                        // worked so the next connect tries it first.
+                        runCatching {
+                            Prefs.markSeen(appCtx, pairing.token, ip, macName.value)
+                            knownDevices.value = Prefs.knownDevices(appCtx)
+                        }
                         TransferManager.attach(appCtx, webSocket)
                         // forceArt: a fresh Mac has no album-art cache, and the
                         // track hasn't "changed" from the phone's point of view.
@@ -256,6 +491,22 @@ object ConnectionManager {
                         val t = msg.optString("text")
                         if (t.isNotEmpty()) setClipboard(t)
                     }
+                    // The Mac telling us about itself, so Home can show both
+                    // devices. Purely informational — nothing here acts on it,
+                    // and an absent/older Mac simply leaves the row hidden.
+                    "mac-info" -> macInfo.value = MacInfo(
+                        name       = msg.optString("name").ifEmpty { macName.value ?: "Mac" },
+                        battery    = if (msg.isNull("battery")) null else msg.optInt("battery"),
+                        charging   = msg.optBoolean("charging", true),
+                        hasBattery = msg.optBoolean("hasBattery", false),
+                        volume     = if (msg.isNull("volume")) null else msg.optInt("volume")
+                    )
+                    "mac-media" -> macMedia.value = MacMedia(
+                        playing = msg.optBoolean("playing", false),
+                        title   = msg.optString("title"),
+                        artist  = msg.optString("artist"),
+                        app     = msg.optString("app"),
+                    )
                     "reply" -> {
                         val ok = NotifStore.reply(appCtx, msg.optString("key"), msg.optString("text"))
                         reply(webSocket, JSONObject().put("type", "reply-result").put("ok", ok))
@@ -390,6 +641,11 @@ object ConnectionManager {
                         }
                     }
                     "mirror-start" -> {
+                        // Additive fields — a Mac that predates them sends none
+                        // and the service keeps its own defaults.
+                        MirrorService.setQuality(
+                            msg.optInt("bitrate"), msg.optInt("fps"), msg.optInt("maxSize")
+                        )
                         val inst = MirrorService.instance
                         if (inst != null && inst.isScreenAlive()) inst.resumeStreaming()
                         else launchMirror(
@@ -403,6 +659,9 @@ object ConnectionManager {
                         MirrorService.stop(appCtx)
                     }
                     "camera-start" -> {
+                        MirrorService.setQuality(
+                            msg.optInt("bitrate"), msg.optInt("fps"), msg.optInt("maxSize")
+                        )
                         val facing = if (msg.optString("facing") == "front")
                             android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT
                         else
@@ -421,8 +680,28 @@ object ConnectionManager {
                     // rather than letting the user keep clicking at a live
                     // video that never responds.
                     "mirror-tap", "mirror-swipe", "mirror-key", "mirror-text" ->
-                        if (!AccessibilityControl.available()) {
-                            reportControlUnavailable(webSocket)
+                        // Lock is the one action with a second route. Device
+                        // admin's `lockNow()` needs no accessibility service,
+                        // which is what keeps the Mac's Lock button alive for
+                        // anyone who has to keep accessibility off for their
+                        // banking apps. Tried first; falls through to the
+                        // accessibility path when the admin isn't granted.
+                        if (msg.optString("type") == "mirror-key" &&
+                            msg.optString("key") == "lock" &&
+                            LockAdmin.lock(appCtx)
+                        ) {
+                            lastEvent.value = "locked by Mac"
+                        } else if (!AccessibilityControl.available()) {
+                            reportControlUnavailable(
+                                webSocket,
+                                // A failed Lock has a fix the others don't:
+                                // grant device admin and it stops needing the
+                                // accessibility service at all. Worth naming,
+                                // since this is the button people reach for
+                                // *because* they keep accessibility off.
+                                wasLock = msg.optString("type") == "mirror-key" &&
+                                    msg.optString("key") == "lock"
+                            )
                         } else when (msg.optString("type")) {
                             "mirror-tap" -> AccessibilityControl.tap(msg.optDouble("x"), msg.optDouble("y"))
                             "mirror-swipe" -> AccessibilityControl.swipe(
@@ -440,7 +719,7 @@ object ConnectionManager {
             }
 
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                TransferManager.onBinary(bytes)
+                runCatching { TransferManager.onBinary(bytes) }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
@@ -464,6 +743,10 @@ object ConnectionManager {
             ws = null
             connected.value = false
             lastEvent.value = "disconnected"
+            // Stale Mac battery is worse than no Mac battery — the reading
+            // stops being true the moment the link drops.
+            macInfo.value = null
+            macMedia.value = null
             TransferManager.detach() // abort transfers; JSON features recover on reconnect
             // Fail any mac-fs-list/mac-fs-pull call still waiting on a reply so it doesn't
             // hang forever; a generic "-error" type satisfies either caller's check below.
@@ -509,13 +792,36 @@ object ConnectionManager {
      * Throttled to one message per 5s: a scroll or a dragged swipe arrives as a
      * burst, and the point is to explain the problem once, not to answer every
      * frame of it.
+     *
+     * Carries *why*, because there are now two reasons and they need opposite
+     * advice: the accessibility service being off (fix it in system Settings) or
+     * the user having switched Mac screen control off while leaving the service
+     * running for auto-clipboard (fix it in DroidDock). Telling someone to grant
+     * a permission they already granted is worse than saying nothing. The field
+     * is optional — an older Mac ignores it and shows its generic text.
      */
-    private fun reportControlUnavailable(socket: WebSocket) {
+    private fun reportControlUnavailable(socket: WebSocket, wasLock: Boolean = false) {
         val now = android.os.SystemClock.elapsedRealtime()
         if (now - lastControlWarnAt < 5_000) return
         lastControlWarnAt = now
-        lastEvent.value = "screen control needs Accessibility"
-        reply(socket, JSONObject().put("type", "control-unavailable"))
+        val serviceOff = AccessibilityControl.service == null
+        val reason = when {
+            // Reached only when `LockAdmin.lock` already declined, so the admin
+            // is definitely not granted — the one case with a fix that doesn't
+            // involve turning accessibility back on.
+            wasLock && serviceOff -> "lock-needs-admin"
+            serviceOff            -> "service"
+            else                  -> "disabled"
+        }
+        lastEvent.value = when (reason) {
+            "lock-needs-admin" -> "lock needs Accessibility or device admin"
+            "service"          -> "screen control needs Accessibility"
+            else               -> "screen control is switched off"
+        }
+        reply(
+            socket,
+            JSONObject().put("type", "control-unavailable").put("reason", reason)
+        )
     }
 
     fun send(obj: JSONObject): Boolean {
@@ -611,6 +917,7 @@ object ConnectionManager {
             return false
         }
         val ok = socket.send(wire(JSONObject().put("type", "clipboard").put("text", text)))
+        if (ok) recordClip(text, fromMac = false)
         pendingClip = if (ok) null else text
         return ok
     }
@@ -621,17 +928,38 @@ object ConnectionManager {
         val socket = ws ?: return
         if (p == lastFromMac) { pendingClip = null; return }
         if (socket.send(wire(JSONObject().put("type", "clipboard").put("text", p)))) {
+            recordClip(p, fromMac = false)
             pendingClip = null
             lastEvent.value = "clipboard → Mac"
         }
     }
 
+    /** A clip is written across a Binder transaction with a ~1 MB budget shared
+     *  with everything else in flight; past this the write fails outright. */
+    private const val MAX_CLIP_CHARS = 200_000
+
     private fun setClipboard(text: String) {
-        lastFromMac = text
+        val clip = if (text.length > MAX_CLIP_CHARS) text.take(MAX_CLIP_CHARS) else text
+        // Echo suppression compares against what actually sits on the clipboard,
+        // so it must be the truncated string — otherwise the accessibility service
+        // reads back the short version, fails to recognise it as ours, and bounces
+        // it straight back to the Mac.
+        lastFromMac = clip
         android.os.Handler(android.os.Looper.getMainLooper()).post {
-            val cm = appCtx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            cm.setPrimaryClip(ClipData.newPlainText("DroidDock", text))
-            lastEvent.value = "clipboard ← Mac"
+            // setPrimaryClip is posted to the main thread, where a throw is fatal,
+            // and it genuinely throws in the wild: TransactionTooLargeException on
+            // an oversized clip, SecurityException on OEMs that gate clipboard
+            // writes. A copy that doesn't land must not kill the app.
+            runCatching {
+                val cm = appCtx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("DroidDock", clip))
+            }.onSuccess {
+                recordClip(clip, fromMac = true)
+                lastEvent.value = "clipboard ← Mac"
+            }.onFailure {
+                lastFromMac = null // it never landed; don't suppress it as an echo later
+                lastEvent.value = "clipboard blocked by Android"
+            }
         }
     }
 
@@ -659,6 +987,44 @@ object ConnectionManager {
         }
     } catch (_: Exception) { null }
 
-    private fun deviceName(): String =
+    /** The name sent in `hello` — the user's own if they set one, else the
+     *  hardware name every previous build sent. */
+    private fun deviceName(): String {
+        val custom = runCatching { Prefs.deviceName(appCtx) }.getOrDefault("")
+        if (custom.isNotBlank()) return custom
+        return hardwareName()
+    }
+
+    /** Shown in Settings as the placeholder, so the field makes clear what the
+     *  Mac would see if it were left blank. */
+    fun hardwareName(): String =
         "${Build.MANUFACTURER} ${Build.MODEL}".trim().ifEmpty { "Android" }
+
+    /**
+     * This phone's address on the current network, for the Settings readout.
+     *
+     * Enumerated rather than read from `WifiManager`, which needs a location
+     * permission on modern Android and still only knows about Wi-Fi — this also
+     * reports the tailnet address when Tailscale is up, which is exactly the one
+     * worth seeing when debugging "expand networking".
+     */
+    /**
+     * The previous [localIpAddress] answer, or null if it has never been asked.
+     *
+     * Exists so the Settings readout can paint the address it showed last time
+     * on its first frame and refresh in the background, rather than blocking
+     * composition on the interface sweep or blinking through a placeholder on
+     * every visit.
+     */
+    @Volatile var lastKnownLocalIp: String? = null
+        private set
+
+    fun localIpAddress(): String? = runCatching {
+        java.net.NetworkInterface.getNetworkInterfaces().toList()
+            .filter { it.isUp && !it.isLoopback }
+            .flatMap { it.inetAddresses.toList() }
+            .filterIsInstance<java.net.Inet4Address>()
+            .firstOrNull { !it.isLoopbackAddress }
+            ?.hostAddress
+    }.getOrNull().also { lastKnownLocalIp = it }
 }

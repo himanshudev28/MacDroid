@@ -28,8 +28,14 @@ class SendClipboardActivity : Activity() {
         super.onWindowFocusChanged(hasFocus)
         if (!hasFocus || done) return
         done = true
+        // An emptied clip still yields a non-null primaryClip with zero items, and
+        // getItemAt(0) on that throws — this activity is launched straight from the
+        // Quick Settings tile, so that throw is a visible crash.
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val text = cm.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty()
+        val text = runCatching {
+            cm.primaryClip?.takeIf { it.itemCount > 0 }
+                ?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty()
+        }.getOrDefault("")
         val sent = text.isNotEmpty() && ConnectionManager.sendClipboardText(text)
         Toast.makeText(
             this,

@@ -70,8 +70,13 @@ class MirrorService : Service() {
             return START_NOT_STICKY
         }
         val source = intent?.getStringExtra(EXTRA_SOURCE) ?: "screen"
-        startForegroundNotif(source)
         try {
+            // Inside the try on purpose: startForeground throws for real reasons
+            // (ForegroundServiceStartNotAllowedException when the start races the
+            // app going to background, SecurityException when the OS decides the
+            // projection consent no longer backs a mediaProjection service), and
+            // it used to throw straight out of onStartCommand and kill the app.
+            startForegroundNotif(source)
             if (source == "camera") {
                 startCamera(intent?.getIntExtra(EXTRA_FACING, CameraCharacteristics.LENS_FACING_BACK)
                     ?: CameraCharacteristics.LENS_FACING_BACK)
@@ -83,9 +88,11 @@ class MirrorService : Service() {
                 startScreen(resultCode, data)
             }
         } catch (e: Exception) {
-            ConnectionManager.send(
-                JSONObject().put("type", "mirror-error").put("error", e.message ?: "mirror failed")
-            )
+            runCatching {
+                ConnectionManager.send(
+                    JSONObject().put("type", "mirror-error").put("error", e.message ?: "mirror failed")
+                )
+            }
             stopSelf()
         }
         return START_NOT_STICKY
@@ -98,8 +105,8 @@ class MirrorService : Service() {
                 MediaFormat.KEY_COLOR_FORMAT,
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
             )
-            setInteger(MediaFormat.KEY_BIT_RATE, 6_000_000)
-            setInteger(MediaFormat.KEY_FRAME_RATE, 30)
+            setInteger(MediaFormat.KEY_BIT_RATE, reqBitrate)
+            setInteger(MediaFormat.KEY_FRAME_RATE, reqFps)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
             setInteger(
                 MediaFormat.KEY_BITRATE_MODE,
@@ -145,7 +152,7 @@ class MirrorService : Service() {
             w = metrics.widthPixels
             h = metrics.heightPixels
         }
-        val cap = 1280
+        val cap = if (reqMaxSize > 0) reqMaxSize else 1280
         val longEdge = maxOf(w, h)
         if (longEdge > cap) {
             val s = cap.toFloat() / longEdge
@@ -177,7 +184,7 @@ class MirrorService : Service() {
         val chars = mgr.getCameraCharacteristics(camId)
         val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         val sizes = (map?.getOutputSizes(MediaCodec::class.java) ?: emptyArray()).toList()
-        val cap = 1280
+        val cap = if (reqMaxSize > 0) reqMaxSize else 1280
         // Webcam-style: closest to 16:9, capped, prefer larger — not a weird square.
         val target = 16.0 / 9.0
         val pick = sizes
@@ -402,6 +409,30 @@ class MirrorService : Service() {
 
     companion object {
         @Volatile var instance: MirrorService? = null
+
+        /**
+         * Encoder settings the Mac asked for on `mirror-start` / `camera-start`.
+         *
+         * Statics rather than Intent extras on purpose: the request arrives in
+         * `ConnectionManager` and the encoder is configured three hops later
+         * (permission activity → service → `startEncoder`), so threading them
+         * through would mean changing four signatures for three integers that
+         * are read exactly once, at encoder configure time.
+         *
+         * The defaults are the values that used to be hardcoded here, so a Mac
+         * that never sends them behaves precisely as before.
+         */
+        @Volatile var reqBitrate = 6_000_000
+        @Volatile var reqFps = 30
+        /** Longest-edge cap in px; 0 = use the built-in 1280 ceiling. */
+        @Volatile var reqMaxSize = 0
+
+        /** Clamped at the edge, so nothing downstream has to re-check. */
+        fun setQuality(bitrate: Int, fps: Int, maxSize: Int) {
+            if (bitrate > 0) reqBitrate = bitrate.coerceIn(1_000_000, 50_000_000)
+            if (fps > 0) reqFps = fps.coerceIn(15, 120)
+            reqMaxSize = maxSize.coerceIn(0, 4096)
+        }
         private const val CHANNEL = "mirror"
         private const val NOTIF_ID = 7
         const val ACTION_STOP = "com.droiddock.app.MIRROR_STOP"
@@ -411,8 +442,14 @@ class MirrorService : Service() {
         const val EXTRA_FACING = "facing"
 
         fun stop(ctx: Context) {
+            // startService is illegal from the background on Android 8+, which is
+            // exactly where a Mac-side "stop mirroring" arrives. Falling back to
+            // stopService reaches the same place — onDestroy — so the phone still
+            // drops its screen-share notification instead of casting forever.
             runCatching {
                 ctx.startService(Intent(ctx, MirrorService::class.java).setAction(ACTION_STOP))
+            }.onFailure {
+                runCatching { ctx.stopService(Intent(ctx, MirrorService::class.java)) }
             }
         }
     }

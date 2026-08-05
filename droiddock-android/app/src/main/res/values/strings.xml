@@ -3,6 +3,39 @@
     <string name="app_name">DroidDock</string>
     <string name="send_to_mac">Send to Mac</string>
     <string name="tile_label">Send to Mac</string>
-    <string name="a11y_label">DroidDock Clipboard</string>
-    <string name="a11y_desc">Lets DroidDock automatically send text you copy on this phone to your paired Mac. Only the clipboard is used — no screen content is read.</string>
+    <!-- This is the row you see in Settings › Accessibility, and the description
+         is the text you read when deciding to grant it. It named only the
+         clipboard while the same service also drives every Mac→phone gesture,
+         and claimed "no screen content is read" while the manifest requests
+         canRetrieveWindowContent="true" (needed to find the focused text field
+         so the Mac can type into it). Consent text has to match what the
+         service actually asks for. -->
+    <string name="a11y_label">DroidDock — Clipboard &amp; Screen Control</string>
+    <string name="a11y_desc">Powers three things for your paired Mac: sending text you copy on this phone, letting the Mac tap, swipe and type on this screen while mirroring, and the Mac\'s Lock button. To type from the Mac it reads the text field you have focused. Everything else — mirroring, file transfer, notifications, photos, calls — keeps working with this off.</string>
+    <string name="admin_label">DroidDock screen lock</string>
+    <string name="admin_desc">Lets your Mac lock this phone\'s screen without accessibility access being on. Screen lock is the only admin power DroidDock requests.</string>
+    <string name="conn_tile_label">DroidDock</string>
+    <string name="conn_tile_linked">Linked</string>
+    <string name="conn_tile_off">Disconnected</string>
+    <string name="conn_tile_searching">Searching…</string>
+    <string name="a11y_tile_label">Screen access</string>
+    <string name="a11y_tile_on">On — tap to turn off</string>
+    <string name="a11y_tile_off">Off — tap to open settings</string>
+
+    <!-- In-app updates. DroidDock is sideloaded, so it checks GitHub Releases
+         itself — see UpdateChecker.kt. -->
+    <string name="update_title">App Update</string>
+    <string name="update_idle">DroidDock updates itself — it isn\'t on the Play Store</string>
+    <string name="update_checking">Checking for a new version…</string>
+    <string name="update_current">You\'re on the latest version</string>
+    <string name="update_available">Version %1$s is available — tap to download</string>
+    <string name="update_downloading">Downloading %1$s — %2$d%%</string>
+    <string name="update_ready">Version %1$s downloaded — tap to install</string>
+    <string name="update_failed">Couldn\'t check: %1$s</string>
+    <string name="update_needs_permission">Allow DroidDock to install apps first</string>
+    <string name="update_install_failed">Update install failed: %1$s</string>
+    <string name="update_action_check">Check</string>
+    <string name="update_action_download">Download</string>
+    <string name="update_action_install">Install</string>
+    <string name="update_action_allow">Allow</string>
 </resources>

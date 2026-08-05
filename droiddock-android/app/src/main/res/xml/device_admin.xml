@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The complete set of admin powers DroidDock can exercise, and it is one
+     item long. `force-lock` is what `DevicePolicyManager.lockNow()` requires.
+
+     Nothing else belongs here. Adding `wipe-data`, `reset-password`,
+     `disable-camera` or `limit-password` would widen what the app is capable
+     of as an admin even if no code ever calls them — the system shows this
+     list on the grant screen, and it should stay something a user can read in
+     one line and agree to. -->
+<device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-policies>
+        <force-lock />
+    </uses-policies>
+</device-admin>

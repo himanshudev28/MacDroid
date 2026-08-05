@@ -61,7 +61,15 @@ class BridgeService : Service() {
     override fun onCreate() {
         super.onCreate()
         createChannel()
-        startInForeground(buildNotification("Waiting for Mac…"))
+        if (!startInForeground(buildNotification("Waiting for Mac…"))) {
+            // The system refused the foreground start (background-start restriction,
+            // FGS quota). Going on would leave a service that never called
+            // startForeground, which Android kills with an ANR — so bow out. The
+            // next time the app is opened, MainActivity starts it again from the
+            // foreground, where the start is always allowed.
+            stopSelf()
+            return
+        }
 
         scope.launch {
             combine(ConnectionManager.connected, ConnectionManager.pausedUntil) { linked, until ->
@@ -113,17 +121,56 @@ class BridgeService : Service() {
         super.onDestroy()
     }
 
-    private fun startInForeground(n: Notification) {
-        if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else {
-            startForeground(NOTIF_ID, n)
+    /**
+     * Enter the foreground as a **connectedDevice** service.
+     *
+     * Not dataSync: since Android 15 a dataSync foreground service may only run
+     * 6 hours in any 24, after which the system calls [onTimeout] and then kills
+     * the process with ForegroundServiceDidNotStopInTimeException — fatal for a
+     * link that is meant to stay up all day. connectedDevice ("interacting with
+     * an external device") is both untimed and the honest description of what
+     * this service does.
+     *
+     * Every step is fallible on a real phone (OEM policy, background-start
+     * restrictions, FGS quota), and an uncaught failure here takes the whole app
+     * down, so each tier degrades to the next instead of throwing.
+     */
+    private fun startInForeground(n: Notification): Boolean {
+        if (Build.VERSION.SDK_INT < 29) {
+            return runCatching { startForeground(NOTIF_ID, n) }.isSuccess
         }
+        val types = intArrayOf(
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        )
+        for (type in types) {
+            if (runCatching { startForeground(NOTIF_ID, n, type) }.isSuccess) return true
+        }
+        return runCatching { startForeground(NOTIF_ID, n) }.isSuccess
+    }
+
+    /**
+     * Android 15+ calls this if the service ever does run under the timed
+     * dataSync fallback above. The contract is unforgiving: stop the foreground
+     * service now, or the system throws. Dropping the link until the app is
+     * next opened beats being killed.
+     *
+     * Both overloads are overridden deliberately. Android 15 calls the one-arg
+     * form; Android 16 calls the two-arg one, whose base implementation does
+     * *not* fall through to the other — overriding only one leaves the phone
+     * with no handler on half the versions that can time out.
+     */
+    override fun onTimeout(startId: Int) {
+        stopSelf()
+    }
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        stopSelf()
     }
 
     private fun notify(n: Notification) {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(NOTIF_ID, n)
+        runCatching { nm.notify(NOTIF_ID, n) }
     }
 
     private fun buildNotification(text: String): Notification {

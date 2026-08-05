@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Context
 import android.graphics.Path
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -36,7 +37,34 @@ object AccessibilityControl {
      * from working to not working with no user action at all. Callers use this
      * to say so instead of dropping the message.
      */
-    fun available(): Boolean = service != null
+    fun available(): Boolean = service != null && enabled
+
+    /**
+     * The user's "let the Mac control this screen" choice, mirrored here so the
+     * dispatch path is a field read rather than a SharedPreferences hit on
+     * every tap of a drag gesture.
+     *
+     * Defaults true so a phone that never opens the setting behaves as it
+     * always has. [available] gates on it, so switching it off makes the Mac
+     * report control as unavailable — the same, already-handled path as the
+     * service being off entirely — while auto-clipboard keeps working.
+     */
+    @Volatile var enabled: Boolean = true
+
+    /**
+     * Turn the accessibility service off from inside the app.
+     *
+     * `disableSelf()` is the only half of this Android gives us — a service can
+     * switch itself off, but nothing can switch one *on* except the user in
+     * Settings. That asymmetry is fine for the case this exists for: banking
+     * apps refuse to run while any accessibility service is enabled, so "off,
+     * right now, without digging through Settings" is the direction that needs
+     * to be quick. Re-enabling is a deliberate act and can afford the trip.
+     */
+    fun disableSelf(): Boolean {
+        val svc = service ?: return false
+        return runCatching { svc.disableSelf(); true }.getOrDefault(false)
+    }
 
     private fun realSize(svc: AccessibilityService): Pair<Int, Int> {
         val wm = svc.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -121,6 +149,17 @@ object AccessibilityControl {
             "back" -> AccessibilityService.GLOBAL_ACTION_BACK
             "home" -> AccessibilityService.GLOBAL_ACTION_HOME
             "recents" -> AccessibilityService.GLOBAL_ACTION_RECENTS
+            // Locks the screen the same way the power button does. Added on
+            // Android 9 (API 28); on anything older this falls through and the
+            // Mac's button is a no-op rather than a crash.
+            //
+            // There is deliberately no "unlock": Android has no API for it at
+            // any privilege level a sideloaded app can reach, and it shouldn't
+            // — a Mac that can unlock the phone defeats the lock screen. The
+            // Mac's button says "Lock phone" and means exactly that.
+            "lock" -> if (Build.VERSION.SDK_INT >= 28) {
+                AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN
+            } else return@post
             else -> return@post
         }
         runCatching { svc.performGlobalAction(action) }
