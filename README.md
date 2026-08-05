@@ -8,7 +8,7 @@ Clipboard · notifications · files · photos · messages · calls · screen mir
 flowing seamlessly between your phone and your Mac over your local Wi‑Fi.
 
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Android-1f6feb?style=for-the-badge)
-![Mac app](https://img.shields.io/badge/Mac-Electron%20%2B%20React-47848F?style=for-the-badge&logo=electron&logoColor=white)
+![Mac app](https://img.shields.io/badge/Mac-Tauri%202%20%2B%20React-24C8DB?style=for-the-badge&logo=tauri&logoColor=white)
 ![Android app](https://img.shields.io/badge/Android-Kotlin%20%2B%20Compose-3DDC84?style=for-the-badge&logo=android&logoColor=white)
 ![Link](https://img.shields.io/badge/link-LAN%20WebSocket-FFB454?style=for-the-badge)
 
@@ -28,7 +28,7 @@ It's two apps that talk to each other:
 
 | | App | Built with |
 |---|---|---|
-| 🖥️ | **Mac client** — [`droiddock 2/`](droiddock%202/) | Electron · React · Tailwind |
+| 🖥️ | **Mac client** — [`droiddock-tauri/`](droiddock-tauri/) | Tauri 2 · Rust · React · Tailwind |
 | 📱 | **Android companion** — [`droiddock-android/`](droiddock-android/) | Kotlin · Jetpack Compose |
 
 ---
@@ -88,7 +88,7 @@ Touch/input is injected back through the **AccessibilityService**.
 
 ```mermaid
 flowchart LR
-    subgraph MAC["🖥️  Mac app · Electron + React"]
+    subgraph MAC["🖥️  Mac app · Tauri 2 + React"]
         UI["React UI\n(Files · Photos · Messages · Mirror …)"]
         SRV["WebSocket server\n:48484"]
         ADB["ADB (fallback)"]
@@ -114,9 +114,10 @@ Pair once — they auto-reconnect whenever both apps are open on the same networ
 
 Grab the prebuilt apps from the [**Releases**](../../releases) page:
 
-1. **Mac** — download `DroidDock-*-mac.zip`, unzip, drag **DroidDock.app** to Applications.
+1. **Mac** — download `DroidDock_<version>_aarch64.dmg` (Apple Silicon), open it and
+   drag **DroidDock.app** to Applications.
    *(Unsigned: first launch is right-click → Open.)*
-2. **Android** — download `DroidDock.apk` and sideload it (allow "install unknown apps").
+2. **Android** — download `DroidDock-Android.apk` and sideload it (allow "install unknown apps").
 3. Open the Mac app → **Pair Device** → scan the QR with the phone app. Done.
 
 > ✅ **No ADB, no scrcpy, no Developer Options needed** — including for **screen
@@ -148,26 +149,31 @@ Phone notifications appear as native macOS alerts. To enable:
 
 ## 🧑‍💻 Build from source
 
+Needs [Rust](https://rustup.rs) (stable) and Node 22+ for the Mac app, JDK 17 for Android.
+
 ```bash
-# Mac app
-cd "droiddock 2"
+# Mac app  (Tauri 2 — Rust backend + React frontend)
+cd droiddock-tauri/app
 npm install
-npm run dev          # dev server + Electron
-npm run dist         # packaged .app → dist/
+npm run tauri dev      # dev build, hot-reloads the frontend
+npm run tauri build    # .app + .dmg → src-tauri/target/release/bundle/
 
 # Android app
 cd droiddock-android
 ./gradlew installDebug   # or open in Android Studio → Run
 ```
 
-> 💡 If your terminal exports `ELECTRON_RUN_AS_NODE=1` (some IDE setups do), Electron
-> boots as plain Node and crashes. Launch with:
-> `env -u ELECTRON_RUN_AS_NODE npm run dev`
+> 💡 The first `npm run tauri dev` compiles the whole Rust dependency tree and
+> takes a few minutes. Later runs are incremental. If the app starts but no
+> phone can connect, check nothing else is holding port `48484` — a second copy
+> of DroidDock will do it.
 
 Releases are built automatically by
 [`.github/workflows/release.yml`](.github/workflows/release.yml) — push a tag
-(`git tag v0.7.0 && git push origin v0.7.0`) and the `.app` + `.apk` are
-built and attached to a GitHub Release.
+(`git tag v1.0.0 && git push origin v1.0.0`) and the `.dmg` + `.apk` are built
+and attached to a GitHub Release. The version in the artifact filenames comes
+from `droiddock-tauri/app/src-tauri/tauri.conf.json`, so bump that to match the
+tag before releasing.
 
 ### First-run Android permissions
 
@@ -178,9 +184,18 @@ Grant these when the app asks (they're all needed for the full feature set):
 | Notification access | Mirrors phone notifications to Mac |
 | SMS · Contacts · Calls | Messages, contacts, call alerts |
 | All-files access | File browser and transfer |
-| Accessibility service ("DroidDock Clipboard") | Auto clipboard phone → Mac |
+| Accessibility service ("Clipboard & Screen Control") | Auto clipboard phone → Mac **and every Mac-side tap, swipe and nav button** |
 | Display over other apps | Auto Mirror mode (no per-session prompt) |
 | Battery — Unrestricted | Keeps the link alive when screen is off |
+
+> ⚠️ **Android 13+ blocks the accessibility toggle for sideloaded apps.** If
+> "Clipboard & Screen Control" won't turn on (or switches itself back off), go to
+> **Settings → Apps → DroidDock → ⋮ → Allow restricted settings** first, then enable
+> it under **Settings → Accessibility → Installed apps**.
+>
+> **Reinstalling the APK turns it off again** — so re-enable it after every update.
+> With it off, the mirror still streams video but every tap, swipe and nav press
+> from the Mac is silently discarded; the Mac now shows a toast telling you so.
 
 ---
 
@@ -201,11 +216,14 @@ reconnect attempts for 1h / 8h / indefinitely without unpairing.
 
 ```
 DroidDock/
-├─ droiddock 2/               🖥️  Mac app  (Electron + React)
-│  ├─ src/main/               ·  adb · wifi · transfer · main process
-│  └─ src/renderer/src/       ·  React UI + all components
+├─ droiddock-tauri/           🖥️  Mac app  (Tauri 2 · Rust + React)
+│  ├─ app/src-tauri/src/      ·  ws_server · transfer · adb · mirror · tray
+│  ├─ app/src/                ·  React UI + all components
+│  └─ tools/fake_mac.py       ·  test harness: drives Mac→phone messages
 ├─ droiddock-android/         📱  Android app  (Kotlin + Compose)
 │  └─ app/src/main/java/      ·  services · repos · Compose screens
+├─ droiddock 2/               🗄️  retired Electron client — kept read-only as
+│                             ·  the protocol reference the rewrite matches
 ├─ .github/workflows/         ·  CI release workflow
 └─ README.md
 ```
@@ -214,8 +232,16 @@ DroidDock/
 
 ## ⚠️ Notes & limitations
 
-- The LAN link is a plain WebSocket gated by a pairing token — fine for a trusted
-  home network. TLS is a future enhancement.
+- The LAN link is a WebSocket gated by a pairing token — fine for a trusted home
+  network. **Optional AES-256-GCM** (off by default, Settings → Security) encrypts
+  JSON control messages, keyed off the pairing token. **Scope, stated plainly:**
+  binary frames — file chunks, thumbnails, app icons, mirror video — stay in the
+  clear, because wrapping them means surgery on the hot transfer/mirror loops.
+  This is *not* end-to-end encryption of everything, and nothing in the UI claims
+  it is. Full TLS is still a future enhancement.
+- **Only one copy of DroidDock can run at a time** — they compete for port `48484`,
+  and the loser can never accept a phone. The app now says so instead of looking
+  healthy and doing nothing.
 - **Android 13+ / Samsung One UI block background clipboard reads.** Phone → Mac
   auto-clipboard uses the accessibility service to read copied text from
   accessibility events the moment a "copied" toast fires — no clipboard read required.
@@ -247,6 +273,16 @@ DroidDock/
 - [x] **Android UI redesign** — Material Design 3 (all-vector icons, MD3 components, dynamic palette)
 - [x] **Phone → Mac file transfer** — send files from the Android app directly to Mac Downloads with live amber progress bar
 - [x] **Android Files tab** — upload queue with real-time progress bars, transfer speed, percentage; recent transfers history with colored file-type badges and direction/time labels
+- [x] **Mac client rewritten on Tauri 2** — Rust backend, ~6 MB `.dmg` instead of a
+      bundled Chromium
+- [x] **Phone card** — wallpaper backdrop, live clock, battery, album art, recent apps
+- [x] **Apps grid** — every launchable app with real icons, prefix-ranked search,
+      launch or open in its own Mac window
+- [x] **Menu-bar panel** — battery / now-playing / notifications without opening the app
+- [x] **Link quality probe** + mDNS discovery as a third reconnect fallback
+- [x] **Opt-in AES-256-GCM** for JSON control messages (see Notes for scope)
+- [x] **Desktop mode** — mirror a virtual Android display, phone stays usable
+- [x] **Per-app notification muting**
 - [ ] TLS on the LAN link
 - [ ] Audio streaming (Mac ↔ phone)
 

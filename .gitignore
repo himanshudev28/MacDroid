@@ -16,6 +16,7 @@ droiddock-android/app/build/
 droiddock-android/**/build/
 droiddock-android/captures/
 droiddock-android/.cxx/
+droiddock-tauri/future update
 Cross-platform design specs
 **/local.properties
 *.iml
