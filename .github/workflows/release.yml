@@ -97,6 +97,24 @@ jobs:
   android:
     name: Build DroidDock Android (APK)
     runs-on: ubuntu-latest
+    # Serialized behind the mac job on purpose, at the cost of ~4 minutes.
+    #
+    # Both jobs write the SAME release for the tag, and neither owned it. The
+    # first to arrive CREATES it and decides its fields; the second only adds
+    # assets. Running in parallel made that a race, and it has now bitten twice:
+    #
+    #   v1.0.0 — mac created the draft, softprops (default `draft: false`)
+    #            updated it and published it, overriding the review gate.
+    #   v2.0.0 — softprops got there first and created the release with an EMPTY
+    #            body; tauri-action then found it existing and only uploaded
+    #            assets, because `releaseBody` applies at creation. The release
+    #            shipped with no notes at all.
+    #
+    # `needs` makes ownership explicit rather than incidental: the mac job
+    # always creates the release, with the notes and the draft flag, and this
+    # job only ever attaches the APK to a release that already exists. It also
+    # means a failed mac build skips the APK instead of leaving half a release.
+    needs: mac
     defaults:
       run:
         working-directory: droiddock-android
