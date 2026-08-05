@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import Rail from "./components/Rail";
 import Icon from "./components/Icon";
 import Onboarding from "./components/Onboarding";
@@ -8,7 +9,7 @@ import PhoneCard from "./components/phone/PhoneCard";
 import type { QuickAction } from "./components/phone/QuickActions";
 import { ALL_ITEMS, itemFor, type ViewId } from "./lib/nav";
 import { getPairingInfo, type PairingInfo } from "./lib/pairing";
-import { applyOpacity } from "./lib/appearance";
+import { applySystemAccent, watchSystemTheme } from "./lib/appearance";
 import { clearIcons } from "./lib/appIcons";
 import DashboardView from "./components/views/DashboardView";
 import FilesView from "./components/views/FilesView";
@@ -56,7 +57,11 @@ import {
   clipboardPushNow,
   fsPush,
   wallpaperGet,
+  mediaState,
   onLinkQuality,
+  onUpdateAvailable,
+  onOpenUpdates,
+  type UpdateInfo,
   type DroidConfig,
   type LinkQuality,
   type Notif,
@@ -69,11 +74,66 @@ import {
   type AppDeviceInfo,
 } from "./lib/bridge";
 
+/// Layout breakpoints, in window px. Derived from what the columns actually
+/// cost rather than from a device-size convention — this window never sees a
+/// phone viewport, it sees whatever the user dragged it to.
+///
+///   rail expanded 184 · phone panel 256 · content wants ≥ 560 to be useful
+///
+/// Below `RAIL_LABEL_MIN` the rail drops to icons (184 → 56, +128 for content).
+/// Below `PHONE_PANEL_MIN` the phone panel goes too, leaving the whole window
+/// to the view. `minWidth` in tauri.conf.json is 920, so the last breakpoint
+/// only fires if that is ever lowered — it's a floor, not dead code.
+const RAIL_LABEL_MIN = 1000;
+const PHONE_PANEL_COMFORTABLE = 1180;
+const PHONE_PANEL_MIN = 860;
+
+/// Window width, tracked for the layout above.
+///
+/// Reads `innerWidth` rather than observing an element: the columns are sized
+/// off the *window*, and a ResizeObserver on the root would feed its own
+/// layout changes back into the measurement.
+function useWindowWidth(): number {
+  const [w, setW] = useState(() => window.innerWidth);
+  useEffect(() => {
+    let frame = 0;
+    const measure = () => {
+      // Coalesced to one read per frame: a live window drag fires resize far
+      // faster than React can re-render the tree behind it.
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => setW(window.innerWidth));
+    };
+
+    // Re-measure on mount, not just on `resize`. In this webview the first
+    // render can run before layout has settled, and `resize` never fires
+    // afterwards if the user doesn't touch the window — so the initial
+    // `useState` read sticks, and a bogus small value silently collapses both
+    // the rail and the phone panel on a window that has room for them.
+    measure();
+
+    // The authority on "the viewport changed". `resize` alone misses the
+    // cases that matter here: entering full screen, a display scale change,
+    // and the settle-after-launch above.
+    const ro = new ResizeObserver(measure);
+    ro.observe(document.documentElement);
+    window.addEventListener("resize", measure);
+    return () => {
+      cancelAnimationFrame(frame);
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+  return w;
+}
+
 export default function App() {
   const [view, setView] = useState<ViewId>("dashboard");
   const [config, setConfig] = useState<DroidConfig | null>(null);
   const [status, setStatus] = useState<WifiStatus>({ connected: false, phoneName: null });
   const [notifs, setNotifs] = useState<Notif[]>([]);
+  /// Set by the background check in `updater.rs`. Its only job out here is the
+  /// rail dot — the row that acts on it lives in Settings → About.
+  const [updateAvailable, setUpdateAvailable] = useState<UpdateInfo | null>(null);
   const [media, setMedia] = useState<MediaState | null>(null);
   const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
   const [messageTarget, setMessageTarget] = useState<MessageTarget | null>(null);
@@ -97,6 +157,14 @@ export default function App() {
   const [phoneOpen, setPhoneOpen] = useState(
     () => localStorage.getItem("phonePanel") !== "off"
   );
+  /// What the user last *chose* for the rail. The rail may still render
+  /// collapsed regardless — see `railExpanded` below — but narrowing the window
+  /// must never overwrite the preference, or widening it again wouldn't
+  /// restore what they had.
+  const [railWanted, setRailWanted] = useState(
+    () => localStorage.getItem("railExpanded") !== "off"
+  );
+  const width = useWindowWidth();
   const [pairing, setPairing] = useState<PairingInfo | null>(null);
   /// Tier B. The phone's wallpaper, fetched once per connection (it's a ~100 KB
   /// payload that rarely changes), and the current track's album art, which the
@@ -122,8 +190,14 @@ export default function App() {
   }, [phoneOpen]);
 
   useEffect(() => {
+    localStorage.setItem("railExpanded", railWanted ? "on" : "off");
+  }, [railWanted]);
+
+  useEffect(() => {
     getPairingInfo().then(setPairing).catch(() => setPairing(null));
-    applyOpacity();
+    // Theme/glass/accent were already applied synchronously in main.tsx so the
+    // first frame is correct; this only keeps `system` following the OS.
+    return watchSystemTheme();
   }, []);
 
   const toast = useCallback((kind: Toast["kind"], text: string) => {
@@ -139,9 +213,11 @@ export default function App() {
     const offConfig = onConfigUpdate(setConfig);
     getAppearance()
       .then((a) => {
-        const root = document.documentElement;
-        root.style.setProperty("--color-accent", a.accent_color);
-        root.dataset.reduceTransparency = String(a.reduce_transparency);
+        // Parked in its own variable, not written over `--color-accent`: the
+        // theme decides whether the macOS accent or the app's warm amber wins,
+        // and overwriting the token directly would make that switch one-way.
+        applySystemAccent(a.accent_color);
+        document.documentElement.dataset.reduceTransparency = String(a.reduce_transparency);
       })
       .catch(console.error);
     return () => offConfig();
@@ -168,6 +244,18 @@ export default function App() {
     const offNotifGone = on<{ key: string }>("notification-removed", ({ key }) =>
       setNotifs((list) => list.filter((x) => x.key !== key))
     );
+
+    // Seed from the current state before subscribing. A listener alone only
+    // reports transitions, and `art` rides along only on a track change — so
+    // without this, mounting mid-song shows no player card and no artwork until
+    // the next track starts.
+    mediaState()
+      .then((m) => {
+        if (!m) return;
+        setMedia(m);
+        if (m.art) setAlbumArt(`data:image/jpeg;base64,${m.art}`);
+      })
+      .catch(() => {});
 
     const offMedia = on<MediaState>("media", (m) => {
       setMedia(m);
@@ -220,6 +308,11 @@ export default function App() {
     // clears; anything else preserves the caller's name/number).
     const offQuality = onLinkQuality(setQuality);
 
+    // Silent by design — a dot on the Settings rail item, no toast, no modal.
+    // The one place it does interrupt is the tray, which the user opened.
+    const offUpdate = onUpdateAvailable(setUpdateAvailable);
+    const offOpenUpdates = onOpenUpdates(() => setView("settings"));
+
     const offCallState = onCallState(({ state }) => {
       setActiveCall((prev) => {
         if (state === "IDLE") return null;
@@ -236,6 +329,8 @@ export default function App() {
       offEditSync();
       offCall();
       offQuality();
+      offUpdate();
+      offOpenUpdates();
       offCallState();
     };
   }, [toast]);
@@ -313,6 +408,49 @@ export default function App() {
       setLostLink(true);
     }
   }, [status.connected]);
+
+  // ── Drop a file anywhere in the window to send it ────────────────────────
+  // The Files view registers its own `onDragDropEvent` (it uploads into the
+  // folder you're browsing, which is the more specific and more useful
+  // behaviour). Both listeners fire on every drop, so this one stands down
+  // entirely while Files is on screen rather than double-sending. Read through
+  // a ref so switching views doesn't churn the OS-level listener registration.
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const linkedRef = useRef(false);
+  const [dropping, setDropping] = useState(false);
+
+  useEffect(() => {
+    const un = getCurrentWebview().onDragDropEvent(async (ev) => {
+      if (viewRef.current === "files") return; // FilesView owns this drop
+      if (ev.payload.type === "over") {
+        setDropping(linkedRef.current);
+        return;
+      }
+      if (ev.payload.type === "leave") {
+        setDropping(false);
+        return;
+      }
+      setDropping(false);
+      if (!linkedRef.current) {
+        toast("bad", "Not linked — connect your phone first");
+        return;
+      }
+      for (const p of ev.payload.paths) {
+        try {
+          // Same destination the quick action uses, and the same one
+          // TransferManager lands every other Mac→phone push in.
+          await fsPush(p, "/sdcard/Download");
+          toast("ok", `Sent ${p.split("/").pop()} → Download`);
+        } catch (e) {
+          toast("bad", String(e));
+        }
+      }
+    });
+    return () => {
+      un.then((f) => f());
+    };
+  }, [toast]);
 
   // ── ⌘-accelerators for the rail ─────────────────────────────────────────
   // Deliberately conservative: only ⌘-combos, so nothing a view already
@@ -456,6 +594,22 @@ export default function App() {
   );
 
   const linked = status.connected;
+  // Mirrored for the window-wide drop listener, which is registered once and
+  // would otherwise close over the first render's value forever.
+  linkedRef.current = linked;
+
+  // ── Responsive shell ─────────────────────────────────────────────────────
+  // Three columns compete for width: rail, phone panel, content. Content is
+  // the one doing the work, so it wins — the chrome yields in order of how
+  // replaceable it is. The rail collapses first (its labels have tooltips);
+  // the phone panel goes second (⌘⌥S brings it back); content never yields.
+  //
+  // Both are *overrides*, not writes: the user's own choice is untouched and
+  // comes straight back when the window grows again.
+  const railExpanded = railWanted && width >= RAIL_LABEL_MIN;
+  const phoneVisible = phoneOpen && width >= PHONE_PANEL_MIN;
+  const railSquashed = railWanted && !railExpanded;
+  const phoneSquashed = phoneOpen && !phoneVisible;
 
   // ── Phone-card quick actions ────────────────────────────────────────────
   // Every one of these is a second entry point to something that already
@@ -575,7 +729,14 @@ export default function App() {
       case "media":
         return <MediaView media={media} />;
       case "settings":
-        return <SettingsView config={config} onConfig={setConfig} onToast={toast} />;
+        return (
+          <SettingsView
+            config={config}
+            onConfig={setConfig}
+            onToast={toast}
+            updateAvailable={updateAvailable}
+          />
+        );
       case "mirror":
         return (
           <MirrorView
@@ -628,22 +789,39 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-screen w-full overflow-hidden">
+    // `relative` anchors the drop overlay at the bottom of this tree; the root
+    // already fills the window, so it changes nothing about the layout.
+    <div className="relative flex h-screen w-full overflow-hidden">
       <Rail
         view={view}
         setView={setView}
         notifCount={notifs.length}
+        updateReady={updateAvailable != null}
         phoneOpen={phoneOpen}
         onTogglePhone={() => setPhoneOpen((o) => !o)}
+        expanded={railExpanded}
+        onToggleExpanded={() => setRailWanted((e) => !e)}
       />
 
       {/* The phone panel — the app's centre of gravity, present on every view.
           Collapsible (⌘⌥S) so a wide Files or Messages session can reclaim
           the column. */}
-      {phoneOpen && (
-        <aside className="glass-chrome flex w-64 shrink-0 flex-col border-r border-line">
+      {phoneVisible && (
+        <aside
+          className={`glass-chrome flex shrink-0 flex-col border-r border-line ${
+            // One step narrower before it disappears entirely. The wide step is
+            // 288px because the card inside is phone-shaped: at 256 it was tall
+            // and thin enough that the now-playing title had no room to breathe.
+            width < PHONE_PANEL_COMFORTABLE ? "w-76" : "w-88"
+          }`}
+        >
           <div data-tauri-drag-region className="h-7 shrink-0" />
-          <div className="min-h-0 flex-1 p-3 pt-1">
+          {/* The card takes the panel's full height, capped so a very tall
+              display can't stretch it past a phone's proportions. Sizing by
+              aspect ratio instead was worse: it left the card short of the
+              space actually available. `pb-2.5`/`px-2.5` keep the frame close
+              to the panel edge — every pixel here is card. */}
+          <div className="flex min-h-0 flex-1 items-center justify-center px-2.5 pt-1 pb-2.5">
             <PhoneCard
               status={status}
               info={appDeviceInfo}
@@ -654,7 +832,10 @@ export default function App() {
               ip={pairing?.ips[0] ?? null}
               port={pairing?.port ?? null}
               actions={quickActions}
-              artwork={(media?.active && albumArt) || wallpaper}
+              // Both, unresolved. Which one shows depends on whether the
+              // player card is open, and that state lives inside the card.
+              wallpaper={wallpaper}
+              albumArt={media?.active ? albumArt : null}
               onRecentError={(m) => toast("bad", m)}
               onPair={() => setView("dashboard")}
             />
@@ -676,6 +857,19 @@ export default function App() {
             <span className="flex items-center gap-1.5 text-[11.5px] text-(--color-link)">
               <span className="led h-1.5 w-1.5 rounded-full bg-(--color-link)" />
               {status.phoneName ?? "Linked"}
+            </span>
+          )}
+
+          {/* Something the user turned on is being suppressed by the window
+              size. Saying so — and offering it back — is the difference
+              between a responsive layout and one that eats your panels. */}
+          {(phoneSquashed || railSquashed) && (
+            <span
+              data-tauri-drag-region
+              title="Widen the window to bring it back — your preference is remembered, not overwritten."
+              className="ml-auto shrink-0 text-[11px] text-faint"
+            >
+              {phoneSquashed ? "Phone panel hidden to fit" : "Sidebar labels hidden to fit"}
             </span>
           )}
         </header>
@@ -720,6 +914,18 @@ export default function App() {
           }}
           onGoToDashboard={() => setView("dashboard")}
         />
+      )}
+      {/* Window-wide drop target. `pointer-events-none` throughout: the OS
+          drag is handled natively by Tauri, so this is purely an affordance and
+          must never swallow a click. */}
+      {dropping && (
+        <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-black/45 p-8">
+          <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-(--color-accent) px-10 py-8 text-center">
+            <Icon name="upload" size={28} className="text-(--color-accent)" />
+            <div className="font-display text-[15px] font-semibold text-fg">Drop to send to your phone</div>
+            <div className="text-[12.5px] text-dim">Lands in Download · use the Files view to pick a folder</div>
+          </div>
+        </div>
       )}
       <Toasts items={toasts} />
     </div>

@@ -173,6 +173,12 @@ fn toggle_panel(app: &AppHandle, rect: Option<tauri::Rect>) {
     .decorations(false)
     .transparent(true)
     .always_on_top(true)
+    // An always-on-top window already floats above every Space. Saying so
+    // explicitly is what keeps macOS from yanking it back to the Space it was
+    // created on: without it, switching desktops drags the panel along, shows
+    // it on the new Space, and then the ensuing focus change hides it — which
+    // reads as "the app appeared for a second and vanished".
+    .visible_on_all_workspaces(true)
     .visible(false)
     .build();
 
@@ -182,7 +188,20 @@ fn toggle_panel(app: &AppHandle, rect: Option<tauri::Rect>) {
             let handle = win.clone();
             win.on_window_event(move |e| {
                 if let WindowEvent::Focused(false) = e {
-                    let _ = handle.hide();
+                    // Not an unconditional hide. A Space switch, a display
+                    // reconfiguration, or the system briefly taking focus all
+                    // deliver `Focused(false)` without the user having clicked
+                    // away, and hiding on those is the flicker described above.
+                    // Re-checking a moment later distinguishes the two: a real
+                    // click-away leaves the panel unfocused, while an
+                    // incidental one has already handed focus back.
+                    let h = handle.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(180));
+                        if !h.is_focused().unwrap_or(false) {
+                            let _ = h.hide();
+                        }
+                    });
                 }
             });
             position_panel(&win, rect);
@@ -262,6 +281,19 @@ fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
         if widget_on { "Hide status widget" } else { "Show status widget" },
     )
     .build(app)?;
+    // Relabels itself once a background check has found something, so the menu
+    // bar carries the news even when the main window has never been opened.
+    let pending_version = app
+        .try_state::<crate::updater::UpdaterState>()
+        .and_then(|s| s.pending_version());
+    let update = MenuItemBuilder::with_id(
+        "update",
+        match &pending_version {
+            Some(v) => format!("Update to {v}…"),
+            None => "Check for Updates…".to_string(),
+        },
+    )
+    .build(app)?;
     let quit = PredefinedMenuItem::quit(app, Some("Quit DroidDock"))?;
 
     MenuBuilder::new(app)
@@ -274,17 +306,38 @@ fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
         .separator()
         .item(&widget)
         .separator()
+        .item(&update)
         .item(&quit)
         .build()
 }
 
-/// `HH:MM` in local time, no `chrono` dependency — just enough for a tray
+/// `HH:MM` in **local** time, no `chrono` dependency — just enough for a tray
 /// label, not a general-purpose formatter.
+///
+/// This used to divide the epoch directly, which is UTC: "Paused until 09:30"
+/// read hours off for anyone not on UTC, which is the only thing this label is
+/// for. `localtime_r` applies the zone *and* DST for the instant in question,
+/// which a fixed offset would get wrong across a transition.
 fn fmt_clock(epoch_ms: i64) -> String {
-    let secs_since_midnight_utc = (epoch_ms / 1000).rem_euclid(86400);
-    let h = secs_since_midnight_utc / 3600;
-    let m = (secs_since_midnight_utc % 3600) / 60;
-    format!("{h:02}:{m:02}")
+    #[cfg(target_os = "macos")]
+    {
+        let secs = epoch_ms.div_euclid(1000) as libc::time_t;
+        // SAFETY: `localtime_r` writes into `tm` and reads `secs`; both are
+        // live for the call, and the _r form needs no global lock.
+        let tm = unsafe {
+            let mut tm: libc::tm = std::mem::zeroed();
+            if libc::localtime_r(&secs, &mut tm).is_null() {
+                return "??:??".into();
+            }
+            tm
+        };
+        format!("{:02}:{:02}", tm.tm_hour, tm.tm_min)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let secs_since_midnight = (epoch_ms / 1000).rem_euclid(86400);
+        format!("{:02}:{:02}", secs_since_midnight / 3600, (secs_since_midnight % 3600) / 60)
+    }
 }
 
 fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
@@ -297,6 +350,13 @@ fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
             let show = !app.state::<crate::AppState>().config.lock().unwrap().widget_enabled;
             let _ = widget_set(app.clone(), show);
             refresh(app);
+        }
+        // Deliberately opens Settings → About rather than downloading straight
+        // from the menu: an update ends with the app relaunching, and that is
+        // not something to trigger from a menu item with no confirmation.
+        "update" => {
+            open_main_window(app.clone());
+            let _ = app.emit("open-updates", ());
         }
         _ => {}
     }
@@ -316,7 +376,9 @@ pub fn apply_pause(app: &AppHandle, until: Option<i64>) {
     refresh(app);
 }
 
-fn refresh(app: &AppHandle) {
+/// Rebuild the menu in place. Public because the updater relabels its item
+/// when a background check finds something.
+pub fn refresh(app: &AppHandle) {
     if let Ok(menu) = build_menu(app) {
         if let Some(tray) = app.tray_by_id(TRAY_ID) {
             let _ = tray.set_menu(Some(menu));

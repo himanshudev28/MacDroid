@@ -7,6 +7,8 @@ mod discovery;
 mod edit_cache;
 mod link_quality;
 mod mac_fs;
+mod mac_info;
+mod mac_media;
 mod mac_remote;
 mod mdns;
 mod mirror;
@@ -16,6 +18,7 @@ mod protocol;
 mod statusbar;
 mod transfer;
 mod tray;
+mod updater;
 mod ws_server;
 
 use adb::AdbState;
@@ -110,7 +113,16 @@ fn set_setting(app: AppHandle, state: State<AppState>, key: String, value: Value
         "lowBatteryAlert" => cfg.low_battery_alert = value.as_bool().unwrap_or(true),
         "lowBatteryPct" => cfg.low_battery_pct = value.as_u64().unwrap_or(20).clamp(5, 50) as u8,
         "desktopDisplaySize" => cfg.desktop_display_size = value.as_str().unwrap_or("").trim().to_string(),
+        // Mirror quality. Clamped here as well as at each use site — this is
+        // the boundary the frontend can write through, so it's the one place
+        // that has to hold.
+        "mirrorBitrateMbps" => {
+            cfg.mirror_bitrate_mbps = value.as_u64().unwrap_or(12).clamp(1, 50) as u32
+        }
+        "mirrorFps" => cfg.mirror_fps = value.as_u64().unwrap_or(60).clamp(15, 120) as u32,
+        "mirrorMaxSize" => cfg.mirror_max_size = value.as_u64().unwrap_or(0).min(4096) as u32,
         "defaultMirrorMode" => cfg.default_mirror_mode = str_setting(&value, "wifi"),
+        "autoCheckUpdates" => cfg.auto_check_updates = value.as_bool().unwrap_or(true),
         "mutedApps" => {
             cfg.muted_apps = value
                 .as_array()
@@ -533,6 +545,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -552,6 +565,7 @@ pub fn run() {
             app.manage(statusbar::StatusState::default());
             app.manage(ws_server::LastPhoneName::default());
             app.manage(AdbState::default());
+            app.manage(updater::UpdaterState::default());
 
             // Phase 17: clears stale edit-cache sessions (keeping any still-pending
             // unsynced edit) and starts a fresh session dir for this launch. Managed
@@ -613,6 +627,9 @@ pub fn run() {
                             tokio::spawn(link_quality::run(h.clone(), ws.clone()));
                             // Phase 3: 1s clipboard watcher (outbound Mac→phone).
                             tokio::spawn(clipboard::run(h.clone(), ws.clone()));
+                            // Mac→phone status (name + battery), 60s tick.
+                            tokio::spawn(mac_info::run(h.clone(), ws.clone()));
+                            tokio::spawn(mac_media::run(h.clone(), ws.clone()));
                             // Awaited directly (not spawned) so this thread
                             // drives the accept loop itself for the app's life.
                             ws_server::run(h, ws, port).await;
@@ -645,10 +662,18 @@ pub fn run() {
                 if system_appearance.reduce_transparency {
                     let _ = window.set_effects(None);
                 }
+                // `setup` runs on the main thread, which AppKit requires here.
+                // Without this the main window follows the user to every Space.
+                appearance::pin_to_own_space(&window);
             }
             app.manage(Mutex::new(system_appearance));
 
             tray::build(app.handle())?;
+
+            // Last, and on a delay of its own — an update check is the least
+            // urgent thing this app does, and must never be in the way of the
+            // link coming up.
+            updater::spawn_startup_check(app_handle.clone());
 
             Ok(())
         })
@@ -713,13 +738,51 @@ pub fn run() {
             adb::adb_call_mute,
             adb::adb_call_dtmf,
             adb::adb_call_start_polling,
+            mac_remote::accessibility_trusted,
+            mac_remote::open_accessibility_settings,
             tray::pause_set,
             tray::autostart_get,
             tray::autostart_set,
             tray::menubar_hide,
             tray::open_main_window,
             tray::widget_set,
+            statusbar::media_state,
+            updater::update_check,
+            updater::update_install,
+            updater::app_version,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        // ── Close means hide, not destroy ────────────────────────────────
+        //
+        // DroidDock keeps running after its window closes — it has a tray icon
+        // and a live phone link, and quitting on close would drop both. But
+        // Tauri's default close *destroys* the webview, and nothing recreated
+        // it: the app sat in the Dock with no window, its icon did nothing, and
+        // the only way back was Force Quit. That is the bug this pair of
+        // handlers fixes, and they have to work together — hiding without
+        // handling Reopen strands the window just as thoroughly.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Only the main window. The mirror pop-out, the menu-bar panel
+                // and the widget all own their lifecycles and must still be
+                // destroyable — `mirror.rs` in particular relies on `Destroyed`
+                // firing to tell the phone to stop casting.
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Clicking the Dock icon of a running app with no visible windows.
+            // Without this the click is swallowed and the app looks hung.
+            if let tauri::RunEvent::Reopen { .. } = event {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.show();
+                    let _ = win.unminimize();
+                    let _ = win.set_focus();
+                }
+            }
+        });
 }

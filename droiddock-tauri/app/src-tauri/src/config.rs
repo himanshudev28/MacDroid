@@ -24,6 +24,10 @@ fn default_menubar_max_len() -> u32 { 28 }
 fn default_album_art() -> String { "thumb".to_string() }
 fn default_low_battery_pct() -> u8 { 20 }
 fn default_mirror_mode() -> String { "wifi".to_string() }
+// The "best" end, deliberately. This is a LAN link, and the old hardcoded
+// 6 Mbps / 30 fps was a conservative guess nobody ever revisited.
+fn default_mirror_bitrate() -> u32 { 12 }
+fn default_mirror_fps() -> u32 { 60 }
 
 fn default_mac_fs_roots() -> Vec<String> {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
@@ -109,6 +113,21 @@ pub struct Config {
     /// `crate::mac_remote` for why this one is gated harder than anything else.
     #[serde(default)]
     pub remote_control: bool,
+    /// Tell the paired phone this Mac's name and battery state (AirSync's
+    /// `MacInfoSyncManager`). Unlike `remote_control` this only ever *sends*
+    /// read-only status to a device that is already paired, so it defaults on —
+    /// see `crate::mac_info`.
+    #[serde(default = "default_true")]
+    pub mac_info_sync: bool,
+    /// Push what's playing on this Mac to the phone (`crate::mac_media`).
+    /// Read-only status like `mac_info_sync`, so it defaults on.
+    #[serde(default = "default_true")]
+    pub mac_media_sync: bool,
+    /// Also read the active browser tab's title when it's on a media site, so
+    /// YouTube and friends show a track name instead of "Playing on your Mac".
+    /// Scoped to an allow-list of media hosts — see `crate::mac_media`.
+    #[serde(default = "default_true")]
+    pub mac_media_browser: bool,
     // ── Menu bar (AirSync+ "MenuBar Customizations") ─────────────────────
     /// What the tray icon shows beside it: `none` | `battery` | `media` | `device`.
     #[serde(default = "default_menubar_text")]
@@ -142,6 +161,23 @@ pub struct Config {
     #[serde(default = "default_mirror_mode")]
     pub default_mirror_mode: String,
 
+    // ── Mirror quality (both transports) ─────────────────────────────────
+    // One set of knobs for Wi-Fi and ADB, because "how good does the mirror
+    // look" is one question to a user even though it reaches two encoders.
+    // Defaults are the good end, not the safe end: this runs over a LAN, and
+    // the previous hardcoded 6 Mbps / 30 fps was chosen for neither.
+    /// Video bit rate in Mbps. Wi-Fi passes it to Android's MediaCodec;
+    /// ADB passes it to scrcpy as `--video-bit-rate`.
+    #[serde(default = "default_mirror_bitrate")]
+    pub mirror_bitrate_mbps: u32,
+    /// Frame-rate cap. 60 reads as smooth without doubling the bandwidth of 30.
+    #[serde(default = "default_mirror_fps")]
+    pub mirror_fps: u32,
+    /// Longest-edge cap in pixels; `0` means the device's own resolution.
+    /// Lowering this is the single biggest bandwidth lever there is.
+    #[serde(default)]
+    pub mirror_max_size: u32,
+
     /// Show the floating always-on-top status widget.
     #[serde(default)]
     pub widget_enabled: bool,
@@ -151,6 +187,16 @@ pub struct Config {
     /// which is the distinction AirSync's per-app notification settings make.
     #[serde(default)]
     pub muted_apps: Vec<String>,
+
+    /// Look for a new release shortly after launch. The check is throttled by
+    /// `last_update_check` and never installs anything on its own — it only
+    /// badges the Settings tab. Off means the only route is the button.
+    #[serde(default = "default_true")]
+    pub auto_check_updates: bool,
+    /// Epoch ms of the last *completed* automatic check, so relaunching the
+    /// app ten times in an afternoon doesn't hit GitHub ten times.
+    #[serde(default)]
+    pub last_update_check: i64,
     /// Keys this build doesn't know about (a newer build's settings, or
     /// hand-added ones) — round-tripped instead of silently deleted on the
     /// next save, matching the Electron config's free-form object semantics.
@@ -192,6 +238,9 @@ impl Default for Config {
             mac_fs_roots: default_mac_fs_roots(),
             encrypt_link: false,
             remote_control: false,
+            mac_info_sync: true,
+            mac_media_sync: true,
+            mac_media_browser: true,
             muted_apps: Vec::new(),
             menubar_text: default_menubar_text(),
             menubar_battery_style: default_battery_style(),
@@ -201,7 +250,12 @@ impl Default for Config {
             low_battery_pct: default_low_battery_pct(),
             desktop_display_size: String::new(),
             default_mirror_mode: default_mirror_mode(),
+            mirror_bitrate_mbps: default_mirror_bitrate(),
+            mirror_fps: default_mirror_fps(),
+            mirror_max_size: 0,
             widget_enabled: false,
+            auto_check_updates: true,
+            last_update_check: 0,
             extra: serde_json::Map::new(),
         }
     }

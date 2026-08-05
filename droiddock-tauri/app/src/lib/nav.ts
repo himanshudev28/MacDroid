@@ -46,13 +46,18 @@ export const GROUPS: { title: string; items: NavItem[] }[] = [
         id: "apps",
         label: "Apps",
         key: "2",
-        path: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",
+        // Rounded squares, not sharp ones — a sharp 2×2 grid is the universal
+        // "grid view / layout" glyph. Rounded ones read as app tiles.
+        path: "M4 5.5A1.5 1.5 0 015.5 4h3A1.5 1.5 0 0110 5.5v3A1.5 1.5 0 018.5 10h-3A1.5 1.5 0 014 8.5zM14 5.5A1.5 1.5 0 0115.5 4h3A1.5 1.5 0 0120 5.5v3A1.5 1.5 0 0118.5 10h-3A1.5 1.5 0 0114 8.5zM4 15.5A1.5 1.5 0 015.5 14h3A1.5 1.5 0 0110 15.5v3A1.5 1.5 0 018.5 20h-3A1.5 1.5 0 014 18.5zM14 15.5A1.5 1.5 0 0115.5 14h3a1.5 1.5 0 011.5 1.5v3a1.5 1.5 0 01-1.5 1.5h-3a1.5 1.5 0 01-1.5-1.5z",
       },
       {
         id: "devices",
         label: "Devices",
         key: "3",
-        path: "M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2M7 5h10a2 2 0 012 2v10a2 2 0 01-2 2H7a2 2 0 01-2-2V7a2 2 0 012-2z M9 9h6v6H9z",
+        // Was a bare microchip, which read as "settings" or "hardware" and
+        // told you nothing. A phone plugged into a cable is what this tab
+        // actually is: USB/ADB device management.
+        path: "M7 3h10a1 1 0 011 1v11a3 3 0 01-3 3H9a3 3 0 01-3-3V4a1 1 0 011-1z M10 3V1.5M14 3V1.5 M12 18v3",
       },
       {
         id: "mirror",
@@ -112,7 +117,9 @@ export const GROUPS: { title: string; items: NavItem[] }[] = [
       },
       {
         id: "media",
-        label: "Media",
+        // "Media" was ambiguous next to Photos — this tab is the phone's
+        // transport controls, not a media library.
+        label: "Now playing",
         path: "M9 19V6l12-2v13M9 19a3 3 0 11-6 0 3 3 0 016 0zM21 17a3 3 0 11-6 0 3 3 0 016 0z",
       },
       {

@@ -68,9 +68,18 @@ pub struct PhotoSyncState {
     /// share this single flag, exactly like `edit_cache::EditCacheState
     /// ::retrying`.
     running: AtomicBool,
+    /// Set when a trigger arrives while a pass is already running. The pass in
+    /// flight built its item list *before* those photos existed, so without
+    /// this the ping was simply dropped and the new shots waited for the next
+    /// unrelated trigger (or a reconnect) to be noticed.
+    pending: AtomicBool,
 }
 
 pub type PhotoSync = Arc<PhotoSyncState>;
+
+/// Returned by `run_sync` when another pass owns the run flag. Compared by
+/// value in `check` — a named constant so the two can't drift apart.
+const BUSY: &str = "Photo sync is already running";
 
 /// Load (or create) the ledger under `data_dir` — same app data dir
 /// `droiddock.json` lives in, just a second small file alongside it.
@@ -82,6 +91,7 @@ pub fn init(data_dir: PathBuf) -> PhotoSync {
         ledger_path,
         ledger: Mutex::new(ledger),
         running: AtomicBool::new(false),
+        pending: AtomicBool::new(false),
     })
 }
 
@@ -241,7 +251,7 @@ async fn run_sync(
     device_key: String,
 ) -> Result<(), String> {
     if photo.running.swap(true, Ordering::SeqCst) {
-        return Err("Photo sync is already running".into());
+        return Err(BUSY.into());
     }
     let _guard = RunGuard(&photo.running);
 
@@ -318,7 +328,27 @@ pub async fn check(
         photo.migrate_key(legacy, &device_key).await;
     }
     let dest = resolve_dest(&app, cfg.photo_sync_dest.as_deref());
-    let _ = run_sync(app, ws_state, photo, dest, device_key).await;
+
+    // Record that a check is owed, then drain. Whoever holds the run flag is
+    // the one that re-runs, so a burst of `photos-changed` pings collapses into
+    // at most one extra pass instead of being dropped on the floor.
+    photo.pending.store(true, Ordering::SeqCst);
+    while photo.pending.swap(false, Ordering::SeqCst) {
+        let r = run_sync(
+            app.clone(),
+            ws_state.clone(),
+            photo.clone(),
+            dest.clone(),
+            device_key.clone(),
+        )
+        .await;
+        if matches!(&r, Err(e) if e == BUSY) {
+            // Another task owns the pass. Hand the work back to it — it checks
+            // this same flag when it finishes — and stop, rather than spinning.
+            photo.pending.store(true, Ordering::SeqCst);
+            return;
+        }
+    }
 }
 
 /// Manual "back-fill existing library" action (Settings button): runs the

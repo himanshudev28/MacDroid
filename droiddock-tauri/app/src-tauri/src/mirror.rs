@@ -48,11 +48,24 @@ pub async fn mirror_popout(
     state: tauri::State<'_, SharedState>,
     source: String,
 ) -> Result<(), String> {
-    let msg = if source == "camera" {
+    // Quality rides along on the start message. The phone's encoder was fixed
+    // at 6 Mbps / 30 fps with no way to say otherwise; these are additive
+    // fields, so a phone build that predates them ignores them and keeps its
+    // own defaults rather than failing to start.
+    let cfg = app.state::<crate::AppState>().config.lock().unwrap().clone();
+    let quality = json!({
+        "bitrate": cfg.mirror_bitrate_mbps.clamp(1, 50) * 1_000_000,
+        "fps": cfg.mirror_fps.clamp(15, 120),
+        "maxSize": cfg.mirror_max_size,
+    });
+    let mut msg = if source == "camera" {
         json!({ "type": "camera-start", "facing": "back" })
     } else {
         json!({ "type": "mirror-start" })
     };
+    if let (Some(obj), Some(q)) = (msg.as_object_mut(), quality.as_object()) {
+        obj.extend(q.clone());
+    }
     if !ws_server::push(&state, msg).await {
         return Err("Phone not linked over Wi-Fi".into());
     }

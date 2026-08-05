@@ -283,6 +283,21 @@ function NotifRow({
         <div className="flex items-baseline justify-between gap-2">
           <span className="label truncate">{n.app || "App"}</span>
           <span className="shrink-0 font-mono text-[10px] tabular-nums text-faint">{fmtTime(n.time)}</span>
+          {/* Dismiss, where you'd look for it.
+              There *was* a "Dismiss" button already, but it lived in the action
+              row below with `opacity-0 group-hover:opacity-100` — invisible
+              until you hovered the exact row, which meant "Clear" (all of them)
+              looked like the only way to get rid of one. This × keeps its place
+              in the layout at all times and only fades its ink, so the row
+              never reflows on hover and the affordance is always findable. */}
+          <button
+            onClick={() => onDismiss(n.key)}
+            title="Dismiss this notification"
+            aria-label={`Dismiss ${n.app || "notification"}`}
+            className="btn-icon -my-1 h-5 w-5 shrink-0 opacity-45 transition-opacity hover:opacity-100 hover:text-bad"
+          >
+            <Icon name="x" size={11} />
+          </button>
         </div>
         {n.title && <p className="mt-0.5 truncate text-[13px] font-semibold text-fg">{n.title}</p>}
         {n.text && <p className="mt-0.5 text-[12px] leading-snug text-dim">{n.text}</p>}
@@ -317,7 +332,7 @@ function NotifRow({
               onClick={send}
               disabled={sending || !draft.trim()}
               title="Send reply"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-(--color-accent) text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-(--color-accent) text-(--color-accent-ink) transition-opacity hover:opacity-90 disabled:opacity-40"
             >
               <Icon name="send" size={13} className={sending ? "spinner" : ""} />
             </button>

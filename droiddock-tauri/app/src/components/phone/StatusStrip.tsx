@@ -1,6 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import Icon from "../Icon";
-import { mediaCmd, type AppDeviceInfo, type MediaState } from "../../lib/bridge";
+import { mediaCmd, mirrorInput, type AppDeviceInfo, type MediaState } from "../../lib/bridge";
+import { phoneSupports, type WifiStatus } from "../../lib/wifi";
+
+/// Lock the phone's screen, the same global action its power button triggers.
+///
+/// Rides the existing `mirror-key` message rather than inventing one — the
+/// phone routes it to the accessibility service, which is also what gates it:
+/// with the service off, the phone replies `control-unavailable` and the Mac
+/// explains, exactly as it does for every other screen-control action.
+///
+/// There is no "unlock" counterpart, and there shouldn't be — Android exposes
+/// no API for it at any privilege a sideloaded app can reach, and a Mac that
+/// could unlock the phone would defeat the lock screen.
+const lockPhone = () => {
+  void mirrorInput({ type: "mirror-key", key: "lock" });
+};
 
 /// The one-line footer of the phone card: battery, phone volume, and the
 /// show/hide toggle for the mini player. Volume opens a popover slider that
@@ -8,13 +23,17 @@ import { mediaCmd, type AppDeviceInfo, type MediaState } from "../../lib/bridge"
 export default function StatusStrip({
   info,
   media,
+  status,
   playerOpen,
   onTogglePlayer,
+  className = "",
 }: {
   info: AppDeviceInfo | null;
   media: MediaState | null;
+  status: WifiStatus;
   playerOpen: boolean;
   onTogglePlayer: () => void;
+  className?: string;
 }) {
   const [volOpen, setVolOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -35,7 +54,7 @@ export default function StatusStrip({
   const hasTrack = !!media?.active && !!(media.title || media.artist);
 
   return (
-    <div className="flex items-center justify-center gap-1.5">
+    <div className={`flex items-center justify-center gap-1.5 ${className}`}>
       {battery !== null && (
         <span
           className="on-glass flex items-center gap-1.5 rounded-full px-2.5 py-1"
@@ -77,16 +96,52 @@ export default function StatusStrip({
         </div>
       )}
 
+      {/* Lock the phone's screen, exactly as its power button would.
+          This slot used to hold the mini-player toggle, which drew a *volume*
+          glyph whenever nothing was playing — two identical speaker icons side
+          by side, the second doing something unrelated to sound. The player
+          toggle moved onto the player's own chevron below. */}
+      {/* Hidden entirely on a phone build that doesn't advertise `lock` — the
+          key would be silently ignored there, and a dead button is worse than
+          an absent one. Same absent-unless-advertised pattern the phone's own
+          Mac Files and Remote tabs use. */}
+      {phoneSupports(status, "lock") && (
+        <button
+          onClick={lockPhone}
+          title="Lock phone screen"
+          aria-label="Lock phone screen"
+          className="on-glass flex h-[26px] w-[26px] items-center justify-center rounded-full text-white/80 transition-colors hover:text-white"
+        >
+          <Icon name="lock" size={12} strokeWidth={2} />
+        </button>
+      )}
+
       {hasTrack && (
         <button
           onClick={onTogglePlayer}
           title={playerOpen ? "Hide player" : "Show player"}
           aria-label={playerOpen ? "Hide player" : "Show player"}
+          aria-expanded={playerOpen}
           className={`flex h-[26px] w-[26px] items-center justify-center rounded-full transition-colors ${
             playerOpen ? "on-glass-active text-white" : "on-glass text-white/80 hover:text-white"
           }`}
         >
-          <Icon name={media?.playing ? "play" : "volume"} size={12} strokeWidth={2} fill={media?.playing ? "currentColor" : "none"} />
+          {/* A chevron that points the way the panel will move — the only
+              honest glyph for a show/hide toggle. */}
+          <svg
+            viewBox="0 0 24 24"
+            className="h-3 w-3"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2.6}
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d={playerOpen ? "M6 9l6 6 6-6" : "M6 15l6-6 6 6"}
+            />
+          </svg>
         </button>
       )}
     </div>

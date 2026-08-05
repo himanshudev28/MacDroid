@@ -24,6 +24,9 @@ export function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<
         macFsRoots: [],
         encryptLink: false,
         remoteControl: false,
+        macInfoSync: true,
+        macMediaSync: true,
+        macMediaBrowser: true,
         mutedApps: [],
         menubarText: "battery",
         menubarBatteryStyle: "percent",
@@ -33,7 +36,12 @@ export function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<
         lowBatteryPct: 20,
         desktopDisplaySize: "",
         defaultMirrorMode: "wifi",
+        mirrorBitrateMbps: 12,
+        mirrorFps: 60,
+        mirrorMaxSize: 0,
         widgetEnabled: false,
+        autoCheckUpdates: true,
+        lastUpdateCheck: 0,
       } as unknown as T);
     }
     if (cmd === "get_appearance") {
@@ -59,6 +67,12 @@ export function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<
     if (cmd === "sms_threads") return Promise.resolve([] as unknown as T);
     if (cmd === "autostart_get") return Promise.resolve(false as unknown as T);
     if (cmd === "adb_paired_info") return Promise.resolve({ guid: null } as unknown as T);
+    if (cmd === "app_version") return Promise.resolve("0.0.0-dev" as unknown as T);
+    // Not `null`: the browser preview has no bundle to replace, and reporting
+    // "you're up to date" there would be a lie the moment someone tested it.
+    if (cmd === "update_check") {
+      return Promise.reject(new Error("Updates aren't available in the browser preview."));
+    }
     return Promise.resolve(null as unknown as T);
   }
   return tauriInvoke<T>(cmd, args);
@@ -113,6 +127,14 @@ export type DroidConfig = {
   /// Tier D: let the paired phone drive this Mac's pointer and keyboard.
   /// Off by default; the Mac only advertises the capability while it's on.
   remoteControl: boolean;
+  /// Tell the phone this Mac's name and battery. Read-only in that direction,
+  /// so unlike `remoteControl` this is on by default.
+  macInfoSync: boolean;
+  /// Push what's playing on this Mac to the phone. Read-only, so on by default.
+  macMediaSync: boolean;
+  /// Also read the active browser tab's title, but only on known media hosts —
+  /// this is what makes YouTube show a track name instead of "Playing on your Mac".
+  macMediaBrowser: boolean;
   /// Packages whose notifications never raise a macOS banner. They still appear
   /// in the in-app list — this mutes the interruption, not the record.
   mutedApps: string[];
@@ -128,8 +150,17 @@ export type DroidConfig = {
   desktopDisplaySize: string;
   /// Which mirror the Mirror tab's primary action starts.
   defaultMirrorMode: "wifi" | "adb" | "desktop";
+  /// Mirror quality, shared by both transports — Wi-Fi sends these to the
+  /// phone's encoder on `mirror-start`, ADB passes them to scrcpy.
+  mirrorBitrateMbps: number;
+  mirrorFps: number;
+  /// Longest edge in px; 0 = the phone's own resolution.
+  mirrorMaxSize: number;
   /// The floating always-on-top status widget.
   widgetEnabled: boolean;
+  /// Look for a new release ~10s after launch, at most once a day.
+  autoCheckUpdates: boolean;
+  lastUpdateCheck: number;
 };
 
 export const getConfig = () => invoke<DroidConfig>("get_config");
@@ -299,6 +330,11 @@ export type MediaState = {
 };
 export const mediaCmd = (cmd: string, value = 0) =>
   invoke<void>("media_cmd", { cmd, value });
+/// The last `media` push, artwork included. `media` is emit-only, and the phone
+/// attaches `art` only on a track change — so anything that mounts mid-track
+/// (a reload, the menu-bar panel, the widget) has to ask for the current state
+/// rather than wait for an event that may not come until the next song.
+export const mediaState = () => invoke<MediaState | null>("media_state");
 
 // ── Phase 3 (addendum): explicit clipboard push ──────────────────────────
 
@@ -458,4 +494,46 @@ export const openMainWindow = () => invoke<void>("open_main_window");
 /// Show/hide the floating status widget. Persists, so it reopens on restart.
 export const widgetSet = (show: boolean) => invoke<void>("widget_set", { show });
 export const autostartGet = () => invoke<boolean>("autostart_get");
+
+/** Whether macOS trusts this app to synthesise input. Without it every remote
+ *  action silently no-ops, so the Settings row surfaces it rather than letting
+ *  the feature look broken. */
+export const accessibilityTrusted = () => invoke<boolean>("accessibility_trusted");
+export const openAccessibilitySettings = () =>
+  invoke<void>("open_accessibility_settings");
 export const autostartSet = (enabled: boolean) => invoke<void>("autostart_set", { enabled });
+
+// ── In-app updates ───────────────────────────────────────────────────────
+
+/// What `update_check` found. `null` from the command means "up to date" —
+/// this type only ever describes a real, newer release.
+export type UpdateInfo = {
+  version: string;
+  /// The GitHub release body, verbatim. Empty when the release had none.
+  notes: string;
+  currentVersion: string;
+};
+
+export type UpdateProgress = {
+  downloaded: number;
+  /// `null` when the server sent no Content-Length — render indeterminate
+  /// rather than dividing by a guess.
+  total: number | null;
+};
+
+/// The version this build reports (`tauri.conf.json`'s `version`), which is
+/// also the number the updater compares against.
+export const appVersion = () => invoke<string>("app_version");
+export const updateCheck = () => invoke<UpdateInfo | null>("update_check");
+/// Downloads, installs, and **relaunches the app** — it does not resolve on
+/// success. Only ever call it from an explicit user action.
+export const updateInstall = () => invoke<void>("update_install");
+export const onUpdateProgress = (cb: (p: UpdateProgress) => void) =>
+  on<UpdateProgress>("update-progress", cb);
+/// Emitted by the once-a-day background check. Nothing has been downloaded at
+/// this point — it exists purely to badge the Settings tab and relabel the tray.
+export const onUpdateAvailable = (cb: (u: UpdateInfo) => void) =>
+  on<UpdateInfo>("update-available", cb);
+/// The tray's "Check for Updates…" item, which opens the window and asks the
+/// frontend to land on Settings → About.
+export const onOpenUpdates = (cb: () => void) => on<void>("open-updates", cb);

@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
 import Icon from "./Icon";
+import { applySystemAccent } from "../lib/appearance";
+import { useAppIcon } from "../lib/appIcons";
 import { fmtTime } from "../lib/ui";
 import { onWifiStatus, wifiStatus, type WifiStatus } from "../lib/wifi";
-import { applyOpacity } from "../lib/appearance";
 import {
   on,
   getConfig,
   getAppearance,
   setSetting,
   notifDismiss,
+  mediaState,
   mediaCmd,
   clipboardPushNow,
   menubarHide,
@@ -51,17 +53,29 @@ export default function MenubarPanel() {
     getConfig().then(setConfig).catch(() => {});
     getAppearance()
       .then((a) => {
-        const root = document.documentElement;
-        root.style.setProperty("--color-accent", a.accent_color);
-        root.dataset.reduceTransparency = String(a.reduce_transparency);
+        // Parked, not written over the token — the theme decides whether
+        // the system accent or the app's amber wins. See lib/appearance.
+        applySystemAccent(a.accent_color);
+        document.documentElement.dataset.reduceTransparency = String(a.reduce_transparency);
       })
       .catch(() => {});
-    applyOpacity();
 
     // This panel is a separate window created on demand, so it never witnessed
     // the `wifi-status` event that fired when the phone linked — without this it
     // opens saying "No phone linked" over a perfectly live connection.
     wifiStatus().then(setStatus).catch(() => {});
+
+    // Same reason, and the reason Settings › Menu bar › album art looked like a
+    // dead setting: `art` was only ever assigned from a `media` event, and the
+    // phone attaches art only on a track change. A panel opened mid-song saw no
+    // art at all, so "thumb" and "background" rendered identically to "none".
+    mediaState()
+      .then((m) => {
+        if (!m) return;
+        setMedia(m);
+        if (m.art) setArt(`data:image/jpeg;base64,${m.art}`);
+      })
+      .catch(() => {});
 
     const offConfig = onConfigUpdate(setConfig);
     const offStatus = onWifiStatus((s) => {
@@ -117,7 +131,7 @@ export default function MenubarPanel() {
   const artLayout = config?.menubarAlbumArt ?? "thumb";
 
   return (
-    <div className="glass-heavy flex h-screen flex-col overflow-hidden rounded-[14px] border border-line">
+    <div className="panel-drop glass-heavy flex h-screen flex-col overflow-hidden rounded-[14px] border border-line">
       {/* Header */}
       <div className="flex shrink-0 items-center gap-2.5 border-b border-line px-3.5 py-3">
         <span
@@ -236,7 +250,7 @@ export default function MenubarPanel() {
               <button
                 onClick={() => mediaCmd(media.playing ? "pause" : "play")}
                 title={media.playing ? "Pause" : "Play"}
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-(--color-accent) text-white transition-opacity hover:opacity-90"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-(--color-accent) text-(--color-accent-ink) transition-opacity hover:opacity-90"
               >
                 <Icon name={media.playing ? "pause" : "play"} size={13} fill="currentColor" strokeWidth={0} />
               </button>
@@ -265,9 +279,7 @@ export default function MenubarPanel() {
           <div className="card divide-y divide-line overflow-hidden">
             {notifs.map((n, i) => (
               <div key={n.key + i} className="group flex items-start gap-2.5 px-3 py-2.5">
-                <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-panel3 text-[9px] font-semibold text-dim">
-                  {(n.app || "?").slice(0, 2).toUpperCase()}
-                </div>
+                <NotifIcon pkg={n.pkg} app={n.app} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
                     <span className="label truncate">{n.app || "App"}</span>
@@ -329,5 +341,24 @@ function PanelAction({
       <Icon name={icon} size={15} strokeWidth={1.8} />
       <span className="text-[10.5px] font-medium">{label}</span>
     </button>
+  );
+}
+
+/// The sending app's real icon, exactly as the main Notifications view shows
+/// it. The panel used to draw two letters of the app name on a grey square —
+/// legible, but it turned a glanceable list into something you had to read.
+/// Icons are already cached in memory by `appIcons`, so a notification from an
+/// app you've seen costs nothing.
+function NotifIcon({ pkg, app }: { pkg?: string; app?: string }) {
+  const icon = useAppIcon(pkg);
+  if (icon) {
+    return <img src={icon} alt="" className="mt-0.5 h-6 w-6 shrink-0 rounded-md object-cover" />;
+  }
+  // Until the icon arrives (or for a phone build that doesn't send `pkg`),
+  // the initials are still the best fallback available.
+  return (
+    <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-panel3 text-[9px] font-semibold text-dim">
+      {(app || "?").slice(0, 2).toUpperCase()}
+    </div>
   );
 }

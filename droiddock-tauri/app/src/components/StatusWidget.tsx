@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import Icon from "./Icon";
+import { applySystemAccent } from "../lib/appearance";
 import { onWifiStatus, wifiStatus, type WifiStatus } from "../lib/wifi";
 import {
   on,
@@ -28,9 +29,10 @@ export default function StatusWidget() {
   useEffect(() => {
     getAppearance()
       .then((a) => {
-        const root = document.documentElement;
-        root.style.setProperty("--color-accent", a.accent_color);
-        root.dataset.reduceTransparency = String(a.reduce_transparency);
+        // Parked, not written over the token — the theme decides whether
+        // the system accent or the app's amber wins. See lib/appearance.
+        applySystemAccent(a.accent_color);
+        document.documentElement.dataset.reduceTransparency = String(a.reduce_transparency);
       })
       .catch(() => {});
 
@@ -119,7 +121,7 @@ export default function StatusWidget() {
           <button
             onClick={() => mediaCmd(media.playing ? "pause" : "play")}
             title={media.playing ? "Pause" : "Play"}
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-(--color-accent) text-white"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-(--color-accent) text-(--color-accent-ink)"
           >
             <Icon name={media.playing ? "pause" : "play"} size={11} fill="currentColor" strokeWidth={0} />
           </button>

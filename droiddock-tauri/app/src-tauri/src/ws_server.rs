@@ -80,6 +80,20 @@ pub async fn is_connected(state: &SharedState) -> bool {
     state.phone.lock().await.is_some()
 }
 
+/// Did the connected phone advertise `cap` in its `hello`?
+///
+/// Every Mac→phone feature added after the protocol froze has to ask this
+/// before sending, or an older phone build gets messages it will log as
+/// unknown. False when nothing is connected.
+pub async fn phone_has_cap(state: &SharedState, cap: &str) -> bool {
+    state
+        .phone
+        .lock()
+        .await
+        .as_ref()
+        .is_some_and(|p| p.caps.iter().any(|c| c == cap))
+}
+
 /// The link state as it stands right now.
 ///
 /// `wifi-status` is only *emitted* on a change, so anything that mounts after
@@ -88,8 +102,12 @@ pub async fn is_connected(state: &SharedState) -> bool {
 /// next changes. They call this on mount to get the truth up front.
 pub async fn status(state: &SharedState) -> WifiStatus {
     match state.phone.lock().await.as_ref() {
-        Some(p) => WifiStatus { connected: true, phone_name: Some(p.name.clone()) },
-        None => WifiStatus { connected: false, phone_name: None },
+        Some(p) => WifiStatus {
+            connected: true,
+            phone_name: Some(p.name.clone()),
+            caps: p.caps.clone(),
+        },
+        None => WifiStatus { connected: false, phone_name: None, caps: Vec::new() },
     }
 }
 
@@ -135,6 +153,11 @@ pub type SharedState = Arc<ServerState>;
 pub struct WifiStatus {
     pub connected: bool,
     pub phone_name: Option<String>,
+    /// What the connected phone said it can do (`hello.caps`). The frontend
+    /// uses this to hide controls an older phone build would silently ignore —
+    /// a button that does nothing is worse than no button.
+    #[serde(default)]
+    pub caps: Vec<String>,
 }
 
 /// Fire-and-forget send of a JSON control message (clipboard, reply, dismiss,
@@ -271,7 +294,7 @@ async fn send_json(state: &SharedState, value: Value) -> bool {
     tx.send(WsMessage::text(payload.to_string())).await.is_ok()
 }
 
-fn emit_status(app: &AppHandle, connected: bool, phone_name: Option<String>) {
+fn emit_status(app: &AppHandle, connected: bool, phone_name: Option<String>, caps: Vec<String>) {
     let state = app.state::<LastPhoneName>();
     let mut guard = state.0.lock().unwrap();
     if !connected && guard.is_none() {
@@ -289,7 +312,7 @@ fn emit_status(app: &AppHandle, connected: bool, phone_name: Option<String>) {
     } else {
         crate::statusbar::refresh_title(app);
     }
-    let _ = app.emit("wifi-status", WifiStatus { connected, phone_name });
+    let _ = app.emit("wifi-status", WifiStatus { connected, phone_name, caps });
 }
 
 /// Forward a feature message to the frontend as a Tauri event, mirroring
@@ -425,6 +448,10 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                     // socket. take+insert under ONE lock acquisition so two
                     // near-simultaneous hellos can't both see "no previous" and
                     // leave a ghost connection whose kill switch is never fired.
+                    // Kept for `emit_status` below — `caps` is moved into the
+                    // handle, and the frontend needs the same list to decide
+                    // which phone-dependent controls to render.
+                    let caps_for_status = caps.clone();
                     let prev = std::mem::replace(
                         &mut *state.phone.lock().await,
                         Some(PhoneHandle {
@@ -467,6 +494,18 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                     if crate::mac_remote::enabled(&app) {
                         welcome_caps.push(crate::mac_remote::CAP.to_string());
                     }
+                    // Mac → phone status. Read-only and on by default, so the
+                    // cap is really just "this Mac build can do it" — the phone
+                    // uses it to decide whether to render the row at all.
+                    if crate::mac_info::enabled(&app) {
+                        welcome_caps.push(crate::mac_info::CAP.to_string());
+                    }
+                    // Phase 3: what's playing on this Mac. Same shape as the
+                    // row above — the phone hides the player entirely rather
+                    // than showing an empty one when this is absent.
+                    if crate::mac_media::enabled(&app) {
+                        welcome_caps.push(crate::mac_media::CAP.to_string());
+                    }
                     // Deliberately sent unsealed: it is the message that tells
                     // the phone encryption is on, so it cannot itself be
                     // encrypted. Everything after it is sealed.
@@ -475,11 +514,24 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                     if outbox_tx.send(WsMessage::text(welcome.to_string())).await.is_err() {
                         break;
                     }
-                    emit_status(&app, true, Some(hello_name.clone()));
+                    emit_status(&app, true, Some(hello_name.clone()), caps_for_status.clone());
                     // Phone reconnected after a pause → clear the pause and
                     // resume ADB reconnect scanning, matching wifi.js's
                     // `statusCb` clearing `appLinkPaused` on `s.connected`.
                     app.state::<crate::adb::AdbState>().paused.store(false, std::sync::atomic::Ordering::Relaxed);
+                    // The phone's Home screen should show the Mac's status and
+                    // what it's playing the moment it links, not up to a tick
+                    // later. Both are cheap no-ops when the phone didn't
+                    // advertise the matching cap, and `mac_media::push_now`
+                    // additionally skips the osascript read in that case.
+                    {
+                        let app2 = app.clone();
+                        let state2 = state.clone();
+                        tokio::spawn(async move {
+                            crate::mac_info::push_now(&app2, &state2).await;
+                            crate::mac_media::push_now(&app2, &state2).await;
+                        });
+                    }
                     // Phase 17: a (re)connect is the retry signal for any edit
                     // that failed its writeback while the phone was away.
                     if let Some(cache) = app.state::<Option<crate::edit_cache::EditCache>>().inner().clone() {
@@ -531,7 +583,7 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
         drop(phone);
         // Fail any in-flight file transfers so their commands don't hang.
         state.transfers.abort_all().await;
-        emit_status(&app, false, None);
+        emit_status(&app, false, None, Vec::new());
     }
 }
 
@@ -622,19 +674,25 @@ async fn route_text(app: &AppHandle, state: &SharedState, raw: Value) {
             crate::notifications::on_removed(app, key.as_str());
             emit_event(app, "notification-removed", &json!({ "key": key }));
         }
-        // The phone got a tap/swipe/nav press it cannot perform, because its
-        // accessibility service is off. Mirror video keeps flowing in that
-        // state, so without this the Mac looks like it simply isn't sending —
-        // the phone throttles these to one per 5s.
+        // The phone got a tap/swipe/nav press it cannot perform. Mirror video
+        // keeps flowing in that state, so without this the Mac looks like it
+        // simply isn't sending — the phone throttles these to one per 5s.
+        //
+        // Two causes, opposite fixes, so `reason` picks the wording: the
+        // accessibility service is off (system Settings) or screen control is
+        // switched off while the service still runs for auto-clipboard
+        // (DroidDock's own Settings). Absent `reason` means an older phone
+        // build — fall back to naming both places rather than guessing.
         "control-unavailable" => {
-            emit_event(
-                app,
-                "wifi-event",
-                &json!({
-                    "kind": "bad",
-                    "text": "Phone screen control is off — enable Accessibility for DroidDock on your phone (Settings › Auto Clipboard › Enable)",
-                }),
-            );
+            let text = match raw.get("reason").and_then(Value::as_str) {
+                Some("disabled") => "Phone screen control is switched off — turn it back on in DroidDock on your phone (Settings › Permissions › Mac screen control)",
+                Some("service") => "Phone screen control needs Accessibility — enable DroidDock in your phone's Settings › Accessibility",
+                // Lock has a second route that needs no accessibility service
+                // at all, which is the answer for anyone keeping it off.
+                Some("lock-needs-admin") => "Can't lock the phone — grant \"Lock Without Accessibility\" in DroidDock on your phone (Settings › Permissions), or turn its Accessibility service back on",
+                _ => "Phone screen control is off — check DroidDock on your phone (Settings › Permissions)",
+            };
+            emit_event(app, "wifi-event", &json!({ "kind": "bad", "text": text }));
         }
 
         // wifi.js turns reply-result into a wifi-event toast (there is no
@@ -672,8 +730,12 @@ async fn route_text(app: &AppHandle, state: &SharedState, raw: Value) {
 
         // Media now-playing metadata push.
         "media" => {
-            crate::statusbar::on_media(app, &raw);
-            emit_event(app, "media", &raw)
+            // Emit the *merged* message, not the raw one: `on_media` re-attaches
+            // the artwork the phone only sends on a track change, so every
+            // listener gets a complete picture rather than one that depends on
+            // when it happened to subscribe.
+            let merged = crate::statusbar::on_media(app, &raw);
+            emit_event(app, "media", &merged)
         }
 
         // Device info (battery/model/etc) — forwarded verbatim.
@@ -956,7 +1018,7 @@ fn live_config(app: &AppHandle) -> crate::config::Config {
     app.state::<crate::AppState>().config.lock().unwrap().clone()
 }
 
-fn mac_name(app: &AppHandle) -> String {
+pub fn mac_name(app: &AppHandle) -> String {
     live_config(app)
         .device_name
         .filter(|n| !n.trim().is_empty())

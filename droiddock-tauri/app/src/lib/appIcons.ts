@@ -88,6 +88,18 @@ export async function launchApp(pkg: string): Promise<void> {
   window.dispatchEvent(new CustomEvent("droiddock:recents"));
 }
 
+/// Drop one app from the recents row.
+///
+/// The row is a Mac-side convenience list, not a view of the phone's task
+/// stack, so removing here changes nothing on the phone — it just stops the
+/// Mac offering that shortcut. Without this the only way off the list was to
+/// launch eight other apps and push it off the end.
+export function removeRecent(pkg: string): void {
+  const next = recentApps().filter((p) => p !== pkg);
+  localStorage.setItem(RECENTS_KEY, JSON.stringify(next));
+  window.dispatchEvent(new CustomEvent("droiddock:recents"));
+}
+
 /// Live view of the recents list — updates when any surface launches an app.
 export function useRecentApps(): string[] {
   const [list, setList] = useState(recentApps);

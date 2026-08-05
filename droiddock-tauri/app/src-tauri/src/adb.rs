@@ -840,9 +840,30 @@ pub fn camera(app: AppHandle, scrcpy: &str, serial: &str, adb: Option<&str>) -> 
 }
 
 /// Spawn scrcpy in mirror mode, detached — mirrors `mirror`.
+/// The quality flags every scrcpy launch shares, from `Config`.
+///
+/// scrcpy's own defaults (8 Mbps, uncapped fps, native resolution) are tuned
+/// for a phone-shaped window on a USB cable. Returned as owned Strings because
+/// they carry runtime values; the caller borrows them into its arg list.
+pub fn scrcpy_quality_args(app: &AppHandle) -> Vec<String> {
+    let cfg = app.state::<crate::AppState>().config.lock().unwrap().clone();
+    let mut v = vec![
+        format!("--video-bit-rate={}M", cfg.mirror_bitrate_mbps.clamp(1, 50)),
+        format!("--max-fps={}", cfg.mirror_fps.clamp(15, 120)),
+    ];
+    // 0 means "the device's own resolution" — scrcpy expresses that by the
+    // flag being absent, not by a zero.
+    if cfg.mirror_max_size > 0 {
+        v.push(format!("--max-size={}", cfg.mirror_max_size));
+    }
+    v
+}
+
 pub fn mirror(app: AppHandle, scrcpy: &str, serial: &str, adb: Option<&str>) -> Result<(), String> {
+    let quality = scrcpy_quality_args(&app);
     std::process::Command::new(scrcpy)
         .args(["-s", serial, "--window-title", "DroidDock — Mirror"])
+        .args(&quality)
         .envs(scrcpy_env(adb))
         // Detached with stdio ignored, matching the Electron reference's
         // `spawn(..., {detached:true, stdio:'ignore'})`. Without this each
@@ -869,13 +890,48 @@ pub fn mirror(app: AppHandle, scrcpy: &str, serial: &str, adb: Option<&str>) -> 
 ///
 /// `--new-display=` with no value lets scrcpy pick the resolution/density from
 /// the device default — matching what AirSync's desktop launcher does.
+/// A landscape virtual-display size for desktop mode's "Auto" setting.
+///
+/// Derived from this Mac's primary display so the Android desktop lands at a
+/// resolution that suits the screen it will be shown on, then clamped: below
+/// 1280×800 Android's desktop UI starts overlapping itself, and above
+/// 1920×1080 the phone is encoding far more pixels than a window on a laptop
+/// screen can show. Falls back to 1920×1080 if the monitor can't be read.
+fn auto_desktop_size(app: &AppHandle) -> String {
+    let (mut w, mut h) = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .map(|m| {
+            let scale = m.scale_factor().max(1.0);
+            let s = m.size();
+            ((f64::from(s.width) / scale) as u32, (f64::from(s.height) / scale) as u32)
+        })
+        .unwrap_or((1920, 1080));
+
+    // A portrait or square monitor would otherwise hand the same portrait
+    // geometry back to the phone — the exact bug this is fixing.
+    if h > w {
+        std::mem::swap(&mut w, &mut h);
+    }
+    w = w.clamp(1280, 1920);
+    h = h.clamp(800, 1080);
+    // Odd dimensions make H.264 encoders unhappy; both axes must be even.
+    format!("{}x{}", w & !1, h & !1)
+}
+
 pub fn desktop(app: AppHandle, scrcpy: &str, serial: &str, size: Option<&str>, adb: Option<&str>) -> Result<(), String> {
     // "Flex display": `--new-display=1920x1080` sizes the virtual display, and
-    // scrcpy lets you resize the window afterwards. Passing the bare flag
-    // instead lets the device pick its own default.
+    // scrcpy lets you resize the window afterwards.
+    //
+    // "Auto" used to pass the bare `--new-display`, which lets the *device*
+    // choose — and a phone chooses its own portrait geometry. The result was a
+    // tall, phone-shaped window running Android's desktop UI, which is the one
+    // shape desktop mode exists to avoid. Auto now derives a landscape size
+    // from this Mac's own screen instead.
     let display_arg = match size {
         Some(s) if !s.is_empty() => format!("--new-display={s}"),
-        _ => "--new-display".to_string(),
+        _ => format!("--new-display={}", auto_desktop_size(&app)),
     };
     std::process::Command::new(scrcpy)
         .args([
@@ -885,6 +941,10 @@ pub fn desktop(app: AppHandle, scrcpy: &str, serial: &str, size: Option<&str>, a
             "--window-title",
             "DroidDock — Desktop",
         ])
+        // Desktop mode drives ~3× the pixels of a portrait phone view, so
+        // scrcpy's 8 Mbps default is exactly where the mush came from. These
+        // are the user's settings now rather than a constant.
+        .args(scrcpy_quality_args(&app))
         .envs(scrcpy_env(adb))
         // Detached with stdio ignored, matching the Electron reference's
         // `spawn(..., {detached:true, stdio:'ignore'})`. Without this each

@@ -27,7 +27,8 @@ export default function PhoneCard({
   ip,
   port,
   actions,
-  artwork = null,
+  wallpaper = null,
+  albumArt = null,
   onRecentError,
   onPair,
 }: {
@@ -40,12 +41,23 @@ export default function PhoneCard({
   ip: string | null;
   port: number | null;
   actions: QuickAction[];
-  artwork?: string | null;
+  /// The phone's own wallpaper — the card's resting backdrop.
+  wallpaper?: string | null;
+  /// The current track's cover. Takes over *only while the player is showing*,
+  /// so the chevron means one coherent thing: show what's playing, or don't.
+  /// Passed separately from `wallpaper` rather than pre-resolved by the caller,
+  /// because the state that decides between them (`playerOpen`) lives here.
+  albumArt?: string | null;
   onRecentError: (msg: string) => void;
   onPair: () => void;
 }) {
   const [playerOpen, setPlayerOpen] = useState(true);
-  const hasTrack = !!media?.active && !!(media.title || media.artist);
+  // An active media session is enough. Requiring a title *or* artist as well
+  // hid the player for sessions that report neither — a browser tab, or an app
+  // that publishes artwork and position but no metadata — even though the
+  // transport controls and seek bar work perfectly for those. `MiniPlayer`
+  // already falls back to "Unknown track" and the app name.
+  const hasTrack = !!media?.active;
   const showPlayer = hasTrack && playerOpen;
 
   // Auto-reopen when a new track starts, so pausing the panel once doesn't
@@ -55,19 +67,48 @@ export default function PhoneCard({
   }, [media?.title, media?.artist, hasTrack]);
 
   return (
-    <div className="phone-card relative flex h-full w-full flex-col overflow-hidden rounded-[26px] border border-white/10">
-      {/* Backdrop: artwork when we have it, generated aurora otherwise. */}
+    // Takes the full height it's given, capped at 720px.
+    //
+    // The cap and the panel width are set together, and the pair is the whole
+    // point: 332 × 720 is 1:2.17, which is a ~6.5" handset. Capping height
+    // alone (or widening alone) gives a frame that is either letterboxed or
+    // thinner than any real phone — the first version of this was 1:2.5 and
+    // still read as stretched even though it filled the column.
+    <div className="phone-card relative flex h-full max-h-[720px] w-full flex-col overflow-hidden rounded-[28px] border border-white/10">
+      {/* Backdrop, three layers deep: generated aurora at the bottom (the
+          fallback when the phone gave us neither image), the wallpaper over it,
+          and the album art on top.
+
+          Both images stay mounted and cross-fade on opacity rather than one
+          being swapped out. Swapping `src` flashes — the browser tears down the
+          old texture before the new one decodes — and a full-bleed flash on a
+          toggle reads as a glitch, not a transition. 450ms is deliberately
+          unhurried: this is a whole-backdrop change, and anything quicker looks
+          like a rendering fault rather than an intentional one. */}
       <div className="absolute inset-0 -z-10">
         <div className="phone-aurora absolute inset-0" />
-        {artwork && (
+        {wallpaper && (
+          <img src={wallpaper} alt="" className="absolute inset-0 h-full w-full object-cover" />
+        )}
+        {albumArt && (
           <img
-            src={artwork}
+            src={albumArt}
             alt=""
-            className="rise absolute inset-0 h-full w-full object-cover"
+            className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-450 ease-out motion-reduce:transition-none ${
+              showPlayer ? "opacity-100" : "opacity-0"
+            }`}
           />
         )}
-        {/* Scrim: keeps white text legible over any wallpaper. */}
-        <div className="absolute inset-0 bg-gradient-to-b from-black/45 via-black/10 to-black/55" />
+        {/* Scrim. Two layers, because one gradient can't do both jobs:
+            · the vertical pass darkens the top and bottom bands, where the
+              connection pill, quick actions and status strip live;
+            · the radial pass sits under the clock specifically.
+            The old single gradient thinned to 10% black across the middle,
+            which is exactly where the 68px clock sits — over busy album art
+            (text-heavy covers especially) it became unreadable. Album art is
+            arbitrary imagery; the only safe assumption is that it competes. */}
+        <div className="absolute inset-0 bg-linear-to-b from-black/55 via-black/25 to-black/70" />
+        <div className="phone-clock-scrim absolute inset-0" />
       </div>
 
       {status.connected ? (
@@ -84,13 +125,36 @@ export default function PhoneCard({
             <PhoneClock compact={showPlayer} />
           </div>
 
-          <div className="shrink-0 space-y-2.5">
+          <div className="shrink-0">
             <RecentApps onError={onRecentError} />
-            {showPlayer && media && <MiniPlayer media={media} />}
-            <QuickActions actions={actions} />
+
+            {/* Collapses to nothing without anyone having to know its height.
+                `grid-rows-[1fr] → [0fr]` on a wrapper whose child is
+                `overflow-hidden` is the one way to animate to *auto* height in
+                CSS; a fixed max-height would either clip a two-line title or
+                leave dead space under a one-line one.
+
+                The margin animates with it — left as a static `mt-2.5` the
+                collapsed player would leave a 10px ghost gap above the quick
+                actions, which is exactly the kind of residue that makes a
+                collapse look broken rather than finished. */}
+            <div
+              className={`grid transition-all duration-300 ease-out motion-reduce:transition-none ${
+                showPlayer ? "mt-2.5 grid-rows-[1fr] opacity-100" : "mt-0 grid-rows-[0fr] opacity-0"
+              }`}
+              aria-hidden={!showPlayer}
+            >
+              <div className="min-h-0 overflow-hidden">{media && <MiniPlayer media={media} />}</div>
+            </div>
+
+            <div className="mt-2.5">
+              <QuickActions actions={actions} />
+            </div>
             <StatusStrip
+              className="mt-2.5"
               info={info}
               media={media}
+              status={status}
               playerOpen={playerOpen}
               onTogglePlayer={() => setPlayerOpen((o) => !o)}
             />

@@ -288,7 +288,7 @@ function Bubble({ m }: { m: SmsMessage }) {
         <div
           className={`px-3.5 py-2 text-[13px] leading-relaxed ${
             m.out
-              ? "rounded-2xl rounded-br-md bg-(--color-accent) text-white"
+              ? "rounded-2xl rounded-br-md bg-(--color-accent) text-(--color-accent-ink)"
               : "rounded-2xl rounded-bl-md bg-panel2 text-fg"
           }`}
         >

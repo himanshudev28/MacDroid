@@ -78,7 +78,7 @@ export default function MediaView({ media }: { media: MediaState | null }) {
             <button
               onClick={() => cmd(media.playing ? "pause" : "play")}
               title={media.playing ? "Pause" : "Play"}
-              className="flex h-12 w-12 items-center justify-center rounded-full bg-(--color-accent) text-white transition-opacity hover:opacity-90"
+              className="flex h-12 w-12 items-center justify-center rounded-full bg-(--color-accent) text-(--color-accent-ink) transition-opacity hover:opacity-90"
             >
               <Icon name={media.playing ? "pause" : "play"} size={20} fill="currentColor" strokeWidth={0} />
             </button>

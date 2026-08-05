@@ -30,6 +30,11 @@ pub struct PhoneSnapshot {
     /// Last battery level we alerted on, so the alert fires once per crossing
     /// rather than on every `device-info` push while the phone sits at 19%.
     alerted_at: Option<i64>,
+    /// The last complete `media` message, replayed to late subscribers.
+    pub media: Option<Value>,
+    /// Cached base64 artwork and the `trackKey` it belongs to — see `on_media`.
+    art: Option<String>,
+    art_track: String,
 }
 
 #[derive(Default)]
@@ -75,9 +80,23 @@ pub fn clear_unread(app: &AppHandle) {
 }
 
 /// A `media` push arrived.
-pub fn on_media(app: &AppHandle, raw: &Value) {
+/// Fold one `media` push into the cache and return the *complete* message —
+/// i.e. this tick's fields plus the artwork the phone last sent for this track.
+///
+/// The phone attaches `art` only when the track changes (it pushes once a
+/// second while playing, and a ~40 KB base64 image per tick would dwarf every
+/// other message on the link). That's the right call on the wire, but it means
+/// any Mac-side listener that starts *mid-track* — a webview reload, the
+/// menu-bar panel opening, the status widget — never sees the artwork at all,
+/// and the phone has no reason to re-send it until the next song.
+///
+/// So the art is cached here against its `trackKey` and re-attached to every
+/// tick. Callers get a message that is always complete, and `media_state`
+/// below hands the same thing to anything that mounts late.
+pub fn on_media(app: &AppHandle, raw: &Value) -> Value {
+    let state = app.state::<StatusState>();
+    let mut merged = raw.clone();
     {
-        let state = app.state::<StatusState>();
         let mut snap = state.0.lock().unwrap();
         let active = raw.get("active").and_then(Value::as_bool).unwrap_or(false);
         snap.playing = raw.get("playing").and_then(Value::as_bool).unwrap_or(false);
@@ -87,8 +106,45 @@ pub fn on_media(app: &AppHandle, raw: &Value) {
         snap.artist = active
             .then(|| raw.get("artist").and_then(Value::as_str).unwrap_or("").to_string())
             .filter(|t| !t.is_empty());
+
+        let track = raw.get("trackKey").and_then(Value::as_str).unwrap_or("").to_string();
+        match raw.get("art") {
+            // Present and non-null: a new image for this track. `Value::Null` is
+            // the phone explicitly saying "this track has none" — distinct from
+            // absent, which means "unchanged, keep what you have".
+            Some(Value::Null) => {
+                snap.art = None;
+                snap.art_track = track;
+            }
+            Some(art) => {
+                snap.art = art.as_str().map(str::to_string);
+                snap.art_track = track;
+            }
+            None => {
+                // Re-attach the cached art, but only if it belongs to the track
+                // now playing — otherwise a paused-then-new-song sequence would
+                // show the previous album's cover.
+                if snap.art_track == track {
+                    if let Some(art) = &snap.art {
+                        if let Some(obj) = merged.as_object_mut() {
+                            obj.insert("art".into(), Value::String(art.clone()));
+                        }
+                    }
+                }
+            }
+        }
+        snap.media = Some(merged.clone());
     }
     refresh_title(app);
+    merged
+}
+
+/// The last `media` push, artwork included — for anything that mounts after it
+/// was emitted. Exactly the same fix `wifi_status` needed: an emit-only event
+/// leaves every late subscriber showing "nothing playing" over a live session.
+#[tauri::command]
+pub fn media_state(app: AppHandle) -> Option<Value> {
+    app.state::<StatusState>().0.lock().unwrap().media.clone()
 }
 
 /// The phone went away — clear the menu bar and re-arm the battery alert so the

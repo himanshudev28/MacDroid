@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.0.0"
+version = "2.0.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -23,6 +23,11 @@ tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-autostart = "2"
+# In-app updates. The app ships outside the App Store as an unsigned .dmg, so
+# without this a user stays on whatever version they first downloaded forever.
+# The updater's minisign signature is its own scheme — unrelated to, and no
+# substitute for, Apple notarization.
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
@@ -47,6 +52,9 @@ sha2 = "0.11.0"
 getrandom = "0.4.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# `localtime_r` for the tray's "Paused until HH:MM" — already in the tree
+# transitively, and cheaper than pulling a whole date crate for one label.
+libc = "0.2"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = [
     "std",
@@ -55,7 +63,17 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSWorkspace",
     "NSAccessibility",
     "NSPasteboard",
+    # Media keys (NX_KEYTYPE_PLAY etc.) can only be posted as an NSSystemDefined
+    # event — see mac_remote::imp::media_key. NSGraphicsContext comes along
+    # because the NSEvent constructor's signature names it (we pass nil).
+    "NSEvent",
+    "NSGraphicsContext",
+    # NSWindow::setCollectionBehavior — keeps the main window on one Space.
+    "NSWindow",
     "objc2-core-foundation",
+    # NSEvent::CGEvent() — the bridge from the AppKit event we build to the
+    # CGEvent we can actually post.
+    "objc2-core-graphics",
 ] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std"] }
 # Tier D: synthesising input events for the phone→Mac remote (mac_remote.rs).
