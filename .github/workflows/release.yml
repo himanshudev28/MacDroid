@@ -65,8 +65,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Signs the `.app.tar.gz` the in-app updater downloads. This is
           # minisign, not Apple code signing — the app is still ad-hoc/unsigned
-          # for Gatekeeper. Without these the build still succeeds but emits no
-          # signature, and every client rejects the update.
+          # for Gatekeeper.
+          #
+          # REQUIRED, not optional. `createUpdaterArtifacts` is on in
+          # tauri.conf.json and a pubkey is configured, so a missing private key
+          # FAILS the build outright:
+          #   "A public key has been found, but no private key."
+          # (Verified locally by building with the variable unset — an earlier
+          # comment here claimed the build merely went unsigned. It does not.)
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
