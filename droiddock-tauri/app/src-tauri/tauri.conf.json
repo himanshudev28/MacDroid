@@ -56,6 +56,9 @@
       "icons/icon.ico"
     ],
     "copyright": "Copyright \u00a9 2026 DroidDock",
-    "category": "Utility"
+    "category": "Utility",
+    "macOS": {
+      "signingIdentity": "-"
+    }
   }
 }

@@ -84,7 +84,10 @@ dark themes, and both can update themselves.
 
 ### Known limitations
 
-- The macOS app is **unsigned/ad-hoc** — first launch is right-click → Open.
+- The macOS app is **ad-hoc signed and not notarized** — notarization needs a paid
+  Apple Developer account. First launch is right-click → **Open**, or clear the
+  quarantine flag with
+  `xattr -dr com.apple.quarantine /Applications/DroidDock.app`.
 - Optional AES-256-GCM covers **JSON control messages only**. Binary frames —
   file chunks, thumbnails, mirror video — remain in the clear. This is not
   end-to-end encryption of everything, and nothing in the UI claims it is.

@@ -125,8 +125,16 @@ Pair once — they auto-reconnect whenever both apps are open on the same networ
 Grab the prebuilt apps from the [**Releases**](../../releases) page:
 
 1. **Mac** — download `DroidDock_<version>_aarch64.dmg` (Apple Silicon), open it and
-   drag **DroidDock.app** to Applications.
-   *(Unsigned: first launch is right-click → Open.)*
+   drag **DroidDock.app** to Applications. Then **right-click the app → Open** →
+   **Open** for the first launch only.
+
+   > The app is ad-hoc signed, not notarized (that needs a paid Apple Developer
+   > account), so macOS won't run it straight from a double-click. If right-click →
+   > Open doesn't offer you an **Open** button, clear the download flag instead:
+   >
+   > ```
+   > xattr -dr com.apple.quarantine /Applications/DroidDock.app
+   > ```
 2. **Android** — download `DroidDock-Android.apk` and sideload it (allow "install unknown apps").
 3. Open the Mac app → **Pair Device** → scan the QR with the phone app. Done.
 
