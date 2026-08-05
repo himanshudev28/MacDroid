@@ -31,6 +31,31 @@ jobs:
       - name: Install frontend dependencies
         working-directory: droiddock-tauri/app
         run: npm ci
+
+      # Release notes come from CHANGELOG.md, not from this file — otherwise
+      # every release needs a workflow edit, and the notes end up written by
+      # whoever last touched CI rather than whoever wrote the code.
+      #
+      # Falls back to a generic body rather than failing the release: a tag with
+      # no section is a documentation slip, not a reason to withhold the build.
+      - name: Extract release notes for this tag
+        id: notes
+        run: |
+          TAG="${{ github.ref_name }}"
+          BODY=$(awk -v tag="## $TAG" '
+            $0 == tag { found = 1; next }
+            found && /^## v/ { exit }
+            found { print }
+          ' CHANGELOG.md)
+          if [ -z "$(echo "$BODY" | tr -d '[:space:]')" ]; then
+            echo "::warning::No '## $TAG' section in CHANGELOG.md — using a generic body."
+            BODY=$(printf 'DroidDock %s\n\n* **macOS** — DroidDock Tauri (`.dmg` / `.app`), built from `droiddock-tauri/`.\n* **Android** — `DroidDock-Android.apk`, built from `droiddock-android/`.' "$TAG")
+          fi
+          {
+            echo "body<<CHANGELOG_EOF"
+            echo "$BODY"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
       # Unsigned/ad-hoc, right-click-to-open — matches the Electron job's
       # `-c.mac.identity=null` precedent; notarization is a paid decision,
       # not made yet (see checkpoint.md's open questions).
@@ -38,15 +63,26 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the `.app.tar.gz` the in-app updater downloads. This is
+          # minisign, not Apple code signing — the app is still ad-hoc/unsigned
+          # for Gatekeeper. Without these the build still succeeds but emits no
+          # signature, and every client rejects the update.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: droiddock-tauri/app
           tagName: ${{ github.ref_name }}
           releaseName: 'DroidDock Tauri ${{ github.ref_name }}'
-          releaseBody: |
-            DroidDock ${{ github.ref_name }}
-
-            * **macOS** — DroidDock Tauri (`.dmg` / `.app`), built from `droiddock-tauri/`.
-            * **Android** — `DroidDock-Android.apk`, built from `droiddock-android/`.
+          # `latest.json` — the manifest the updater in `updater.rs` polls.
+          #
+          # It is fetched from `releases/latest/download/latest.json`, which
+          # only resolves for a PUBLISHED release. With `releaseDraft: true`
+          # below, that means the update endpoint goes live at the moment you
+          # publish the draft by hand. That is the intended review gate, not a
+          # bug — but it does mean a draft release is invisible to every
+          # existing install until you press Publish.
+          includeUpdaterJson: true
+          releaseBody: ${{ steps.notes.outputs.body }}
           # Drafted, not published: the build lands as a draft to inspect and
           # release by hand. Flip to false once a run has been trusted end to end.
           releaseDraft: true
@@ -64,10 +100,50 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      # ubuntu-latest ships the Android SDK; the Gradle wrapper is in the repo.
-      - run: chmod +x gradlew && ./gradlew assembleDebug
-      # Named to sit unambiguously beside the macOS "DroidDock Tauri" assets.
-      - run: cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/DroidDock-Android.apk"
+      # The release keystore, from a secret.
+      #
+      # This is what makes in-app updates possible at all: Android only lets an
+      # APK replace one signed by the SAME certificate, and this job used to
+      # publish `assembleDebug` signed with whatever throwaway debug keystore
+      # the runner generated that morning — a different key every release.
+      #
+      # Failing loudly on a missing secret is deliberate. build.gradle.kts falls
+      # back to debug signing when no keystore is present, which is right
+      # locally and would be silently catastrophic here: it would ship another
+      # APK nobody can upgrade from, and nothing would look wrong until users
+      # tried to install it.
+      - name: Decode the release keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::error::ANDROID_KEYSTORE_B64 is not set. Publishing an unsigned or debug-signed APK would break in-app updates for every existing install."
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/droiddock-release.jks"
+
+      # Tests before the APK: a release that ships a broken address book is
+      # worse than a release that doesn't happen, and these are JVM unit tests
+      # that add seconds, not minutes.
+      #
+      # `versionTag` drives both versionName and versionCode (see
+      # build.gradle.kts). The installer refuses an APK whose versionCode isn't
+      # greater than the installed one, so deriving it from the tag is what
+      # stops a forgotten manual bump from silently breaking updates.
+      - name: Test and build the release APK
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/droiddock-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest assembleRelease -PversionTag=${{ github.ref_name }}
+
+      # Named to sit unambiguously beside the macOS "DroidDock Tauri" assets —
+      # and matched exactly by UpdateChecker.kt's APK_ASSET, which finds the
+      # download by this filename.
+      - run: cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/DroidDock-Android.apk"
       - name: Publish APK to the release
         uses: softprops/action-gh-release@v2
         with:
