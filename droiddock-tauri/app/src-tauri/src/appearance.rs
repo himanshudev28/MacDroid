@@ -43,23 +43,20 @@ pub fn read() -> SystemAppearance {
     }
 }
 
-/// Keep the main window on the Space it was opened on.
+/// State the main window's Space membership explicitly: it belongs to the one
+/// desktop it was opened on.
 ///
-/// # Why this is needed at all
+/// This is belt-and-braces, not the cure for a window that follows you around.
+/// The window the toolkit hands us starts at `collectionBehavior 0x0`
+/// (`Default`), which already means "managed, one Space" — verified by logging
+/// the value at startup. Writing `Managed` down makes the intent explicit and
+/// guards against a future toolkit change, but a window that *does* follow you
+/// is almost never doing it through this property. See
+/// [`activate_without_raising_all`] for what actually drags a window across
+/// desktops.
 ///
-/// A window that follows you to every desktop is doing so because its
-/// `collectionBehavior` carries `CanJoinAllSpaces` (it exists on all of them)
-/// or `MoveToActiveSpace` (it is dragged to whichever one you switch to).
-/// Neither is a behaviour this app asks for — only the status widget and the
-/// menu-bar panel want it, and they set it on their own windows. The main
-/// window inherits it from the window the toolkit hands us, and the symptom is
-/// exactly what a user reports as "it appears on the new desktop for a moment
-/// and then goes": the window is pulled across, then macOS re-resolves which
-/// Space owns it.
-///
-/// `Managed` is the normal document-window behaviour — participates in
-/// Exposé, belongs to one Space. `FullScreenPrimary` is kept so the green
-/// button still offers full screen; dropping it silently disables that.
+/// `FullScreenPrimary` is kept so the green button still offers full screen;
+/// dropping it silently disables that.
 #[cfg(target_os = "macos")]
 pub fn pin_to_own_space(window: &tauri::WebviewWindow) {
     use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
@@ -83,7 +80,7 @@ pub fn pin_to_own_space(window: &tauri::WebviewWindow) {
 
     if before != wanted {
         eprintln!(
-            "[window] collectionBehavior {:#x} → {:#x} (was following Spaces)",
+            "[window] main collectionBehavior {:#x} → {:#x}",
             before.0, wanted.0
         );
         ns.setCollectionBehavior(wanted);
@@ -92,3 +89,37 @@ pub fn pin_to_own_space(window: &tauri::WebviewWindow) {
 
 #[cfg(not(target_os = "macos"))]
 pub fn pin_to_own_space(_window: &tauri::WebviewWindow) {}
+
+/// Make this app frontmost **without dragging its other windows to the desktop
+/// you happen to be on**.
+///
+/// # The bug this exists to fix
+///
+/// Tauri's `set_focus()` ends in `-[NSApplication activateIgnoringOtherApps:]`,
+/// and AppKit is explicit about what that means: *all* of the app's windows are
+/// brought forward. When the main window lives on desktop 3 and you click the
+/// menu-bar icon from desktop 2, "brought forward" is resolved by yanking it
+/// onto desktop 2 — macOS won't switch Spaces for you here, because the app
+/// already owns a window on this one (the panel and the status widget both join
+/// every Space by design). The window vanishing from the desktop you left it on
+/// and reappearing over your current work is the whole reported symptom, and no
+/// `collectionBehavior` value prevents it: this is window *ordering*, not Space
+/// membership.
+///
+/// `NSRunningApplication`'s activation is the same thing minus that clause —
+/// with no `ActivateAllWindows` option it brings forward only the main and key
+/// windows, so the panel we just ordered front comes up and everything parked
+/// on another desktop stays parked.
+#[cfg(target_os = "macos")]
+pub fn activate_without_raising_all() {
+    use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
+
+    // Deliberately empty: `ActivateAllWindows` is precisely the flag that
+    // reaches across Spaces, and `ActivateIgnoringOtherApps` is a no-op from
+    // macOS 14 on.
+    NSRunningApplication::currentApplication()
+        .activateWithOptions(NSApplicationActivationOptions::empty());
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn activate_without_raising_all() {}

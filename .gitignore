@@ -46,3 +46,7 @@ droiddock-tauri/protocol-corpus/
 # trailing space in the real directory name.
 future update /
 *.mp4
+
+# Local release-APK output. `assembleRelease` drops an 11 MB APK here; CI
+# builds and uploads its own, so this is never worth committing.
+droiddock-android/artifacts/

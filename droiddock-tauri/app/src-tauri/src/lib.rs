@@ -781,7 +781,10 @@ pub fn run() {
                 if let Some(win) = app.get_webview_window("main") {
                     let _ = win.show();
                     let _ = win.unminimize();
-                    let _ = win.set_focus();
+                    // Ordering the main window front (above) is the whole
+                    // point of a Dock click; the activation is kept narrow so
+                    // it doesn't drag every other window along with it.
+                    appearance::activate_without_raising_all();
                 }
             }
         });

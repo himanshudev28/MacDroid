@@ -70,6 +70,9 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSGraphicsContext",
     # NSWindow::setCollectionBehavior — keeps the main window on one Space.
     "NSWindow",
+    # NSRunningApplication::activateWithOptions — activating without the
+    # "bring every window forward" clause that drags windows between desktops.
+    "NSRunningApplication",
     "objc2-core-foundation",
     # NSEvent::CGEvent() — the bridge from the AppKit event we build to the
     # CGEvent we can actually post.

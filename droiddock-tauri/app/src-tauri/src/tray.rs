@@ -133,6 +133,11 @@ pub fn apply_widget(app: &AppHandle) {
     // looking for defeats the point.
     .visible_on_all_workspaces(true)
     .skip_taskbar(true)
+    // A glanceable readout must never take key focus. It sits on every Space,
+    // so letting it become the focused window is how a Space switch turns into
+    // an app activation — and an app activation is what drags the main window
+    // across desktops.
+    .focused(false)
     .build();
 
     match built {
@@ -155,7 +160,11 @@ fn toggle_panel(app: &AppHandle, rect: Option<tauri::Rect>) {
         } else {
             position_panel(&win, rect);
             let _ = win.show();
-            let _ = win.set_focus();
+            // NOT `set_focus()`: that activates the app with "bring every
+            // window forward", which drags the main window off whichever
+            // desktop it was left on and onto this one. `show()` already made
+            // this panel key; this only makes the app frontmost.
+            crate::appearance::activate_without_raising_all();
             // Opening the panel is seeing the notifications.
             crate::statusbar::clear_unread(app);
         }
@@ -206,7 +215,8 @@ fn toggle_panel(app: &AppHandle, rect: Option<tauri::Rect>) {
             });
             position_panel(&win, rect);
             let _ = win.show();
-            let _ = win.set_focus();
+            // Same reasoning as the reuse path above.
+            crate::appearance::activate_without_raising_all();
             crate::statusbar::clear_unread(app);
         }
         Err(e) => eprintln!("[tray] menu-bar panel failed to open: {e}"),
@@ -251,8 +261,12 @@ pub fn menubar_hide(app: AppHandle) {
 pub fn open_main_window(app: AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.unminimize();
+        // `show()` is the deliberate part: ordering *this* window front is what
+        // brings it to the desktop you're on, which is exactly what "Open
+        // DroidDock" asks for. The activation that follows stays narrow so the
+        // mirror pop-out parked on another desktop doesn't come too.
         let _ = win.show();
-        let _ = win.set_focus();
+        crate::appearance::activate_without_raising_all();
     }
     if let Some(panel) = app.get_webview_window(PANEL_LABEL) {
         let _ = panel.hide();
