@@ -5,6 +5,11 @@
 > unbuilt is listed in §5 at the bottom, with the reason for each. Re-verified
 > against airsync-mac @ `81c13b3` (2026-08-02) and the live landing page.
 
+> **§2 and §3 are the pre-build snapshot and were never revised.** Their
+> "DroidDock" columns describe the app as it stood *before* Tiers A–D, so most
+> of the "none" entries there are now wrong (U1–U18, F1, F4, F8, F10 are all
+> built). **§5 and §6 are the current state** — read those.
+
 **Reference:** [sameerasw/airsync-mac](https://github.com/sameerasw/airsync-mac) @ main
 (~46k lines Swift/SwiftUI, 1959 commits) + <https://sameerasw.com/airsync>.
 **Subject:** `droiddock-tauri/app` (~11k lines Rust + React/TS) + `droiddock-android`.
@@ -157,11 +162,45 @@ muting.
 | **Full binary-frame encryption** | Would mean surgery on the highest-throughput, least-verified code (transfer + mirror hot loops). Flagged rather than half-done. |
 
 ### Still open, worth doing later
-- Notification **action buttons** and **progress bars** (U12) — needs the phone
-  to send `actions[]`/`progress`, which it doesn't yet.
+- ~~Notification **action buttons** and **progress bars** (U12)~~ — **already
+  built**, in the "AirSync v4 changelog match" pass. This row was stale: the
+  phone does send `actions[]`/`progress`/`priority`, `notif-action` fires one
+  back by index, and `NotificationsView` renders both. Corrected 2026-08-05.
+- ~~**Mac → phone info sync** and **Mac media control from the phone**
+  (F5/F6)~~ — **built 2026-08-05.** `mac_info.rs` pushes `{name, battery,
+  charging, hasBattery}` on connect and every 60s (caps-gated `"macinfo"`,
+  Settings-toggleable, on by default); the phone's Home screen renders it.
+  Media control rides the existing `remote` message as a `media` action with
+  its own closed allow-list (`playpause`/`next`/`prev`/`volup`/`voldown`/
+  `mute`), posted as real `NX_KEYTYPE_*` HID keys — so it drives whatever app
+  owns the Mac's now-playing session, with no `media-control` CLI dependency.
+  **Scope: control only.** Reading the Mac's now-playing *metadata* back to the
+  phone needs the private MediaRemote framework and was not attempted.
+- ~~**Drag & drop** files onto the window (U22)~~ — **built 2026-08-05.** A
+  window-wide drop target that stands down while the Files view is on screen,
+  since `FilesView` owns its own (more specific) drop handling.
 - **In-card / sidebar mirroring** (U19) — mirroring inside the phone card
-  instead of a pop-out window.
-- **Mac → phone info sync** and **Mac media control from the phone** (F5/F6).
+  instead of a pop-out window. Still open; see §6.
 - ~~The five pre-existing CRITICAL/MAJOR bugs~~ — **all fixed** (2026-08-04),
-  along with the pre-existing reqId-misroute hole and the `adb.rs` process
-  leaks. See `checkpoint.md` §"Open findings — ALL FIXED".
+  along with the pre-existing reqId-misroute hole. The `adb.rs` work fixed 5 of
+  7 items; the tracker-child-on-quit and screenshot-filename items are still
+  open and documented as deliberate (both self-limiting/cosmetic).
+
+---
+
+## 6. Still not built, as of 2026-08-05
+
+Kept as an explicit ledger so nothing sits in the gap between "done" and
+"deliberately skipped" without a reason attached.
+
+| Item | Status | Why |
+|---|---|---|
+| **U19** in-card mirroring | open, worth doing | Needs the main window to attach a mirror `Channel` the way the pop-out does. Real work in a path that currently works, so it wants its own session rather than a drive-by. |
+| **U20** floating navbar / side control bar | open, low value | Separate non-focusable windows over the mirror. Our mirror already carries the same controls in-window; this is AirSync's layout preference, not a missing capability. |
+| **U16** What's New tour | open, low value | Popovers pointing at newly-added UI. Meaningful for a shipping product with a userbase; this is a personal app whose changelog is `checkpoint.md`. |
+| **U18** "pretend older OS" style toggle, app-icon variants | open, cosmetic | Icon variants need designed assets. The rest of U18 (window opacity, accent) is built. |
+| **U7** haptic feedback on the volume/seek scrubbers | open, marginal | `NSHapticFeedbackManager` only does anything on a Force Touch trackpad, and never for a mouse or external keyboard. |
+| **Phase 20 reverse control** — streaming the *Mac's screen* to the phone | not started | Feasible, but it is a feature-sized project: screen capture + encode on the Mac, a decoder and a new tab on the phone. The *input* half already exists (`mac_remote.rs`); only the video half is missing. Needs a PRD section first, per this project's own standing rule. |
+| **F12** WebDAV | deliberate | Wi-Fi `fs-*` already covers the same ground. |
+| **Full binary-frame encryption** | deliberate | Surgery on the least-verified hot loops. Flagged rather than half-done. |
+| F7 Quick Share · F1 BLE · F9 Metal decode · F13 AppleScript · U25 i18n · U26 Sparkle · Apple Intelligence | deliberate | Unchanged from §5 above. |

@@ -7,6 +7,10 @@
 Clipboard · notifications · files · photos · messages · calls · screen mirror · camera —
 flowing seamlessly between your phone and your Mac over your local Wi‑Fi.
 
+**Made with [Tauri 2](https://tauri.app)** — the Mac app is a native Rust binary in a
+~6 MB `.dmg`, not a bundled browser. *(It was an Electron app until v1.0.0; that client
+is retired and kept only as a protocol reference.)*
+
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Android-1f6feb?style=for-the-badge)
 ![Mac app](https://img.shields.io/badge/Mac-Tauri%202%20%2B%20React-24C8DB?style=for-the-badge&logo=tauri&logoColor=white)
 ![Android app](https://img.shields.io/badge/Android-Kotlin%20%2B%20Compose-3DDC84?style=for-the-badge&logo=android&logoColor=white)
@@ -49,6 +53,12 @@ It's two apps that talk to each other:
 | 📷 | **Phone camera** | Use your phone's back or front camera as a Mac webcam-style feed — live, switchable, no ADB. |
 | 🤖 | **Auto Mirror mode** | Grant "Display over other apps" once — after that the Mac can start screen/camera instantly with no per-session tap on the phone. |
 | 🔌 | **Smart pairing** | **Custom QR scan screen** (glowing amber corner brackets, animated status pill) or manual IP entry; auto-reconnect; "Forget this Mac"; **Pause** mode (1h / 8h / until resume). |
+| 🖥️ | **Your Mac, on your phone** | The phone's Home screen shows the Mac's **name, battery and charging state**, plus what it's playing — with working transport keys, **volume**, **brightness**, **screensaver** and **lock**. Off unless you enable remote control. |
+| 🌗 | **Light & dark themes** | Both apps follow the system theme or pin one, with a warm palette and adjustable glass on the Mac. The Android light palette is contrast-measured, not eyeballed. |
+| ⬆️ | **Self-updating** | The Mac app updates in place; the Android APK is signed with a stable release key so it can too. |
+| 📱 | **Device management** | Remembered Macs, Quick Connect, Disconnect, and switching between Macs — discovered over mDNS. |
+| 📜 | **Clipboard history** | This session's clips, both directions. Memory-only and capped on purpose — persisting it would be a plaintext log of passwords and OTPs. |
+| ⚡ | **Quick Settings tiles** | Toggle the connection and the accessibility service straight from the Android shade. |
 
 ---
 
@@ -119,6 +129,14 @@ Grab the prebuilt apps from the [**Releases**](../../releases) page:
    *(Unsigned: first launch is right-click → Open.)*
 2. **Android** — download `DroidDock-Android.apk` and sideload it (allow "install unknown apps").
 3. Open the Mac app → **Pair Device** → scan the QR with the phone app. Done.
+
+> ⬆️ **Both apps update themselves from v2.0.0 onward** — the Mac in place, and the
+> Android APK too, now that it ships signed with a stable release key.
+>
+> ⚠️ **Upgrading from v1.0.0 or earlier needs one manual uninstall + reinstall of the
+> Android app.** Releases up to v1.0.0 shipped a *debug-signed* APK whose key changed
+> every build, and Android refuses to replace an APK with one signed by a different
+> certificate. This is a one-time break.
 
 > ✅ **No ADB, no scrcpy, no Developer Options needed** — including for **screen
 > mirroring and phone camera**. Everything runs over the Wi-Fi app link. `adb` is
@@ -283,6 +301,16 @@ DroidDock/
 - [x] **Opt-in AES-256-GCM** for JSON control messages (see Notes for scope)
 - [x] **Desktop mode** — mirror a virtual Android display, phone stays usable
 - [x] **Per-app notification muting**
+- [x] **Mac status + Now Playing on the phone** — battery, charging, and real media
+      transport keys that drive any Mac app
+- [x] **Mac volume / brightness / screensaver / lock** from the phone
+- [x] **Light & dark themes** on both apps (Android light palette contrast-measured)
+- [x] **Self-updating** — in-app updater on Mac, release-signed APK on Android
+- [x] **Device management** — remembered Macs, Quick Connect, switch, mDNS discovery
+- [x] **Clipboard history**, session-only and capped
+- [x] **Quick Settings tiles** for connection + accessibility
+- [x] **Lock the phone from the Mac** (no unlock — Android exposes no such API)
+- [x] Window-wide drag & drop, configurable mirror quality, Android unit tests in CI
 - [ ] TLS on the LAN link
 - [ ] Audio streaming (Mac ↔ phone)
 

@@ -1,7 +1,18 @@
 # DroidDock Tauri Rewrite — Checkpoint
 
-**Last updated:** end of Phase 19 (2026-07-04). Read this before anything
-else — it's the fast path to full context without re-reading history.
+**Last updated:** 2026-08-05 — Android crash fixes + AirSync mobile parity
+Phases 1–4 (see those two sections near the bottom, above "Design decisions").
+Read this before anything else — it's the fast path to full context without
+re-reading history.
+
+> **Two things that changed the shape of the project on 2026-08-05, worth
+> knowing before reading the phase history below:**
+>
+> 1. **The Android app had a guaranteed daily crash** — a `dataSync` foreground
+>    service against Android 15's 6-hour cap, with no `onTimeout`. Fixed by
+>    moving to `connectedDevice`. Six other crash paths went with it.
+> 2. **The Android app now has unit tests and runs them in CI.** It previously
+>    had no test source set at all. Nine tests, mutation-checked.
 
 > **BATCH NOTE (Phases 16–19, a fourth explicit override):** The user
 > explicitly instructed building straight through from Phase 16 to the end of
@@ -362,9 +373,19 @@ Electron app — nothing about it can be "built." What was actually produced:
 `PHASE16_PARITY_CHECKLIST.md` (repo root, sibling to this file) — a
 feature-by-feature checklist covering every phase 0–15 feature plus the new
 Phase 17–19 features (added retroactively once those existed), ready to run
-through whenever hardware time is available. Every row is unchecked. The
+through whenever hardware time is available. The
 Electron app at `droiddock 2/` has **not** been touched, archived, or
 retired — cutover has not happened.
+
+**Updated 2026-08-05.** The checklist now tracks two axes rather than one: the
+`[ ]` boxes still mean *exercised on real hardware* (all but one still open),
+and a separate `code ✔/◐/✘` tag per row records whether the feature is written.
+Nearly everything is `code ✔` — the survey found a command + handler + view for
+essentially every row — which is worth knowing but is not evidence of parity;
+distrusting exactly that inference is why this pass exists. Four rows carry
+`code ◐` because a known gap is attached (`media-cmd` int semantics, mirror
+window sizing, tray status line). **One row is now genuinely ticked:** the
+packaging/CI row, satisfied by the real `v1.0.0` tag and its green jobs.
 
 ## Phase 17 — open-in-place with edit-writeback (unverified, see BATCH NOTE)
 New Rust module `edit_cache.rs`: double-click a phone file in Files → pulls it
@@ -1137,7 +1158,823 @@ one-time full recompile.**
   The link and screen control are proven; these are not.
 - The mirror/camera window sizing fix, and the Dashboard/menu-bar status fix —
   both need eyes on the screen, which ADB can't provide.
-- `PHASE16_PARITY_CHECKLIST.md` remains unrun.
+- `PHASE16_PARITY_CHECKLIST.md` remains unrun — every behaviour row is still
+  open. Only the packaging/CI row is ticked, and that one was satisfied by the
+  `v1.0.0` release rather than by a parity session.
+
+## Gap-closing pass (2026-08-05; unverified on hardware)
+
+A cross-check of `AIRSYNC_GAP_ANALYSIS.md` and this file **against the actual
+source** turned up items claimed open that were built, items built that no doc
+mentioned, and three verified-open minor findings. Fixed the docs, then built
+the bounded gaps.
+
+### Doc corrections
+- **The gap analysis said notification action buttons + progress bars (U12)
+  were still open.** They were built in the v4 pass — `notif_action` is a
+  registered command, `NotificationsView` renders both. Row corrected; a future
+  session was being told to build something that already ships.
+- **`PHASE16_PARITY_CHECKLIST.md` did not actually cover Phases 17–19**, though
+  this file claimed it did, and covered none of Tiers A–D. It now has sections
+  for Phase 17/18/19, Tiers A–D, the v4 items, the menu-bar/battery/widget work
+  and the features below — 49 rows became ~100.
+- §2/§3 of the gap analysis are a pre-Tier-A snapshot and read as if nothing is
+  built. Banner added pointing at §5/§6 instead.
+- New **§6 "Still not built"** ledger, so U16/U18/U19/U20/U7/Phase 20 each carry
+  a reason rather than sitting unaccounted between "done" and "skipped".
+
+### Built
+- **Mac → phone info sync (F5).** New `mac_info.rs`: `{name, battery, charging,
+  hasBattery}` pushed on connect and on a 60s tick. Battery via `pmset -g batt`
+  rather than an IOKit interop dependency for one integer — 4 parser tests
+  cover laptop/charging/desktop-with-no-battery/garbage. Caps-gated `"macinfo"`
+  both ways, `Config.mac_info_sync` **default on** (it only ever *sends*
+  read-only status to an already-paired device — deliberately not gated like
+  `mac_remote`, which moves authority), honours the global pause. Android shows
+  it as a card on Home, cleared on disconnect so a stale reading can't linger.
+- **Mac media control from the phone (F6).** A `media` action on the existing
+  `remote` message, with its own closed allow-list. Media keys are not virtual
+  key codes — they must be posted as an `NSSystemDefined` event with subtype 8,
+  so this builds the AppKit event and posts its backing `CGEvent`. That means
+  it drives whatever app owns the Mac's now-playing session with **no
+  `media-control` CLI** (AirSync shells out to one). Inherits every existing
+  gate: off unless `remote_control` is on, caps-gated, pause-muted,
+  Accessibility-gated by macOS. **Control only** — reading the Mac's
+  now-playing metadata back needs the private MediaRemote framework and wasn't
+  attempted.
+- **Window-wide drag & drop (U22).** Previously declined because `FilesView`
+  registers its own `onDragDropEvent` and a second listener would double-send.
+  Resolved by having the app-level listener stand down while Files is the
+  active view, read through a ref so the OS-level registration doesn't churn on
+  every navigation. FilesView is untouched.
+
+### Verified-open findings, now fixed
+- **Tray "Paused until HH:MM" rendered UTC.** The function's own doc comment
+  said local. Now `localtime_r` (new direct `libc` dep — already in the tree
+  transitively), which handles DST for the instant in question where a fixed
+  offset wouldn't.
+- **`photos-changed` arriving mid-pass was dropped.** The running pass had
+  already built its item list, so those photos waited for an unrelated later
+  trigger. Now a `pending` flag: whoever holds the run flag drains it, so a
+  burst collapses into at most one extra pass.
+
+### Still open after this pass
+`mac-fs-pull` still isn't in `TransferRegistry` (no cancel, no progress, not
+covered by disconnect abort); edit-writeback still retries only on reconnect;
+the `adb track-devices` child still isn't killed on quit (self-limiting) and
+the screenshot filename still deviates (cosmetic). U19 in-card mirroring,
+U20 floating navbar, U16, U18's icon variants, U7 haptics and Phase 20 are
+listed with reasons in the gap analysis §6.
+
+**Verified:** `cargo build` zero warnings, `cargo test` **61/61**,
+`npx tsc --noEmit`, `npm run build`, `./gradlew :app:compileDebugKotlin`.
+**NOT verified:** any of it on hardware. In particular nobody has seen the Mac
+status card on the phone, and the media keys have never been posted on a Mac
+with Accessibility actually granted.
+
+## Retheme — light/dark, warm palette, adjustable glass (2026-08-05; unverified on hardware)
+
+Requested: the rail's icons didn't say what they were, the layout didn't
+respond to window width, there was no light theme, and the visual direction
+should be warm cream + brown/amber with adjustable glassmorphism.
+
+**Two themes, one token layer.** `index.css` now defines every colour twice —
+`:root[data-theme='dark']` (espresso, not the old blue-grey near-black) and
+`[data-theme='light']` (cream) — in OKLCH, and a single `@theme` block maps them
+onto the `--color-*` names every component already used. No component needed a
+colour change to gain a light mode. Contrast was **computed, not eyeballed**:
+the light theme's accent/ok/warn had to go considerably darker than they first
+looked right, because they carry status text *and* sit under white text, and
+both directions owe 4.5:1. `--dd-faint` is the one token below that, and is
+documented as decoration-only.
+
+**Accent.** The macOS system accent no longer overwrites `--color-accent`; it
+is parked in `--dd-system-accent` and Settings picks which one wins. Otherwise
+a Mac set to blue drags one cool button into a warm palette, and switching back
+would have needed a restart.
+
+**Glass is one slider, not a checkbox.** It drives blur radius, saturation
+push-back, and the alpha of both the chrome and the content surface together —
+tuned separately they stop reading as one material. At 0 everything is flat and
+opaque with zero compositing cost, which is also the escape hatch if
+translucency is unreadable on a given desktop.
+
+> **`tauri.conf.json` now has `transparent: true`.** It was `false`, which is
+> why the previously-shipped window-opacity slider did nothing: `.app-surface`
+> never consumed `--app-opacity`, and an opaque window has nothing to reveal
+> anyway. Glass needs the transparent window to blend against. Flag if this
+> causes any rendering oddity — glass 0 makes the surface opaque again without
+> touching the config.
+
+**Rail.** Expands to 184px with labels and group headings, collapses to the
+56px icon rail. Expanded is the default. The Devices and Apps glyphs were
+redrawn (a bare microchip read as "hardware settings"; a sharp 2×2 grid is the
+universal "grid view" icon), and "Media" is now "Now playing" — it was
+ambiguous next to Photos.
+
+**Responsive.** Breakpoints derived from what the columns cost, not device
+sizes: under 1000px the rail drops its labels, under 1120 the phone panel
+narrows, under 860 it hides. Both are *overrides* — the user's own choice is
+never written over, so widening the window restores exactly what they had, and
+the title bar says which one is being suppressed rather than letting a panel
+silently vanish.
+
+**Menu-bar panel Space fix.** It was `always_on_top` without
+`visible_on_all_workspaces`, and hid on *any* `Focused(false)`. Switching
+desktops dragged it to the new Space, showed it, and the ensuing focus change
+hid it again — "appears for a second, then goes". Now it's explicitly
+all-Spaces, and the blur-hide re-checks focus 180ms later so an incidental
+focus change (Space switch, display reconfiguration) doesn't dismiss it while a
+real click-away still does.
+
+**Main-window Spaces bug — found and fixed.** The main window's
+`collectionBehavior` was `NSWindowCollectionBehaviorDefault` (0), i.e. nothing
+explicit, which is why it appeared on whichever desktop you switched to.
+`appearance::pin_to_own_space` now sets `Managed | FullScreenPrimary` and
+clears `CanJoinAllSpaces`/`MoveToActiveSpace`/`Transient` at setup, on the main
+thread. It logs the before→after transition once, so a regression is visible in
+stdout rather than silent. (The menu-bar-panel fix above is separate and still
+stands; the user reported no problem there.)
+
+**Responsive width bug — found by running it.** `useWindowWidth` seeded from
+`window.innerWidth` at first render and only updated on `resize`. In this
+webview that first read happens before layout settles, and if the user never
+drags the window `resize` never fires — so the stale value stuck and collapsed
+*both* the rail and the phone panel on a window with room for them. Now
+re-measures on mount and observes `document.documentElement`. Worth knowing for
+any future work here: **vite HMR preserves `useState`, so a bad measured value
+survives a hot reload** and only a full page reload shows the fix.
+
+**Verified on screen, not just compiled** (2026-08-05, dev build, real phone
+linked): dark theme, light theme, expanded rail with labels + group headings,
+collapsed rail, the phone panel narrowing at <1120, amber accent throughout,
+and the phone card keeping its own dark backdrop in the light theme (correct —
+its contents are white-on-glass). One defect found this way and fixed: the
+rail's scroll-fade sat on top of the last destination and half-erased its
+label.
+
+### Follow-up pass, same day — three defects found by looking at it
+
+**The phone card was stretched, not narrow.** It was `h-full`, so on a tall
+window a 224px-wide card grew past 700px — about 1:3.2, narrower than any real
+handset, which squeezed the now-playing title to a few characters. Now
+`aspect-[10/19] max-h-full`, centred in whatever space is left, and the panel's
+wide step went 256 → 288.
+
+**Album art / the now-playing card vanished on any late mount.** `media` was
+emit-only *and* the phone attaches `art` only on a track change (a ~40 KB image
+per 1s tick would dwarf the whole link — the right call on the wire). So
+anything that subscribed mid-track — a webview reload, the menu-bar panel, the
+status widget — saw no artwork and no player card until the next song started.
+Two fixes, both Mac-side, no protocol change:
+1. `statusbar::on_media` now caches the artwork against its `trackKey` and
+   re-attaches it to every subsequent tick, so what gets emitted is always a
+   complete message rather than one that depends on when you subscribed. The
+   `trackKey` check is what stops a paused-then-new-song sequence showing the
+   previous album's cover.
+2. New `media_state` command; `App` seeds from it on mount. **This is the third
+   instance of the same bug shape in this codebase** (after `wifi-status` and
+   the Files pending-sync badge): an emit-only event leaves every late
+   subscriber rendering an empty state over live data. Worth checking for it
+   whenever a new push event is added.
+
+**Right-click showed the WebKit menu** (Reload / Back / Inspect Element) — a
+webview artefact leaking through, and "Reload" in particular looks destructive.
+`main.tsx` now suppresses `contextmenu` except inside a text field or over a
+selection, where a menu is genuinely useful.
+
+### Phone-card controls — recents, and a lock button that can't lie
+
+**The recents row needed to explain itself.** Apps appear there because you
+launched them *from the Mac* — it's a local shortcut list, not a view of the
+phone's task stack — which is why one can show up without the phone being
+touched. It now says so in its tooltip, and hovering **the row** (not each
+icon) reveals a × on every entry. Per-icon hover was tried first and rejected:
+a control that only appears once you're already over the exact thing you want
+is one nobody discovers.
+
+**Lock button, capability-gated.** The status strip's second slot used to hold
+the mini-player toggle, which drew a *volume* glyph whenever nothing was
+playing — two identical speaker icons side by side, the second doing something
+unrelated to sound. That slot is now "lock phone screen" (riding the existing
+`mirror-key` message → `GLOBAL_ACTION_LOCK_SCREEN`), and the player toggle
+moved to a chevron that points the way the panel will move.
+
+The button is **hidden unless the connected phone advertises `"lock"`**, which
+required plumbing the phone's `hello.caps` through `WifiStatus` to the
+frontend. Two reasons that matters more than it looks:
+- an un-updated APK silently ignores an unknown `mirror-key`, so without the
+  gate the Mac shows a button that does nothing — which is exactly what
+  happened on first try;
+- `GLOBAL_ACTION_LOCK_SCREEN` is API 28+, so the phone only advertises the cap
+  on Android 9 or newer.
+
+**There is deliberately no "unlock".** Android exposes no API for it at any
+privilege a sideloaded app can reach, and shouldn't — a Mac that could unlock
+the phone would defeat the lock screen. The button says "Lock phone screen".
+
+### Phone card sizing — two passes, and why the first was wrong
+
+`aspect-[10/19] max-h-full` looked right in isolation and was wrong in place:
+the aspect ratio *capped* the card at what its width allowed, so it sat short
+in a column with plenty of height going spare. Reverted to `h-full` with an
+explicit `max-h-[720px]`.
+
+**The cap and the panel width are one decision, not two.** 300 × 760 (the first
+attempt at "taller") is 1:2.5 — still thinner than any real handset. The
+shipped pair is a 352px panel and a 720px cap, giving a ~332 × 720 card at
+1:2.17, which is a 6.5" phone. Changing either number alone re-breaks it.
+
+**Legibility over album art.** The scrim was a single vertical gradient that
+thinned to 10% black across the middle — exactly where the 68px clock sits.
+Over a text-heavy cover the clock and date were unreadable. Now two layers: the
+vertical pass for the top/bottom bands where the pill and controls live, plus
+`.phone-clock-scrim`, a radial pool centred at 40% height under the clock. A
+uniform scrim strong enough for the worst cover would erase the artwork the
+card exists to show. The clock also gained a two-stop text shadow (tight for
+glyph edges, wide for block separation) and the date went from `white/60` —
+invisible on a light cover — to `white/90` with its own shadow.
+
+**The mini player needed an active session, nothing more.** It was gated on
+`active && (title || artist)`, which hid it for sessions publishing artwork and
+position but no metadata — a browser tab, mostly — even though the transport
+and seek bar work fine for those. `MiniPlayer` already falls back to "Unknown
+track".
+
+**Verified on screen:** card proportions at 1:2.17, clock and date legible over
+a text-heavy album cover, album art present on a fresh mount mid-track, the
+Apps grid, Messages, and the rail's scroll fade no longer clipping "Clipboard".
+**NOT verified:** the context-menu suppression (couldn't synthesise a
+right-click from a script), the glass slider at its extremes, the Settings
+Appearance pane, and `system` theme following a live macOS appearance switch.
+**Verified:** `cargo build`, `cargo test` 68/68, `tsc --noEmit`, `npm run build`.
+
+## Android crash fixes (2026-08-05) — "DroidDock keeps crashing on my phone"
+
+Reported symptom, no stack trace available (no device attached), so these came
+from reading the code. Seven fixes; the first is the one that matches
+"crashes repeatedly, by itself".
+
+1. **The foreground service was guaranteed to be killed once a day.**
+   `BridgeService` ran as a `dataSync` FGS. Since **Android 15 that type is
+   capped at 6 hours per 24**; on expiry the system calls `Service.onTimeout()`
+   and, if the service doesn't stop within seconds, kills the process with
+   `ForegroundServiceDidNotStopInTimeException`. `onTimeout` was never
+   overridden. Worse, the service returns `START_STICKY`, so the system
+   relaunched it and `startForeground` from the background with the quota spent
+   throws `ForegroundServiceStartNotAllowedException` — crash, restart, crash.
+   The phone is on Android 16 with `targetSdk 35`, so this applied.
+   **Fix:** switched to **`connectedDevice`** (untimed, and the honest
+   description of a long-lived link to an external device), added
+   `FOREGROUND_SERVICE_CONNECTED_DEVICE` + `CHANGE_WIFI_MULTICAST_STATE` (a
+   prerequisite for that type, and genuinely used by mDNS), kept `dataSync` as
+   an OEM fallback, overrode **both** `onTimeout` overloads (Android 15 calls
+   the 1-arg, Android 16 the 2-arg, and the base 2-arg does *not* fall through),
+   and made `startForeground` degrade through tiers instead of throwing.
+2. **Any exception on the OkHttp reader thread killed the process.** OkHttp
+   doesn't catch what a listener throws, so a single bad message — or a revoked
+   permission inside any of ~40 handlers in `ConnectionManager.onMessage` —
+   reached the thread's default handler. Now contained per-message.
+3. **`setPrimaryClip` was posted to the main thread unguarded.** Oversized
+   clips throw `TransactionTooLargeException`, One UI throws `SecurityException`.
+   Guarded, and the clip capped at 200k chars.
+4. **`getItemAt(0)` on an empty clip**, in two places (the Files "Send
+   Clipboard" button and the QS tile activity). A cleared clip yields a non-null
+   `primaryClip` with zero items; `getItemAt(0)` throws. Deterministic crash.
+5. `MirrorService.startForegroundNotif` sat outside its `try`.
+6. `MdnsDiscovery` leaked a `ServiceInfoCallback` per reconnect round —
+   hundreds of live multicast listeners over an evening with the Mac off.
+7. `MirrorService.stop()` used `startService`, illegal from the background,
+   which is exactly where a Mac-side "stop mirroring" arrives — it failed
+   silently and the phone kept casting. Falls back to `stopService`.
+
+**Two regressions caught in the fixes themselves, before shipping:** the first
+mDNS rewrite unregistered on the first address-less `onServiceUpdated`, which
+would have made WiFi-switch recovery *worse*; and the clipboard cap set
+`lastFromMac` to the untruncated text, so echo suppression would have missed and
+bounced the clip back to the Mac.
+
+**Not verified on hardware — no device was attached, so which of these was
+actually firing is still unknown.** Getting the crash log is still worth doing.
+
+## AirSync mobile parity, Phases 1–4 (2026-08-05; unverified on hardware)
+
+Driven by `future update /airSyncMobile.mp4` + `airsyncmobile.pdf`. Gap analysis
+and the full plan live in **`AIRSYNC_MOBILE_GAP.md`**; this is the summary.
+
+The survey's main finding: **most of the request already existed** — media
+transport, both clipboard directions, per-app notification muting, mouse/keys/
+text remote, manual pairing. The genuinely missing set was smaller than it
+looked.
+
+- **Phase 1 — theme + device management.** New `Theme.kt`: `DroidColors`,
+  light/dark palettes, `LocalDroidColors`, `ThemeMode` in `Prefs`, segmented
+  picker, system-bar polarity following the theme. The 14 palette names in
+  `MainActivity.kt` became `@Composable get()` accessors, so ~200 call sites
+  were untouched and the compiler proved none read a colour outside a
+  composable. Light palette **measured**, not eyeballed: first pass had seven
+  pairs at 3.7–4.4:1, retuned until the worst is 4.58:1.
+  `KnownDevice` list in `Prefs` (capped 8, keyed by token), `lastSeenAt`
+  stamped on link-up with the working IP promoted, Last-Connected-Device card
+  with Quick Connect / Disconnect / switch, Available Devices on Connect fed by
+  a new `MdnsDiscovery.browse`.
+  **Disconnect reuses Pause** rather than a second teardown path, and QR /
+  manual / switch-device funnel through one `ConnectionManager.onPaired`.
+  `Prefs.clear()` no longer wipes everything — it was destroying `deviceId`
+  (which the Mac keys photo-sync on) and the theme choice.
+- **Phase 2 — Mac controls.** `lock` (⌘⌃Q via the existing CGEvent path),
+  `screensaver` (`ScreenSaverEngine`), `brightness` (`NX_KEYTYPE_BRIGHTNESS_*`,
+  same HID path as the media keys), `volume_set` (osascript, absolute — so it
+  gets a real slider). Brightness is **stepped, not absolute**: an absolute
+  level needs private CoreDisplay. Current volume rides the existing `mac-info`
+  push rather than a new message type.
+- **Phase 3 — Now Playing.** New `mac_media.rs`. **The private `MediaRemote`
+  framework is not usable** — macOS 15.4 gated `MRMediaRemoteGetNowPlayingInfo`
+  behind an entitlement Apple doesn't issue — so metadata comes from Music and
+  Spotify over AppleScript, plus the active browser tab **only when its host is
+  on a media allow-list**. A bank or mail tab is never read; there are tests
+  asserting exactly that, and that `youtube.com.evil.test` doesn't match.
+  **The player card shows whenever the Mac accepts remote control, not only
+  when a title is known** — transport keys are real HID media keys and drive
+  every Mac app including YouTube in Chrome, so hiding them when the label is
+  unavailable would remove working controls.
+  Also: Clipboard tab (session history both directions, memory-only and capped
+  — it would otherwise be a plaintext log of passwords and OTPs), Connection QS
+  tile, and `requestAddTileService` buttons.
+- **Phase 4 — Tailscale + settings.** The Mac already advertised its tailnet
+  address (`get_if_addrs` takes every non-loopback v4), so no Mac change was
+  needed — but **the phone was throwing it away**: `ips.take(2)`/`take(4)`
+  could evict the `100.x` entry, the one address nothing can rediscover since
+  both discovery paths are link-local. `trimAddresses` now protects it. Plus an
+  "Expand networking" toggle that skips the two link-local probes (~4.5s/round),
+  editable device name, local IP readout.
+- **Accessibility, answering "does the Mac app ask for the grant?" — it did
+  not, and the Settings hint *claimed it would*.** Nothing in the app had ever
+  called an API that prompts, so `CGEvent::post` silently discarded every remote
+  action and the feature looked broken rather than un-permitted. Added
+  `AXIsProcessTrusted` plus a warning row deep-linking to the exact pane. The
+  built-in `AXIsProcessTrustedWithOptions` prompt was deliberately *not* used:
+  macOS shows it once ever, so a user who dismissed it could never get it back.
+
+### Android finally has a test harness
+
+Previously **none** — no `src/test`, no JUnit dependency, nothing. Added JUnit 4
+and nine tests over the address-book rules (`isTailnetAddress`,
+`trimAddresses`, `KnownDevice.toPairing`) — the logic deciding whether the phone
+can still reach the Mac.
+
+**Mutation-checked rather than trusted:** reverting `trimAddresses` to the old
+`take(max)` fails exactly the two tests describing the eviction bug. Wired into
+`.github/workflows/release.yml`, which was running no Android tests at all.
+
+### Defects found in this session's own work, before shipping
+
+Worth recording because each was caught by a check rather than by luck:
+`Tile.setSubtitle` is API 29 against `minSdk 26` (a `NoSuchMethodError` raised
+inside the system's shade process); a `remember` keyed on the device-name field
+re-enumerated network interfaces on every keystroke; `mac-info` read the volume
+with a blocking `Command::output()` on the async runtime; `MdnsDiscovery.find`
+returned the alphabetically-first Mac rather than the one that answered; and a
+`clean_title` test caught two transforms short-circuiting instead of composing.
+
+### Status
+
+`./gradlew testDebugUnitTest assembleDebug` (9 tests), `cargo test` 68/68,
+`tsc --noEmit`, `vite build` — all clean. **Nothing in either section above is
+verified on real hardware.** The tests cover pure logic only; everything visual,
+every permission prompt, and the whole `mac-media` AppleScript path are
+unexercised. The AppleScript reads will raise macOS Automation dialogs the first
+time they touch Music, Spotify or a browser.
+
+**Deliberately not built:** "Use Blur" (needs `RenderEffect`, API 31+, for a
+decorative effect that fights the flat card design).
+
+### Phone-card controls pass (2026-08-05, unverified on screen)
+
+**The recents row needed explaining, not just fixing.** It shows apps launched
+*from the Mac* — a local list, nothing to do with the phone's task stack — so
+an entry can appear without the phone being touched, which reads as "why is
+this pinned here". There was also no way off the list except launching eight
+other apps to push it off the end. Added `removeRecent()` and a hover ×, plus a
+tooltip on the row saying what "recent" means here.
+
+**Two identical speaker icons sat side by side in the status strip.** The
+second was the mini-player toggle, which drew a *volume* glyph whenever nothing
+was playing. The toggle now draws a chevron pointing the way the panel will
+move, and that slot holds a **Lock phone** button instead.
+
+> **Lock only — there is deliberately no unlock.** Android exposes no unlock API
+> at any privilege a sideloaded app can reach, and a Mac that could unlock the
+> phone would defeat its lock screen. `AccessibilityControl.key("lock")` maps to
+> `GLOBAL_ACTION_LOCK_SCREEN` (API 28+; older devices no-op rather than crash).
+> It rides the existing `mirror-key` message, so it inherits the same
+> accessibility gate and the same `control-unavailable` reply every other
+> screen-control action has.
+
+**Four clock styles** (Settings › Appearance › Phone clock): `row` (default),
+`stacked` (hour over minute), `mono` (tabular, with seconds), `minimal` (light
+weight, no date). Only `mono` ticks every second — the others stay on the minute
+boundary, since a display without seconds would waste 59 renders out of 60.
+
+**Verified:** `tsc --noEmit`, `npm run build`, `cargo test` 68/68,
+`./gradlew :app:compileDebugKotlin`. **NOT verified on screen:** the lock
+button, the recents ×, and the four clock styles — the dev app was in active
+use and driving it further would have meant hijacking a window mid-session.
+
+### Phone-card controls + clock styles (2026-08-05, later)
+
+- **Recents row was unexplained.** Apps appeared there with no way to remove
+  them and no hint why. It is a *Mac-side* list — apps launched from the Apps
+  grid, not the phone's task stack — so the tooltip now says so, and hovering
+  the row reveals a × on every icon. Hover is tracked on the row rather than
+  per icon deliberately: a control that only appears once you're already over
+  the exact icon you want is a control nobody finds.
+- **Two speaker glyphs sat side by side.** The second was the mini-player
+  toggle, which drew a *volume* icon whenever nothing was playing — an icon
+  with no relationship to what the button did. It now draws a chevron pointing
+  the way the panel will move, and the freed slot holds a **Lock phone**
+  button (`mirror-key{key:"lock"}` → `GLOBAL_ACTION_LOCK_SCREEN`).
+- **The lock button is caps-gated, and had to be.** Shipped ungated first and
+  it silently did nothing on the installed APK, which is the worst possible
+  outcome for a button. The phone advertises `"lock"` only on API 28+ (where
+  `GLOBAL_ACTION_LOCK_SCREEN` exists), and the Mac hides the button without it.
+  **There is deliberately no "unlock"** — Android exposes no API for it at any
+  privilege a sideloaded app can reach, and a Mac that could unlock the phone
+  would defeat the lock screen.
+- **Four clock styles** (`row`/`stacked`/`mono`/`minimal`) in Settings ›
+  Appearance. Only `mono` shows seconds, and only `mono` pays for a 1s tick —
+  the others stay on the minute boundary, which is 59 saved renders a minute.
+
+**Verified:** `cargo build`, `cargo test` 68/68, `tsc --noEmit`,
+`npm run build`, `./gradlew :app:compileDebugKotlin`. **NOT verified on
+hardware:** the lock action itself — it needs an APK built from this tree, and
+the phone in use is running an older one (its `hello.caps` has no `"lock"`,
+which is exactly why the button is currently hidden rather than dead).
+
+### The player chevron now owns the backdrop too (2026-08-05, later still)
+
+Collapsing the mini player used to leave the album art filling the card, which
+contradicted the gesture: you'd said "not now" and the app kept showing you the
+cover full-bleed. The chevron now means one thing — *show what's playing, or
+don't* — and swaps the backdrop back to the phone's wallpaper on the way.
+
+The design call, since it isn't obvious: the counter-argument is that album art
+is useful ambient information when collapsed. It's weaker than it looks,
+because collapsing **buys no space** — the card is a fixed frame, the clock
+just grows. So the trade isn't "art vs room", it's "art vs a bigger clock",
+and tying them is the coherent option.
+
+Two mechanics worth keeping:
+
+- **Both images stay mounted and cross-fade on opacity.** Swapping one `src`
+  flashes — the browser drops the old texture before the new one decodes — and
+  a full-bleed flash on a toggle reads as a rendering fault. 450ms, deliberately
+  unhurried for a whole-backdrop change.
+- **`grid-rows-[1fr] → [0fr]`** collapses the player without anyone knowing its
+  height; a fixed `max-height` would either clip a two-line title or leave dead
+  space under a one-line one. The wrapper's margin animates with it, or the
+  collapsed player leaves a 10px ghost gap that makes the whole thing look
+  half-finished.
+
+`PhoneCard` now takes `wallpaper` and `albumArt` separately instead of one
+pre-resolved `artwork`, because the state that chooses between them
+(`playerOpen`) lives inside the card, not at the call site.
+
+**Verified:** `cargo test` 68/68, `tsc --noEmit`, `npm run build`, and both
+generated utilities confirmed present in the built CSS (`duration-450`,
+`grid-rows-[0fr]` — worth checking, since a silently-dropped arbitrary class
+would make the animation simply not happen). **NOT seen running:** the
+cross-fade itself. The Spaces fix means the window no longer follows to the
+active Space, so scripted screenshots couldn't reach it.
+
+### The accessibility service was mislabelled, and Lock depended on it
+
+Reported as "the lock button needs the *Clipboard* accessibility permission,
+and I have to turn that off for my banking apps." Investigating turned up a
+worse problem than the one reported.
+
+**One service does everything.** `ClipAccessibilityService.onServiceConnected`
+sets `AccessibilityControl.service = this`, so the row labelled **"DroidDock
+Clipboard"** was also driving every Mac→phone gesture — tap, swipe, type, back,
+home, recents — and the Lock button. Nothing in its name said so.
+
+**Its consent text was wrong.** `a11y_desc` claimed *"Only the clipboard is
+used — no screen content is read"*, and the config XML carried a comment
+asserting `canRetrieveWindowContent=false`, directly above the attribute set to
+`true`. It has to be true — `typeText` finds the focused field via
+`findFocus(FOCUS_INPUT)` and calls `ACTION_SET_TEXT`. That description is what a
+user reads when deciding to grant the permission, so it is now accurate and the
+label is "DroidDock — Clipboard & Screen Control".
+
+**The banking conflict cannot be fixed, only routed around.** Those apps call
+`AccessibilityManager.getEnabledAccessibilityServiceList()` and refuse to run if
+it is non-empty — they don't inspect *which* service or what it declares.
+Narrowing flags, renaming, or splitting into two services changes nothing.
+Recorded in `accessibility_config.xml` so the next person doesn't try.
+
+Two routes around it, both shipped:
+
+- **`LockAdmin`** — a device-admin receiver declaring exactly one policy,
+  `force-lock`. `DevicePolicyManager.lockNow()` needs no accessibility service,
+  so Lock survives with it off. Opt-in and separate; the accessibility path
+  still works, so declining costs nothing that existed before. The policy list
+  is deliberately one item — the system shows it on the grant screen, and it
+  should stay readable in a line.
+- **One-tap off** — `AccessibilityService.disableSelf()` behind a "Turn off"
+  action in Settings › Permissions. Android has no API to turn one back *on*,
+  so that direction deep-links to the Settings page rather than pretending.
+
+`ConnectionManager` tries `LockAdmin.lock()` before the accessibility gate and
+falls through when the admin isn't granted. `CAPS` became `caps()` — evaluated
+per connection, so granting device admin is reflected at the next handshake
+instead of needing an app restart.
+
+**Verified:** `:app:compileDebugKotlin`, `:app:processDebugMainManifest`,
+`:app:processDebugResources` all clean. **NOT verified:** any of it on the
+phone — in particular whether granting device admin actually satisfies the
+user's banking apps, which is the assumption the whole `LockAdmin` path rests
+on. `:app:assembleDebug` currently fails in this environment on an unrelated
+NDK `llvm-strip` toolchain error.
+
+### Settings layout, menu-bar panel, more clock styles
+
+- **Settings rows squeezed their labels to one word.** `Field` was
+  `justify-between` with a `shrink-0` control — which the control has to be, a
+  squashed segmented picker is unusable — so the label column absorbed every
+  pixel the control wanted. A four-option picker ("Desktop display size") left
+  the label ~100px wide. Now `flex-wrap` with `min-w-52` on the label, so the
+  control drops to its own line at any pane width with no breakpoint to keep in
+  sync.
+- **Menu-bar notifications drew initials, not app icons.** The main
+  Notifications view already resolves `useAppIcon(pkg)`; the panel never did.
+  Same cache, so an app you've already seen costs nothing.
+- **`menubarAlbumArt` looked like a dead setting — fourth instance of the
+  emit-only bug.** The panel assigned `art` only from a `media` event, and the
+  phone attaches art only on a track change; a panel opened mid-song therefore
+  had none, so "thumb" and "background" rendered identically to "none". Seeded
+  from `media_state()` on mount, like `App` and `wifi_status` before it.
+  **This exact shape has now bitten four times** (`wifi-status`, the Files
+  pending-sync badge, `media` in `App`, and here): a window or view that mounts
+  after an emit-only event renders an empty state over live data. New push
+  events should ship with a query command in the same change.
+- **Panel entrance animation** — a 180ms drop-and-settle from under the menu
+  bar, so it reads as coming out of the icon rather than blinking into place.
+- **Four more clock styles**: `neon`, `outline`, `pixel`, `gradient`, all
+  accent-tinted. They differ only in how the glyphs are *painted*, so they're a
+  CSS class on the same tree rather than four more branches. Each owns its own
+  shadow — an outline has no fill to shadow and a gradient's fill is
+  transparent, so the shared `text-shadow` is applied only when none of them is
+  active. No pixel font is bundled (new font, new licence); the pixel read comes
+  from geometry — mono family, wide tracking, single-axis slab shadow.
+
+**Verified:** `cargo build` (0 errors), `cargo test` 70/70, `tsc --noEmit`,
+`npm run build`, and all six new classes confirmed present in the built CSS.
+**NOT seen running.**
+
+### Close-to-hide, lock-screen wallpaper, per-row dismiss
+
+- **Closing the window stranded the app — the worst bug of the session.** There
+  was *no* window-event handling at all. Tauri's default close destroys the
+  webview; the tray kept the process alive, so the app sat in the Dock with no
+  window and no way back except Force Quit. Fixed as a pair, and it has to be a
+  pair: `CloseRequested` on `"main"` calls `prevent_close()` + `hide()`, and
+  `RunEvent::Reopen` (the Dock-icon click) shows it again. Hiding without
+  handling Reopen strands the window just as thoroughly. Scoped to `"main"` —
+  the mirror pop-out relies on `Destroyed` firing to tell the phone to stop
+  casting.
+- **The phone card wore the wrong wallpaper.** `WallpaperRepo` read
+  `WallpaperManager.drawable`, which is the *home* wallpaper. On a phone with
+  different home and lock images (the One UI default) the card showed a picture
+  the lock screen never displays — while the card is deliberately imitating a
+  lock screen. Now tries `getWallpaperFile(FLAG_LOCK)` first; it returns null
+  rather than throwing when no separate lock wallpaper is set, which is exactly
+  when the home one is correct anyway. **Still fetched once per connection**, so
+  changing wallpaper needs a reconnect to show up.
+- **Per-notification dismiss existed but was invisible.** It lived in the action
+  row under `opacity-0 group-hover:opacity-100`, so "Clear" (all) looked like
+  the only option. Added a × in the row header that keeps its layout slot at all
+  times and only fades its ink — no reflow on hover, and always findable.
+- **Eight clock styles overflowed the settings pane.** A segmented control is a
+  single row by convention, which held at 2–4 options and broke at 8. `Choice`
+  now wraps and caps at `max-w-md`.
+- **`pixel` → `bubble`.** The pixel style tried to fake an LCD font with a slab
+  shadow and looked like a mistake. Replaced with the chunky sticker read: fat
+  accent fill inside a thick light outline, stacked 2×2. `paint-order: stroke
+  fill` is what makes it work — it draws the stroke *under* the fill so the
+  outline grows outward; painted on top it eats 6px off every numeral from the
+  inside. `outline`'s stroke went 1.6px → 3px, which at a 68px glyph is the
+  difference between "unfinished" and "drawn".
+- **Desktop mode was pixelated because nothing set a bit rate.** scrcpy defaults
+  to 8 Mbps, tuned for a phone-shaped stream; desktop mode drives ~3× the pixels
+  at the same budget. Now `--video-bit-rate=16M --max-fps=60`.
+
+**Verified:** `cargo build` (0 errors), `cargo test` 70/70, `tsc --noEmit`,
+`npm run build`, `:app:compileDebugKotlin`, `:app:processDebugResources`.
+**NOT seen running.**
+
+### Mirror quality is configurable now (both transports)
+
+Both encoders were running on constants nobody had revisited: the phone's
+MediaCodec at **6 Mbps / 30 fps / 1280px**, and scrcpy at its own 8 Mbps
+default. Neither was chosen for a LAN, and desktop mode drives ~3× a phone
+view's pixels on that same budget — which is the whole reason it looked mushy.
+
+One quality group in Settings › Mirroring drives both, because "how good does
+the mirror look" is one question to a user even though it reaches two encoders:
+bit rate (2–30 Mbps, default 12), frame rate (30/45/60/90, default 60),
+resolution cap (default: the phone's own), and a Reset button.
+
+- **Wi-Fi**: `mirror-start` / `camera-start` gained additive `bitrate`/`fps`/
+  `maxSize` fields. A phone build that predates them ignores them and keeps its
+  old defaults rather than failing to start.
+- **ADB**: one `scrcpy_quality_args()` shared by the mirror and desktop
+  launchers, so the two can't drift apart.
+- **Android**: the request lands on `MirrorService` companion statics rather
+  than Intent extras. The message arrives in `ConnectionManager` and the
+  encoder is configured three hops later (permission activity → service →
+  `startEncoder`), so extras would mean changing four signatures for three
+  integers read once. Defaults equal the old hardcoded values.
+
+Values are clamped at `set_setting` (the boundary the frontend writes through),
+again in `scrcpy_quality_args`, and again in `MirrorService.setQuality`.
+
+Also: clock sizes went up ~20% — the card grew to 332×720 and the type never
+followed, so it read small in it. Settings' content pane gained
+`overflow-x-hidden` and tighter minimums; at narrow widths its rows were
+spilling sideways *over the phone panel* rather than wrapping.
+
+**Verified:** `cargo build` (0 errors), `cargo test` 70/70, `tsc --noEmit`,
+`npm run build`, `:app:compileDebugKotlin`. **NOT seen running**, and the
+Wi-Fi quality path in particular has never been exercised end to end.
+
+## Android UI pass — decluttering, two dead buttons, and Settings jank (2026-08-05, late; **partly verified on hardware**)
+
+First session where the phone was unlocked and attached for most of the work,
+so several things here are *seen working*, not just compiled. Device:
+Samsung SM-G990B2 (S21 FE), Android 15, debug build.
+
+### Two buttons that were genuinely dead, both silently
+
+**1. "Grant" on Lock Without Accessibility did nothing at all.** The intent was
+launched with `FLAG_ACTIVITY_NEW_TASK`. `DeviceAdminAdd` returns a result to
+its caller, so it refuses to run in a task of its own and finishes itself in
+`onCreate`:
+
+```
+I/ActivityTaskManager: START u0 {act=android.app.action.ADD_DEVICE_ADMIN flg=0x10000000 …}
+W/SecDeviceAdminAdd:  Cannot start ADD_DEVICE_ADMIN as a new task
+I/SurfaceFlinger:     Removed ActivityRecord{… SecDeviceAdminAdd}
+```
+
+Created and destroyed in the same frame. Nothing throws, so the surrounding
+`runCatching` had nothing to catch — the button just looked broken. Now goes
+through an `ActivityResultLauncher`, which can only start from the host
+activity's task, so the flag cannot creep back in. The constraint is written
+into `LockAdmin.enableIntent`'s KDoc because nothing in the API hints at it.
+**Verified**: prompt appears and keeps focus; `dumpsys device_policy` shows
+`com.droiddock.app/.LockAdminReceiver` active with exactly `force-lock`.
+
+**2. Enter / Space / Esc / Tab felt unresponsive.** `RemoteKey` used Material3's
+`Button`, which forces **24dp content padding per side**. At a quarter-row or a
+46dp d-pad cell that is 48dp of mandatory padding inside a smaller button, so
+labels wrapped to two lines and the caps looked and felt dead — they were in
+fact receiving taps the whole time. Replaced with `RemoteKeyBase` (a `Box`, no
+imposed padding, 46dp min height) plus haptic feedback on every key: the result
+of these keys lands on the *Mac*, so without a local cue there is no evidence
+the tap registered. D-pad now uses drawn arrow icons — `↑←↓→` as text renders as
+an off-centre hairline on One UI. **Verified on screen.**
+
+### Screen control and auto-clipboard are now separate grants
+
+One switch titled "Clipboard & Screen Control" used to carry both, because both
+ride the same accessibility service. They are different grants in a user's mind
+and the service never required them to move together. Now three rows:
+**Accessibility service** (the prerequisite, with Enable / Turn off),
+**Auto clipboard**, **Mac screen control**. New `Prefs.screenControl` mirrors
+into `AccessibilityControl.enabled`, which `available()` gates on — so turning
+screen control off makes the Mac report control unavailable (an
+already-handled path) while auto-clipboard keeps working. Seeded from Prefs in
+`ClipAccessibilityService.onServiceConnected`, so it survives a restart.
+**Verified on screen.**
+
+Also added `A11yTileService` — a QS tile that switches the service off in one
+tap (banking apps refuse to run while *any* accessibility service is enabled).
+It drives the pre-existing `AccessibilityControl.disableSelf()`; a duplicate
+`turnOff()` written before noticing that was deleted. Android lets a service
+disable itself but never enable itself, so the off→on direction can only
+deep-link to Settings. The tile service had been registered in the manifest
+with **no "Add" row in Settings**, i.e. no way to actually add it — now listed
+in Settings › Quick Settings Tiles beside the Connection and Clipboard tiles.
+
+### `control-unavailable` now carries a reason
+
+There are three causes with three different fixes, and the Mac was showing one
+message for all of them — pointing at "Settings › Auto Clipboard › Enable",
+a row that no longer exists after the split above. The phone now sends
+`reason`, and `ws_server.rs` picks the wording:
+
+| `reason` | Fix the message points at |
+|---|---|
+| `service` | system Settings › Accessibility |
+| `disabled` | DroidDock Settings › Permissions › Mac screen control |
+| `lock-needs-admin` | grant Lock Without Accessibility (needs no a11y service at all) |
+
+`lock-needs-admin` is only reachable after `LockAdmin.lock` has already
+declined, so the admin is definitely not granted. Additive and optional — an
+older Mac ignores the field and shows generic text.
+
+### Settings was the only laggy screen, and it was two syscalls
+
+Both sat inside `LazyColumn` items, so they re-ran **every time the row scrolled
+back into view**, on the composition thread:
+
+- `ConnectionManager.localIpAddress()` — enumerates every interface and asks
+  each whether it is up. Now resolved on `Dispatchers.IO`, seeded from a new
+  `lastKnownLocalIp` so a revisit paints immediately instead of blinking
+  through a placeholder. (Second bug in this one line: it was originally keyed
+  on `name`, re-running per keystroke in the field below it.)
+- `clipAccessibilityEnabled()` + `LockAdmin.isActive()` — two binder round
+  trips. `deviceAdmin` joined `PermissionSnapshot`; both now arrive from the
+  2s off-thread poll and are passed into `ScreenControlRows`. The `tick`
+  counter is gone; a `justDisabled` flag keyed on `serviceOn` covers the one
+  case the poll can't (`disableSelf()` unbinds asynchronously).
+
+Measured with `dumpsys gfxinfo`, same device and build:
+
+```
+Settings entry     90th 32ms   2/12 janky      (was 200ms — worst screen in the app)
+Settings scroll    90th 21ms   6.0% janky      (JIT-warmed)
+Settings scroll    90th 48ms   14.5% janky     (cold, first pass after install)
+```
+
+**The cold/warm gap is mostly JIT in a debug build** — don't read the cold
+number as the shipped experience, and expect the first scroll after any
+install to be the worst one. Other tabs could not be scroll-profiled for
+comparison: they render too little content to scroll at all, which is itself
+most of why "other pages feel smooth".
+
+### Smaller
+
+- Settings footer read `DroidDock · 0.9.1`, three releases behind the manifest.
+  Now `BuildConfig.VERSION_NAME` (`buildConfig = true` added to
+  `buildFeatures` for it) so it cannot drift again.
+- `MacNowPlayingCard` play/pause icon is optimistic — `optimistic ?: media?.playing`,
+  reset by `remember(media)` — so the glyph flips on tap instead of waiting for
+  the Mac to report back.
+
+### Environment trap (cost a build failure)
+
+`~/Library/Android/sdk/ndk/27.0.12077973` is an **aborted download**: two files,
+`source.properties` and `.installer/.installData`, no toolchain. AGP believes
+that version is installed and fails `stripDebugDebugSymbols` on a missing
+`llvm-strip`. Moved to `27.0.12077973.aborted-download`; the complete
+`27.1.12297006` beside it is used instead. If a future session sees
+`A problem occurred starting process 'command '…/llvm-strip''`, this is it.
+
+### Verified vs not
+
+**Seen working on the phone:** the three split permission rows updating live
+from the poll, the device-admin prompt and its resulting `force-lock` grant, the
+Mac Remote layout (arrow icons, tall trackpad, single-line Enter/Esc/Space/Tab),
+the Settings jank numbers above, all three tiles in the merged manifest.
+
+**Not verified:** the Mac's Lock button actually locking the phone via device
+admin — that needs the Mac to send `mirror-key{key:"lock"}` and the phone is the
+WS *client*, so it can't be driven from the CLI. Trace from the phone's receive
+side if it misbehaves. Also unverified: the new toast strings (**the Mac app
+needs a rebuild** — `cargo build` clean, 70/70 tests, but the running binary is
+the old one), and Lock/Screensaver/Brightness/Volume driving the Mac.
+
+**Note for the next session:** reinstalling the APK drops the accessibility
+grant every time, and Samsung clears `enabled_accessibility_services` with it.
+Re-granting over adb is safe *only* after reading the current value — blindly
+`settings put` clobbers any other service the user has enabled.
+
+### Settings rows: container queries, and the width cap that made it worse
+
+Two mistakes, one after the other, both mine:
+
+1. `Field` was `justify-between` with a `shrink-0` control, so the label column
+   absorbed everything the control wanted and collapsed to one word per line.
+2. The fix — capping the control at `max-w-72` so it wrapped sooner — was worse
+   than the bug. It forced *four*-option pickers onto two ragged lines even on a
+   wide window, so every row looked broken instead of just the eight-option one.
+
+The cap is gone. `Choice` wraps only when it genuinely must, and `Field` now
+stacks label-over-control by default, going side by side at `@2xl` — a
+**container** query, not a viewport one. That distinction is the point: this
+pane's width depends on the phone panel and the rail, not the window, so a
+viewport breakpoint would happily put a row side-by-side inside a 300px pane.
+
+Verified in the built CSS that all six `@2xl:` variants and the
+`container-type: inline-size` rule actually emit — an arbitrary or unsupported
+variant that Tailwind silently drops would leave the layout permanently stacked
+with nothing to show for it.
+
+**Verified:** `cargo build` (0 errors), `cargo test` 70/70, `tsc --noEmit`,
+`npm run build`, container-query CSS confirmed present. **NOT seen running** —
+scripted navigation to the Settings pane kept landing in other apps, and I
+stopped rather than keep driving the user's screen.
 
 ## Design decisions (final direction — supersedes earlier attempts)
 1. ❌ Rejected: carrying over Electron's existing design tokens as-is.
@@ -1227,6 +2064,35 @@ one-time full recompile.**
   17–19 made zero edits to `droiddock 2/` — it remains completely untouched.
 
 ## Immediate next steps, in order
+
+> **Pick up here (2026-08-05, late).** See "Android UI pass — decluttering, two
+> dead buttons, and Settings jank" above for what just landed. Three concrete
+> things are waiting, in order:
+>
+> 1. **Rebuild and restart the Mac app.** Rust is clean (70/70) but the running
+>    binary predates the `control-unavailable` `reason` field, so it still shows
+>    the old toast pointing at a Settings row that no longer exists.
+> 2. **Press Lock on the Mac** with the phone's accessibility service off and
+>    device admin on (that is the phone's current state). This is the one path
+>    that could not be driven from the CLI — the phone is the WebSocket client.
+> 3. **Exercise Lock / Screensaver / Brightness / Volume** against the Mac; they
+>    need Accessibility granted *on the Mac*, and that grant breaks on every
+>    rebuild because the app is ad-hoc signed (`TeamIdentifier=not set`) and TCC
+>    keys on the code signature.
+>
+> Everything else below still stands.
+
+> **Updated 2026-08-05.** The single highest-value action is unchanged and has
+> only grown: **attach the phone.** Two sessions of Android work — seven crash
+> fixes and four parity phases — are compile-and-unit-test verified only, and
+> the crash fixes in particular were written from reading the code because no
+> device was attached to pull a stack trace from. Start there:
+> `adb logcat` + `dumpsys dropbox` to confirm *which* crash was actually firing,
+> then `./gradlew installDebug`. Note the APK signing trap: CI ships a
+> **debug**-signed APK from the runner's keystore, so a locally built one will
+> not install over it (signature mismatch), and uninstalling loses the pairing
+> and the accessibility/notification grants.
+
 **Partly superseded — see "First hardware session (2026-08-04 afternoon)"
 above.** The app has now run on real hardware: the Wi-Fi link, the release
 bundle and Mac→phone screen control are verified, and the startup deadlock that
