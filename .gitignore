@@ -39,3 +39,9 @@ droiddock-tauri/src-tauri/target/
 # ---- throwaway Phase 0 spikes, and captured protocol corpus (may contain real personal data) ----
 spikes/
 droiddock-tauri/protocol-corpus/
+
+# Scratch media for planned work — screen recordings blow past GitHub's 100 MB
+# hard limit (a 177 MB .mp4 in here got a push rejected once). Note the
+# trailing space in the real directory name.
+future update /
+*.mp4

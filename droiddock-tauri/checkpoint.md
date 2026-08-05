@@ -960,6 +960,185 @@ verified:** any of it on real hardware. Nothing in Tiers B–D has been seen
 running, and the encryption and remote-control paths in particular have never
 completed a real handshake. Same standing debt as Phases 3–19.
 
+## First hardware session (2026-08-04 afternoon) — "the app doesn't work"
+
+The session opened with the app dead: frozen UI, and the phone reconnecting in a
+loop being rejected. **Everything below was found by running it, not by
+reading it.** Landed as `4257024`, `e981b13`, `c1af853`, `dba74af` on `main`.
+
+### The one bug that caused most of it
+
+`adb.rs::tools_status` locked the same mutex twice inside a single struct
+literal:
+
+```rust
+ToolsStatus {
+    adb: state.adb.lock().unwrap().is_some(),   // guard taken…
+    ...
+    adb_path: state.adb.lock().unwrap().clone(), // …still alive here
+}
+```
+
+Temporaries in a struct expression live until the whole struct is built, and
+`std::sync::Mutex` is not reentrant, so **the first call to this function
+deadlocked forever, holding `AdbState.adb`**. Confirmed with a standalone
+`rustc` repro and with a live `sample(1)` of the running process showing two
+threads parked in `tools_status → Mutex::lock`.
+
+The cascade is the reason it presented as a *networking* failure:
+
+1. `adb_tools` is a **sync** command, so it runs on the **main thread**. The
+   frontend calls it on mount → the macOS main thread froze. That is the
+   "nothing reflects on the Mac" symptom.
+2. `adb::init → activate_adb → tools_status` blocked a worker on the same lock.
+3. Every async worker that then touched the tray (`emit_status →
+   statusbar::refresh_title → tray::set_title`, which blocks on the main
+   thread) piled up behind it, until the networking runtime had **no thread
+   left to poll its IO driver** — at which point `accept()` stopped waking.
+
+**This invalidates a prior conclusion recorded in the code.** The dedicated
+networking thread in `lib.rs` was added because `TcpListener::accept()` was
+"entered and never woke", and its comment blamed a defect in Tauri's
+`async_runtime`. That diagnosis was wrong; it was this lock all along. The
+thread is kept (isolation is still worth having) but its comment now records
+the real cause, and the dead `RUNTIME`/`install_runtime` helper written for
+that theory is deleted. **Do not cite the old claim in future work.**
+
+Regression test: `tools_status_does_not_deadlock_on_itself` runs it on a worker
+under a 5s deadline, so a recurrence fails the suite instead of hanging it.
+
+### The recurring theme: everything failed silently
+
+Each of these cost real debugging time purely because nothing was reported.
+Treat "the button does nothing" as a bug in its own right.
+
+- **`scrcpy` failures.** All four spawn sites nulled stdio and detached, and
+  `spawn()` succeeding only proves the binary is executable. On this machine
+  scrcpy died ~20ms after launch (`dyld: Library not loaded:
+  …libbluray.2.dylib` — Homebrew had moved `libbluray` to `.3` while `ffmpeg
+  7.1_3` was still linked against `.2`; fixed with `brew reinstall ffmpeg`).
+  ADB mirror/camera therefore did nothing at all, forever, with no message.
+  `reap()` now captures stderr and toasts an exit inside 3s.
+- **Screen control.** Every gesture needs the accessibility service; without it
+  each one hit `service ?: return@post` while mirror video kept streaming, so
+  the Mac looked broken. The phone now replies `control-unavailable`
+  (throttled 5s) and the Mac explains it.
+- **Port already in use.** `ws_server::run` gave up after ten failed binds with
+  only an `eprintln`. A second copy of DroidDock (`/Applications` plus a dev
+  build) made the app look completely healthy while never accepting a phone.
+  It now says so. **Watch for this** — it is easy to hit during development.
+- **Pairing QR could hand out a fake token.** `getPairingInfo` returned
+  `demo-token-123` outside Tauri, and `vite` serves the same bundle at
+  `localhost:1420` in a plain browser. Scanning *that* QR stores a token the
+  Mac will never accept — a strong candidate for the original
+  `HANDSHAKE REJECT: token mismatch`. It now rejects rather than inventing one.
+
+### Other fixes
+
+- **`wifi-status` was emit-only.** Nothing could *query* the link state, so any
+  view mounting after the phone connected sat at "not linked": the Dashboard on
+  every revisit, the menu-bar panel and the widget permanently. Added a
+  `wifi_status` command; all four subscribers now **seed from it on mount** and
+  keep the listener for changes. A listener alone only reports transitions,
+  never the state you arrived in.
+- **Drag regions never worked anywhere.** `.drag`/`.no-drag` set
+  `-webkit-app-region`, which despite the prefix is a **Chromium extension
+  WebKit never implemented** — inert in WKWebView. The frameless mirror pop-out
+  and the status widget could not be moved at all, and the main window's header
+  carried a comment about "giving the traffic lights a drag region" that had
+  never been true. All converted to `data-tauri-drag-region` (applied to label
+  elements too — Tauri tests the attribute on the *event target*), plus
+  `core:window:allow-start-dragging` in the capability. The CSS rules are
+  deleted with a note so nobody reaches for them again.
+- **Mirror/camera window sizing.** `apply_aspect` hardcoded a 760px height and
+  solved width from the aspect ratio → ~1287px for a landscape camera source,
+  with no clamp to the display. It also locked the aspect of the *raw video*
+  while the content box additionally holds the 36px bar, so every resize
+  letterboxed a little more. Now fits the monitor on whichever axis binds and
+  locks the real content ratio.
+- **Camera flip was invisible.** It rendered correctly all along, but as a bare
+  28px glyph between pin and close it read as "there is no way to switch
+  cameras". Now a labelled button that also reports which camera is live.
+- **Rail clipped destinations silently.** 15 buttons need ~700px; `minHeight`
+  is 600 and the scrollbar was hidden, so entries simply weren't there. Added a
+  scroll affordance.
+- **Config round-trip is now tested.** A parse failure in `load_or_create`
+  falls back to `Config::default()`, which **mints a fresh token and silently
+  unpairs the phone**. The file on disk predated most Tier B–D fields, so the
+  first settings change would have been the first time the full shape was ever
+  written. Two tests cover the round-trip and the legacy 6-key file.
+- Restored the CSP that had been set to `null` while debugging (plus
+  `ws://localhost:1420`, without which the strict policy silently kills vite
+  HMR), and removed the debug scaffolding left in `index.html`/`App.tsx`.
+
+### Hardware verification — the debt is partly paid
+
+For the first time, parts of this stack have been **observed working on the
+real phone** (Galaxy S21 FE, Android 16), not just compiled.
+
+- The phone links to the Mac over Wi-Fi and stays linked across app restarts;
+  verified against both the dev build and the **release bundle**.
+- `npm run tauri build` produces `DroidDock.app` + the `.dmg` — the same
+  artifacts CI ships — and the release bundle was launched and linked.
+- **Mac→phone screen control works end to end.** Verified with
+  **`droiddock-tauri/tools/fake_mac.py`** (kept in the repo — it is the only
+  way found to exercise Mac→phone messages without clicking the real UI): a
+  ~120-line stand-in for the Mac's WebSocket server that authenticates the
+  phone and fires control messages at it. Stop the real app first so it frees
+  port 48484, then e.g.
+  `python3 tools/fake_mac.py '{"type":"mirror-key","key":"home"}'`.
+  - `mirror-key home` (`performGlobalAction`) → phone left My Files for the
+    launcher, confirmed via `dumpsys window | grep mCurrentFocus`.
+  - `mirror-swipe` (`dispatchGesture`) → notification shade opened, confirmed
+    by screenshot diff.
+  - With accessibility disabled (`Bound services:{}`), the phone replied
+    `{"type":"control-unavailable"}` — the new path, proven.
+
+**The blocker was never the code.** `enabled_accessibility_services` was
+`null`. On Android 13+ a **sideloaded** APK cannot enable an accessibility
+service until *Settings → Apps → DroidDock → ⋮ → Allow restricted settings* is
+tapped, and **reinstalling the APK turns the service off again**. Every
+Mac-side tap, swipe and nav press depends on it, and so does auto-clipboard —
+which is why the phone's permission row is renamed **"Clipboard & Screen
+Control"**; labelling it "Auto Clipboard" is what hid the dependency.
+
+### Release v1.0.0 (shipped)
+
+Tags had reached `v0.9.2` (Electron) while the Tauri app was still `0.1.0`, so
+a tag would have published "v1.0.0" containing `DroidDock_0.1.0_aarch64.dmg`.
+All version declarations were aligned to **1.0.0** — `tauri.conf.json` (which
+names the bundles), `package.json`, `package-lock.json`, `Cargo.toml`, and the
+Android `versionName` (with `versionCode` 2 → 3, since Android rejects an
+update that doesn't increment it). CI: **both jobs green**, assets
+`DroidDock_1.0.0_aarch64.dmg`, `DroidDock_aarch64.app.tar.gz`,
+`DroidDock-Android.apk`.
+
+**CI trap worth remembering:** the release was configured as a draft
+(`releaseDraft: true` on the mac job) and **published anyway**. Both jobs write
+the *same* release for a tag, and `softprops/action-gh-release` defaults to
+`draft: false`, so the Android job took the draft the mac job had just created
+and published it. Whichever job finishes last decides — **the two settings must
+always agree** (fixed in `dba74af`). v1.0.0 is public as a result; converting it
+back needs `gh release edit v1.0.0 --draft`.
+
+### Housekeeping
+
+`target/` had grown to **13 GB** of stale incremental artifacts. Cleaned along
+with the retired Electron app's `node_modules` (508 MB — its `src/` reference
+is untouched), Gradle output and `.DS_Store`s: repo **14 G → 144 M**. Nothing
+git-tracked was inside any deleted path (checked first). The Tauri app's
+`node_modules` was deliberately kept. **The next `npm run tauri dev` does a
+one-time full recompile.**
+
+### Still NOT verified
+
+- Tiers B–D through the real UI: wallpaper, apps grid + icons, opt-in
+  encryption, Mac remote control, desktop mode, per-app notification muting.
+  The link and screen control are proven; these are not.
+- The mirror/camera window sizing fix, and the Dashboard/menu-bar status fix —
+  both need eyes on the screen, which ADB can't provide.
+- `PHASE16_PARITY_CHECKLIST.md` remains unrun.
+
 ## Design decisions (final direction — supersedes earlier attempts)
 1. ❌ Rejected: carrying over Electron's existing design tokens as-is.
 2. ❌ Rejected: per-section/per-tab rainbow color scheme.
@@ -1048,10 +1227,14 @@ completed a real handshake. Same standing debt as Phases 3–19.
   17–19 made zero edits to `droiddock 2/` — it remains completely untouched.
 
 ## Immediate next steps, in order
-**Nothing below has changed in kind — it's the same hardware-verification
-debt as before, now larger.** Every phase from 3 through 19 compiles/typechecks
-(and 18–19's Android changes additionally compile via Gradle) but has never
-touched real hardware.
+**Partly superseded — see "First hardware session (2026-08-04 afternoon)"
+above.** The app has now run on real hardware: the Wi-Fi link, the release
+bundle and Mac→phone screen control are verified, and the startup deadlock that
+made the app appear dead is fixed. The verification debt is smaller but still
+real — Phases 3–19 and Tiers B–D are otherwise still compile-verified only, and
+the checklist below has not been run. **Start any hardware pass by confirming
+the phone's accessibility service is on** (see that section); with it off, a
+large share of the app silently does nothing.
 1. Run `PHASE16_PARITY_CHECKLIST.md` (repo root) — this now covers Phases
    0–19 in one place and is the single source of truth for what to test, in
    what order. It supersedes the old itemized list that used to live here
