@@ -256,18 +256,52 @@ pub fn menubar_hide(app: AppHandle) {
     }
 }
 
-/// Bring the main window forward — the panel's "Open DroidDock" action.
+/// Bring the main window forward, from the Dock icon, the tray menu, or the
+/// menu-bar panel's "Open DroidDock".
+///
+/// # The distinction this function exists to draw
+///
+/// "Open DroidDock" means two different things depending on where the window
+/// already is, and conflating them is what made the window appear to live on
+/// every desktop:
+///
+/// * **Closed, hidden or minimised** — there is no window anywhere, so putting
+///   one on the desktop the user is looking at is exactly right.
+/// * **Open, on another desktop** — the window already exists somewhere. The
+///   Mac-native answer is to take the user *to it*, which is what activating
+///   the app does on its own. Calling `show()` here instead would order the
+///   window front on the current desktop, and AppKit implements that by
+///   dragging it across. Do that a few times from a few desktops and the app
+///   has, from the user's point of view, appeared on all of them.
+///
+/// So: only ever `show()` a window that isn't already up somewhere.
+pub fn raise_main(app: &AppHandle) {
+    let Some(win) = app.get_webview_window("main") else {
+        return;
+    };
+
+    let visible = win.is_visible().unwrap_or(false);
+    let minimized = win.is_minimized().unwrap_or(false);
+    let here = crate::appearance::is_on_active_space(&win);
+    let elsewhere = visible && !minimized && !here;
+    eprintln!(
+        "[window] raise_main: visible={visible} minimized={minimized} \
+         on_active_space={here} → {}",
+        if elsewhere { "activate only" } else { "show + activate" }
+    );
+
+    if !elsewhere {
+        let _ = win.unminimize();
+        let _ = win.show();
+    }
+    // Narrow activation in both branches: `ActivateAllWindows` would drag the
+    // mirror pop-out along with whatever else is parked elsewhere.
+    crate::appearance::activate_without_raising_all();
+}
+
 #[tauri::command]
 pub fn open_main_window(app: AppHandle) {
-    if let Some(win) = app.get_webview_window("main") {
-        let _ = win.unminimize();
-        // `show()` is the deliberate part: ordering *this* window front is what
-        // brings it to the desktop you're on, which is exactly what "Open
-        // DroidDock" asks for. The activation that follows stays narrow so the
-        // mirror pop-out parked on another desktop doesn't come too.
-        let _ = win.show();
-        crate::appearance::activate_without_raising_all();
-    }
+    raise_main(&app);
     if let Some(panel) = app.get_webview_window(PANEL_LABEL) {
         let _ = panel.hide();
     }

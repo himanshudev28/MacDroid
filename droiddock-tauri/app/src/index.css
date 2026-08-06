@@ -60,16 +60,34 @@
   --dd-bad:      oklch(0.660 0.220 27);
   --dd-warn:     oklch(0.860 0.170 92);
 
-  /* Glass over a dark backdrop tints with light. */
-  --dd-glass-tint:      oklch(0.98 0.02 80 / 0.06);
+  /* Glass over a dark backdrop keeps the app's own espresso — see the glass
+     section further down for why a white tint here is what made the material
+     read as milky rather than dark. */
+  --dd-glass-tint:      oklch(0.24 0.014 62 / 0.55);
   --dd-glass-sheen:     oklch(1 0 0 / 0.14);
+  --dd-glass-rim:       oklch(1 0 0 / 0.26);
+  --dd-glass-glow:      oklch(1 0 0 / 0.08);
+  /* Deliberately tiny. These are three *stacked* shadows on surfaces as small
+     as a 180×46 popover, where a 56px-radius shadow covers the whole element —
+     at any real strength the pane stops reading as the same material as its
+     neighbours and starts looking like a differently-coloured pill dropped on
+     top of them. Depth here is cumulative, not per-layer. */
+  --dd-glass-depth:     oklch(0.10 0.02 60 / 0.07);
+  /* Where the backdrop's brightness lands at full glass. Below 1: a bright
+     desktop showing through a dark app must not turn the app light. */
+  --glass-lum-full:     0.68;
   --dd-shadow-hue:      oklch(0.10 0.02 60);
   --dd-scrim:           oklch(0.12 0.015 60 / 0.55);
 }
 
 :root[data-theme='light'] {
   --dd-ink:      oklch(0.945 0.018 82);
-  --dd-panel:    oklch(0.978 0.011 85);
+  /* Warm cream, not white. The old value was 0.978 L at 0.011 C — brighter
+     than the page *and* less saturated than it, which is the exact recipe for
+     a card that reads as a white patch dropped on a warm surface rather than
+     as the same material lifted a step. It keeps its elevation (still lighter
+     than `--dd-ink`) but carries the page's own chroma up with it. */
+  --dd-panel:    oklch(0.972 0.020 84);
   --dd-panel2:   oklch(0.915 0.021 80);
   --dd-panel3:   oklch(0.872 0.025 78);
   --dd-line:     oklch(0.35 0.04 58 / 0.14);
@@ -91,10 +109,22 @@
   --dd-bad:      oklch(0.510 0.190 27);
   --dd-warn:     oklch(0.495 0.115 72);
 
-  /* Glass over cream tints with the ink instead — a white tint on a
-     near-white page is invisible and just costs a compositing pass. */
-  --dd-glass-tint:      oklch(0.35 0.04 58 / 0.05);
-  --dd-glass-sheen:     oklch(1 0 0 / 0.55);
+  /* Glass over cream. The old value here was ink at 5% alpha, which is why
+     light mode looked like it had no glass at all: 5% of anything over a
+     near-white page is nothing, and there was no rim to give the pane an
+     edge either. Light glass reads as glass through *definition* — a real
+     tint, a bright rim, a dark hairline and saturation — not through a white
+     film on white. */
+  --dd-glass-tint:      oklch(0.995 0.006 85 / 0.55);
+  --dd-glass-sheen:     oklch(1 0 0 / 0.70);
+  --dd-glass-rim:       oklch(1 0 0 / 0.70);
+  --dd-glass-glow:      oklch(1 0 0 / 0.26);
+  /* Warm ink rather than grey — a neutral grey reads as dirt on cream — and
+     as faint as the dark theme's, for the same stacking reason. */
+  --dd-glass-depth:     oklch(0.45 0.05 58 / 0.06);
+  /* Above 1, mirroring dark's below-1: a dark desktop behind a cream app must
+     not drag the app grey. */
+  --glass-lum-full:     1.14;
   --dd-shadow-hue:      oklch(0.40 0.05 55);
   --dd-scrim:           oklch(0.30 0.03 55 / 0.35);
 }
@@ -118,6 +148,39 @@
   --glass-saturate: 138%;
   --chrome-alpha:   0.75;
   --surface-alpha:  0.89;
+
+  /* Luminance anchoring, interpolated by the same slider. At glass 0 this is
+     exactly 1 (nothing shows through, so it would be a no-op anyway); at glass
+     100 it reaches the theme's `--glass-lum-full`.
+
+     This is the single most important term in the whole material. `blur` and
+     `saturate` alone are neutral about *lightness*: a bright desktop behind a
+     thin dark surface comes through bright, and the app turns into grey haze
+     — which is precisely what "at 100% the UI looks whitish" describes. Real
+     macOS vibrancy is dark-tinted in dark mode and light-tinted in light mode
+     for exactly this reason. */
+  --glass-lum: calc(1 + (var(--glass-lum-full, 1) - 1) * var(--glass-strength));
+  --glass-backdrop: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-lum));
+
+  /* How much paint the cards keep. Cards were the one surface the slider never
+     reached: the rail and the content surface thinned out around them while
+     every card stayed a flat opaque slab, so at glass 100 the app read as
+     translucent chrome wrapped around solid white (light) / solid espresso
+     (dark) blocks — the two halves looking like different products.
+
+     The floor is deliberately high (0.66, versus the surface's 0.55). A card
+     is the thing you actually read: labels, hints, values. It can pick up the
+     desktop's colour without ever putting body copy on top of it. */
+  --card-alpha: calc(1 - var(--glass-strength) * 0.34);
+  /* For a card sitting on another card. It can't take the full thinning —
+     alphas multiply, so 0.66 inside 0.66 lands near 0.44 and the inner tile
+     stops being a tile — but it can't be fully opaque either: a solid slab
+     inside a parent that has picked up the desktop's colour reads as a foreign
+     block punched into it, which is the exact flat-white / flat-espresso look
+     this whole change exists to remove. Thinned just enough to inherit the
+     parent's tint. */
+  --card-alpha-nested: calc(1 - var(--glass-strength) * 0.20);
 }
 
 /* The single mapping layer: Tailwind utilities (`bg-panel`, `text-dim`, …)
@@ -200,22 +263,63 @@ textarea:focus {
   font-variant-numeric: tabular-nums;
 }
 
-/* Flat card — dense lists, table containers. */
+/* Flat card — dense lists, table containers.
+
+   Deliberately NO `backdrop-filter` of its own, on either card. Cards live on
+   `.app-surface` (or inside `.glass-heavy`), which has already blurred and
+   saturated everything behind it — thinning a card's paint reveals that
+   finished material, so a second blur pass would sample an image that is
+   already blurred and change almost nothing visible. It would not be free:
+   Settings alone stacks five cards, and each blurred element costs its own
+   compositing pass every frame. Same reasoning as `.on-glass`. */
 .card {
-  background: var(--color-panel);
+  background: color-mix(in oklch, var(--color-panel) calc(var(--card-alpha) * 100%), transparent);
   border: 1px solid var(--color-line);
   border-radius: 14px;
+  /* Kept to the top edge — a lit rim, not a wash. The full-surface gradient
+     that reads fine on an opaque slab turns into a milky film the moment the
+     slab goes translucent (see the note on `.glass-chrome`). */
+  box-shadow: inset 0 1px 0 color-mix(in oklch, var(--dd-glass-sheen) 32%, transparent);
 }
 
 /* Raised card — focal content (pairing, now-playing, device hero). */
 .card-raised {
-  background: var(--color-panel2);
+  background: color-mix(in oklch, var(--color-panel2) calc(var(--card-alpha) * 100%), transparent);
   border: 1px solid var(--color-line);
   border-radius: 16px;
   box-shadow:
     inset 0 1px 0 color-mix(in oklch, var(--dd-glass-sheen) 45%, transparent),
     0 1px 2px color-mix(in oklch, var(--dd-shadow-hue) 22%, transparent),
     0 6px 20px color-mix(in oklch, var(--dd-shadow-hue) 16%, transparent);
+}
+
+/* Nested cards, and cards inside a popover, step back to `--card-alpha-nested`
+   so the thinning doesn't compound — see the token for why. */
+.card-raised .card,
+.card .card,
+.glass-heavy .card {
+  background: color-mix(
+    in oklch,
+    var(--color-panel) calc(var(--card-alpha-nested) * 100%),
+    transparent
+  );
+}
+.card .card-raised,
+.card-raised .card-raised,
+.glass-heavy .card-raised {
+  background: color-mix(
+    in oklch,
+    var(--color-panel2) calc(var(--card-alpha-nested) * 100%),
+    transparent
+  );
+}
+
+/* Modals (pairing, setup, incoming call) are the one card that stays solid.
+   They float over arbitrary app content rather than over the window's own
+   material, so what's behind them is high-contrast UI, not a blurred desktop —
+   showing it through a dialog is noise, not depth. */
+.card-raised.float-lg {
+  background: var(--color-panel2);
 }
 
 
@@ -349,22 +453,33 @@ textarea:focus {
    reaches 0, so the chrome becomes a plain opaque panel — no compositing
    cost, and a guaranteed way back if translucency is unreadable on a
    particular desktop. ── */
+/* The rim. Five stacked inset shadows, and the reason a pane reads as a
+   physical piece of glass rather than as a translucent rectangle:
+
+     1. a tight bright edge — the lit rim where the pane's own thickness
+        catches light,
+     2. a soft inner glow just inside it — light scattering through that edge,
+     3–5. three widening soft dark shadows falling from the top — the depth the
+        pane sits at.
+
+   What it deliberately replaces is a full-height white gradient across the
+   whole surface. That reads fine over an opaque panel, but once the slider
+   thins the paint out, a constant white wash over a bright backdrop is
+   *exactly* the milky look being complained about: the highlight stops being
+   an edge and becomes a film. Specular light lives at edges. */
 .glass-chrome {
   background:
+    /* Specular, kept to the top edge where it belongs — 14% of the height, not
+       all of it. */
     linear-gradient(
-      160deg,
-      var(--dd-glass-sheen) 0%,
-      color-mix(in oklch, var(--dd-glass-sheen) 22%, transparent) 22%,
-      transparent 45%,
-      transparent 75%,
-      color-mix(in oklch, var(--dd-glass-sheen) 28%, transparent) 100%
+      180deg,
+      var(--dd-glass-sheen) 0,
+      color-mix(in oklch, var(--dd-glass-sheen) 20%, transparent) 5%,
+      transparent 14%
     ),
     color-mix(in oklch, var(--color-panel) calc(var(--chrome-alpha) * 100%), transparent);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  box-shadow:
-    inset 0 1px 0 var(--dd-glass-sheen),
-    inset -1px 0 0 color-mix(in oklch, var(--dd-glass-sheen) 35%, transparent);
+  backdrop-filter: var(--glass-backdrop);
+  -webkit-backdrop-filter: var(--glass-backdrop);
 }
 
 
@@ -400,27 +515,80 @@ textarea:focus {
    modals). Capped at 8–12px blur; one per view, never stacked/animated. */
 .glass {
   background: var(--dd-glass-tint);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: var(--glass-backdrop);
+  -webkit-backdrop-filter: var(--glass-backdrop);
 }
 
 .glass-dim {
   background: color-mix(in oklch, var(--dd-glass-tint) 55%, transparent);
-  backdrop-filter: blur(calc(var(--glass-blur) * 0.7));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.7));
+  backdrop-filter: blur(calc(var(--glass-blur) * 0.7)) saturate(var(--glass-saturate))
+    brightness(var(--glass-lum));
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.7)) saturate(var(--glass-saturate))
+    brightness(var(--glass-lum));
 }
 
 /* Popovers and modals: these float over arbitrary app content, so they need
    enough paint to stay legible whatever is behind them. Their floor is higher
    than the chrome's — they never go fully transparent. */
 .glass-heavy {
-  background: color-mix(
-    in oklch,
-    var(--color-panel) calc((0.72 + var(--chrome-alpha) * 0.28) * 100%),
-    transparent
-  );
-  backdrop-filter: blur(calc(var(--glass-blur) + 6px)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 6px)) saturate(var(--glass-saturate));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in oklch, var(--dd-glass-sheen) 85%, transparent) 0,
+      transparent 10%
+    ),
+    color-mix(
+      in oklch,
+      var(--color-panel) calc((0.72 + var(--chrome-alpha) * 0.28) * 100%),
+      transparent
+    );
+  backdrop-filter: blur(calc(var(--glass-blur) + 6px)) saturate(var(--glass-saturate))
+    brightness(var(--glass-lum));
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 6px)) saturate(var(--glass-saturate))
+    brightness(var(--glass-lum));
+}
+
+/* The rim needs a positioned parent, and asking for one here is a trap: these
+   classes are combined with Tailwind's `absolute` on every popover in the app.
+   Plain rules in this file are *unlayered*, Tailwind's utilities live in
+   `@layer utilities`, and unlayered always beats layered — so a bare
+   `position: relative` here silently overrides `absolute` and drops every
+   popover back into the document flow, on top of whatever it was floating
+   above. Declaring it in `@layer components` puts it below the utilities where
+   it belongs: it applies to the statically-positioned panes that need it, and
+   loses to `absolute` on the ones that don't. */
+@layer components {
+  .glass-chrome,
+  .glass-heavy {
+    position: relative;
+  }
+}
+
+/* The rim itself rides on a pseudo-element rather than the element's own
+   `box-shadow`, because `box-shadow` is one property: several of these panes
+   also carry `.float-md`/`.float-lg` for their drop shadow, and whichever rule
+   came last in this file would silently erase the other. An overlay can't
+   collide with anything. */
+.glass-chrome::after,
+.glass-heavy::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 2px 1px var(--dd-glass-rim),
+    /* 1px of spread, not 4: a 4px-spread glow eats a small popover whole and
+       turns it into a light blob rather than a pane with a lit edge. */
+    inset 0 0 8px 1px var(--dd-glass-glow),
+    inset 0 4px 16px var(--dd-glass-depth),
+    inset 0 8px 24px var(--dd-glass-depth),
+    inset 0 6px 56px var(--dd-glass-depth);
+}
+
+[data-reduce-transparency='true'] .glass-chrome::after,
+[data-reduce-transparency='true'] .glass-heavy::after {
+  display: none;
 }
 
 
@@ -430,6 +598,7 @@ textarea:focus {
   background: var(--color-panel2);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
+  box-shadow: none;
 }
 
 /* Inner-edge highlight — glass specular */
@@ -470,8 +639,28 @@ textarea:focus {
    is behind it. See lib/appearance.ts. */
 .app-surface {
   background: color-mix(in oklch, var(--color-ink) calc(var(--surface-alpha) * 100%), transparent);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: var(--glass-backdrop);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  /* Depth only, no bright rim: this is the window's own content area, not a
+     floating pane, so ringing it in specular light would draw a box around
+     nothing. The soft fall from the top edge is what seats it under the
+     toolbar. */
+  box-shadow:
+    inset 0 4px 16px var(--dd-glass-depth),
+    inset 0 10px 40px var(--dd-glass-depth);
+}
+
+[data-reduce-transparency='true'] .app-surface {
+  box-shadow: none;
+}
+
+/* Cards follow the same rule as every other translucent surface: when the OS
+   asks for reduced transparency they go back to being flat paint. */
+[data-reduce-transparency='true'] .card {
+  background: var(--color-panel);
+}
+[data-reduce-transparency='true'] .card-raised {
+  background: var(--color-panel2);
 }
 
 /* ═══ The phone card ═══════════════════════════════════════════════════
@@ -803,9 +992,21 @@ textarea:focus {
 .ax-warn svg { color: var(--color-warn); flex: 0 0 auto; margin-top: 1px; }
 .ax-warn strong { display: block; font-size: 13px; color: var(--color-fg); }
 .ax-warn p { margin: 4px 0 0; font-size: 12px; line-height: 1.45; color: var(--color-dim); }
+.ax-warn p + p { margin-top: 8px; }
+.ax-warn p strong { display: inline; font-size: inherit; color: var(--color-fg); }
+/* Stacked, not inline: two actions side by side in a narrow warning box wrap
+   mid-label. */
+.ax-warn-actions {
+  flex: 0 0 auto;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 .ax-warn button {
   flex: 0 0 auto;
   align-self: center;
+  white-space: nowrap;
   padding: 6px 12px;
   font-size: 12px;
   border-radius: 8px;

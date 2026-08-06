@@ -37,15 +37,40 @@ export default function StatusStrip({
 }) {
   const [volOpen, setVolOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  // Bumped on every drag of the slider; the idle timer below restarts whenever
+  // it changes, so adjusting the volume keeps the popover alive.
+  const [touched, setTouched] = useState(0);
 
   useEffect(() => {
     if (!volOpen) return;
     const onDown = (e: MouseEvent) => {
       if (!ref.current?.contains(e.target as Node)) setVolOpen(false);
     };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setVolOpen(false);
+    };
     document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [volOpen]);
+
+  /// Close itself once you've stopped using it.
+  ///
+  /// Click-away alone isn't enough for something that opens *inside* the phone
+  /// card: set the volume, look away, and the slider sits there covering the
+  /// battery and lock buttons until you happen to click somewhere. A transient
+  /// control that has to be dismissed by hand isn't transient.
+  ///
+  /// The timer restarts on every drag and while the pointer is over the
+  /// popover, so it can only fire on a slider nobody is using.
+  useEffect(() => {
+    if (!volOpen) return;
+    const id = setTimeout(() => setVolOpen(false), 2600);
+    return () => clearTimeout(id);
+  }, [volOpen, touched]);
 
   const battery = typeof info?.battery === "number" ? Math.round(info.battery) : null;
   const volMax = media?.volMax ?? 0;
@@ -77,7 +102,13 @@ export default function StatusStrip({
           </button>
 
           {volOpen && (
-            <div className="rise-fast glass-heavy absolute bottom-[calc(100%+8px)] left-1/2 z-30 w-45 -translate-x-1/2 rounded-xl border border-line p-3 float-md">
+            <div
+              // Hovering counts as using it: the timer restarts while the
+              // pointer is inside, so it can't vanish out from under a hand
+              // that is on its way to the slider.
+              onMouseMove={() => setTouched((t) => t + 1)}
+              className="rise-fast glass-heavy absolute bottom-[calc(100%+8px)] left-1/2 z-30 w-45 -translate-x-1/2 rounded-xl border border-line p-3 float-md"
+            >
               <div className="flex items-center gap-2.5">
                 <Icon name="volume" size={13} className="shrink-0 text-dim" />
                 <input
@@ -85,7 +116,10 @@ export default function StatusStrip({
                   min={0}
                   max={volMax}
                   value={vol}
-                  onChange={(e) => mediaCmd("setvol", Number(e.target.value))}
+                  onChange={(e) => {
+                    mediaCmd("setvol", Number(e.target.value));
+                    setTouched((t) => t + 1);
+                  }}
                   aria-label="Phone volume"
                   className="vol-slider min-w-0 flex-1"
                 />

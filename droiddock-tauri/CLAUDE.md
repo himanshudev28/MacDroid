@@ -12,6 +12,7 @@
 - The Android app (`../droiddock-android/`) is the protocol source of truth. Never invent a message schema — read the reference source, or the 0.4 captured corpus, and match it. If both are ambiguous, stop and ask.
 - Dependencies: OSI-permissive only (MIT/Apache-2.0/BSD). Zero data egress. No features beyond the current phase.
 - End every phase with the Part 1 §6 compatibility report and a smoke `tauri build` (run from `app/`).
+- **Never hand-patch a built `.app`.** Copying a bare `cargo build --release` binary into `DroidDock.app/Contents/MacOS/app` produces a window that opens blank white and can't be dragged: `tauri.conf.json` carries `devUrl: http://localhost:1420`, and only a build driven by the Tauri CLI resolves the webview to the embedded `dist/` instead of that URL. No content also means no `data-tauri-drag-region`, which is why "blank" and "won't drag" arrive together. Always `npm run tauri build -- --bundles app` and install the whole bundle. (Re-signing after any such patch also mints a new cdhash, which silently revokes the Accessibility grant — see README's notes section.)
 
 ## Reference source (read-only)
 - Protocol/server: `../droiddock 2/src/main/wifi.js` · transfer: `.../transfer.js` · ADB: `.../adb.js` · IPC surface: `.../src/preload/index.js`

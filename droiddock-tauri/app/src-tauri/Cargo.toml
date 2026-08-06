@@ -58,6 +58,9 @@ libc = "0.2"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = [
     "std",
+    # NSWindow::setAppearance — the window's vibrancy material has to follow
+    # the app's theme, not the Mac's (see appearance::window_theme_set).
+    "NSAppearance",
     "NSColor",
     "NSColorSpace",
     "NSWorkspace",
@@ -78,7 +81,15 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
     # CGEvent we can actually post.
     "objc2-core-graphics",
 ] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std"] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    # The options dictionary for AXIsProcessTrustedWithOptions — NSDictionary
+    # is toll-free bridged to CFDictionaryRef, so this saves building one by
+    # hand (mac_remote::imp::reset_accessibility).
+    "NSDictionary",
+    "NSString",
+    "NSValue",
+] }
 # Tier D: synthesising input events for the phone→Mac remote (mac_remote.rs).
 objc2-core-graphics = { version = "0.3", default-features = false, features = [
     "std",

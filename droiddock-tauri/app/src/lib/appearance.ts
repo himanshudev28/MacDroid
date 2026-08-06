@@ -8,6 +8,8 @@
 /// synchronously on load, before the first `invoke()` round-trip resolves, so
 /// the app never paints one theme and then flips to another.
 
+import { windowThemeSet } from "./bridge";
+
 export type Theme = "dark" | "light" | "system";
 export type AccentSource = "warm" | "system";
 
@@ -68,6 +70,17 @@ export function applyTheme(t: Theme = getTheme()): void {
   // window background before first paint — in the matching scheme. Without it,
   // a light theme still flashes black on every window open.
   document.documentElement.style.colorScheme = resolved;
+
+  // And the half CSS can't reach at all: the window's own vibrancy material,
+  // which is behind the webview and follows macOS unless told otherwise. A
+  // light Mac running a dark app leaves every translucent surface backed by a
+  // light material — the app washes out to grey-white while its opaque cards
+  // stay espresso, and the two read as different products.
+  //
+  // `t`, not `resolved`: on "system" the native side must clear its override
+  // and follow macOS, because `resolvedTheme` reads `prefers-color-scheme`,
+  // which the override itself would then be feeding.
+  void windowThemeSet(t).catch(() => {});
 }
 
 /// Re-resolve when the OS flips, but only while the user is on `system`.

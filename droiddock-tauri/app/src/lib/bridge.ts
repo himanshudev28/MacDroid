@@ -501,6 +501,28 @@ export const autostartGet = () => invoke<boolean>("autostart_get");
 export const accessibilityTrusted = () => invoke<boolean>("accessibility_trusted");
 export const openAccessibilitySettings = () =>
   invoke<void>("open_accessibility_settings");
+/** Revoke the Accessibility grant and ask for it again, so macOS records the
+ *  build that is actually running. The recovery for the state where System
+ *  Settings shows DroidDock ticked and the Mac still ignores every remote
+ *  action — see `mac_remote::accessibility_reset` for why that happens. */
+export const accessibilityReset = () => invoke<boolean>("accessibility_reset");
+
+/** Point the *window's* material at the app's theme rather than the Mac's.
+ *  Without this, a Mac in light mode running the app in dark mode backs every
+ *  translucent surface with a light vibrancy material — grey-white where the
+ *  app is see-through, espresso where it isn't. Pass "system" to hand control
+ *  back to macOS. See `appearance::window_theme_set`. */
+export const windowThemeSet = (theme: "dark" | "light" | "system") =>
+  invoke<void>("window_theme_set", { theme });
+
+/** Whether the Dock has DroidDock assigned to a desktop (Dock icon → Options →
+ *  Assign To). That assignment is app-wide and applied by the Dock *after* the
+ *  app positions its own windows, so it is the one reason the main window can
+ *  show up on every Space no matter what the app asks for. */
+export const spacesBindingActive = () => invoke<boolean>("spaces_binding_active");
+/** Clear it. Resolves `false` if it survived, in which case the only remaining
+ *  route is the Dock's own menu. */
+export const spacesBindingClear = () => invoke<boolean>("spaces_binding_clear");
 export const autostartSet = (enabled: boolean) => invoke<void>("autostart_set", { enabled });
 
 // ── In-app updates ───────────────────────────────────────────────────────

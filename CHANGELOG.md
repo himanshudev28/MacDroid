@@ -8,6 +8,83 @@ to a generic body.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **The Mac window no longer appears on every desktop.** The cause was never a
+  window property: macOS keeps per-app Space assignments in your Dock
+  preferences (Dock icon → Options → Assign To), and the Dock stamps that answer
+  onto every window the app opens, after the app has positioned them. Once
+  DroidDock picked up an `All Desktops` assignment, nothing the app did to its
+  own windows could override it, and it survived reinstalls because it isn't
+  stored in the app. **Settings → System** now detects the assignment and offers
+  **Keep on one desktop**, which clears it.
+- **"Open DroidDock" no longer drags the window to whichever desktop you're
+  on.** `show()` on a window that is already open somewhere else does not mean
+  "make visible" — AppKit reads it as "put this window in front *here*" and
+  relocates it. Click the tray icon from a few different desktops and the app
+  has, from where you're sitting, appeared on all of them. It now only shows a
+  window that isn't already up; if one is open elsewhere, activating takes you
+  to it, the way every other Mac app behaves.
+- **The glass slider now reaches the cards.** Cards were the one surface it
+  never touched: the rail and the content surface thinned out around them while
+  every card stayed a flat opaque slab, so at 100% the app read as translucent
+  chrome wrapped around solid blocks — white ones in light mode, espresso ones
+  in dark — and the two halves looked like different products. Cards now thin
+  and pick up the desktop with everything else, down to a higher floor than the
+  surface (they carry the text you actually read). A card nested in another card
+  steps back rather than compounding the two alphas, and modals stay solid:
+  what's behind a dialog is app UI, not a blurred desktop, and showing it
+  through is noise rather than depth. At slider 0 every card is fully opaque, as
+  before.
+- **Light-mode cards are cream, not white.** `--dd-panel` was brighter than the
+  page *and* less saturated than it, which is the recipe for a card that reads
+  as a white patch dropped onto a warm surface rather than as the same material
+  lifted one step. It keeps its elevation and now carries the page's own chroma
+  up with it.
+- **The phone-card volume slider dismisses itself.** It opens *inside* the
+  phone card, over the battery and lock buttons, and previously stayed there
+  until you happened to click elsewhere — a transient control you have to
+  dismiss by hand isn't transient. It now closes 2.6s after you stop using it
+  (the timer restarts on every drag and while the pointer is over it), and on
+  Escape as well as click-away.
+- **Popovers stopped rendering in the wrong place.** A `position: relative`
+  added for the new glass rim was overriding Tailwind's `absolute` on every
+  popover that uses `.glass-heavy`, dropping them out of their float and into
+  the document flow on top of their neighbours. Plain rules in `index.css` are
+  unlayered and unlayered beats layered, so it silently outranked the utility;
+  it now lives in `@layer components`, below the utilities.
+- **A Spaces probe, for the next time this class of bug shows up.** Run the
+  binary with `DROIDDOCK_DEBUG_SPACES=1` and it logs every change in the main
+  window's `collectionBehavior` and `isOnActiveSpace`, with a heartbeat so a
+  dead sampler can't be mistaken for a quiet one. "The window follows me" has
+  several causes that look identical in a screen recording; this tells them
+  apart in one pass. Off unless the variable is set.
+- **A dark app on a light Mac is dark all the way down.** The window's vibrancy
+  material is an `NSVisualEffectView` behind the webview, and it rendered
+  according to *macOS's* appearance rather than the app's. Run the Mac in light
+  mode, set DroidDock to dark, push the glass slider up, and the two disagreed
+  visibly: translucent surfaces washed out to grey-white against a light
+  material while opaque cards stayed espresso, so one window showed two
+  unrelated palettes. The window now takes the app's theme (`system` still
+  follows macOS).
+- **Glass at full strength no longer washes the UI out white, and light mode
+  has a visible material at last.** Two bugs with one root: the material had no
+  luminance anchoring, so a bright desktop behind a thinned surface came
+  straight through and turned espresso into grey haze, and the highlight was a
+  full-height white gradient — a film, not an edge. The backdrop now carries a
+  theme-aware `brightness()` that scales with the slider, and the specular is a
+  layered inset rim (tight edge, inner glow, three soft depth shadows) confined
+  to where light actually lands. Light mode's glass tint went from 5% ink —
+  invisible on cream — to a real tint with its own rim and hairline.
+- **"Let the phone control this Mac" stopped working after updating.** DroidDock
+  is ad-hoc signed, so macOS records the Accessibility permission against a hash
+  of the exact app binary — which changes with every release. After an update
+  the app still appears ticked in Privacy & Security → Accessibility while the
+  system silently discards its input. The warning now says so, and **Reset
+  permission** clears the dead entry and re-asks for the copy you're running.
+
 ## v2.0.0
 
 The release where the link stops being one-way. Until now the Mac watched the

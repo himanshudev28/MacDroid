@@ -265,6 +265,15 @@ DroidDock/
   clear, because wrapping them means surgery on the hot transfer/mirror loops.
   This is *not* end-to-end encryption of everything, and nothing in the UI claims
   it is. Full TLS is still a future enhancement.
+- **Updating the Mac app revokes its Accessibility permission**, and macOS does not
+  tell you. Because DroidDock is ad-hoc signed rather than Developer ID signed, the
+  permission is recorded against a hash of the exact app binary
+  (`designated => cdhash H"…"`), and every release is a different binary. The row
+  stays in **Privacy & Security → Accessibility** with the switch still on, but the
+  Mac ignores every remote click and keystroke. Fix it with **Settings → System →
+  Reset permission** in DroidDock, then tick DroidDock when macOS asks. Unticking
+  and re-ticking the stale row often doesn't help — it's the row itself that's dead.
+  A Developer ID signature is the only thing that removes this for good.
 - **Only one copy of DroidDock can run at a time** — they compete for port `48484`,
   and the loser can never accept a phone. The app now says so instead of looking
   healthy and doing nothing.

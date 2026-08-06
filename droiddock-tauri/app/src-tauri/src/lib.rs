@@ -663,8 +663,21 @@ pub fn run() {
                     let _ = window.set_effects(None);
                 }
                 // `setup` runs on the main thread, which AppKit requires here.
-                // Without this the main window follows the user to every Space.
                 appearance::pin_to_own_space(&window);
+            }
+            // The other half of "the window shows on every desktop", and the
+            // half no window property can answer: a Dock-level Space
+            // assignment, which lives in the user's prefs and outlives every
+            // reinstall. Logged loudly at startup because it is otherwise
+            // invisible from inside the app — Settings offers the one-click
+            // undo.
+            appearance::spawn_space_probe(app_handle.clone());
+            if let Some(binding) = appearance::dock_space_binding(&app.config().identifier) {
+                eprintln!(
+                    "[window] the Dock has this app assigned to {binding:?} \
+                     (Dock icon → Options → Assign To) — every window it opens \
+                     will follow the user across Spaces until that is cleared"
+                );
             }
             app.manage(Mutex::new(system_appearance));
 
@@ -740,6 +753,10 @@ pub fn run() {
             adb::adb_call_start_polling,
             mac_remote::accessibility_trusted,
             mac_remote::open_accessibility_settings,
+            mac_remote::accessibility_reset,
+            appearance::spaces_binding_active,
+            appearance::spaces_binding_clear,
+            appearance::window_theme_set,
             tray::pause_set,
             tray::autostart_get,
             tray::autostart_set,
@@ -761,6 +778,18 @@ pub fn run() {
         // handlers fixes, and they have to work together — hiding without
         // handling Reopen strands the window just as thoroughly.
         .on_window_event(|window, event| {
+            // Re-pin on every focus, not once at startup. `collectionBehavior`
+            // is a mutable property: the Dock re-stamps it onto our windows
+            // whenever it has a Space assignment for this app, and it does that
+            // *after* `setup` has run. Cheap — it only writes when the value
+            // actually differs — and this is already the main thread.
+            if window.label() == "main" {
+                if let tauri::WindowEvent::Focused(true) = event {
+                    if let Some(main) = window.app_handle().get_webview_window("main") {
+                        appearance::pin_to_own_space(&main);
+                    }
+                }
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // Only the main window. The mirror pop-out, the menu-bar panel
                 // and the widget all own their lifecycles and must still be
@@ -778,14 +807,10 @@ pub fn run() {
             // Clicking the Dock icon of a running app with no visible windows.
             // Without this the click is swallowed and the app looks hung.
             if let tauri::RunEvent::Reopen { .. } = event {
-                if let Some(win) = app.get_webview_window("main") {
-                    let _ = win.show();
-                    let _ = win.unminimize();
-                    // Ordering the main window front (above) is the whole
-                    // point of a Dock click; the activation is kept narrow so
-                    // it doesn't drag every other window along with it.
-                    appearance::activate_without_raising_all();
-                }
+                // Same rules as the tray's "Open DroidDock": a window already
+                // open on another desktop is reached by going there, not by
+                // hauling it here. See `tray::raise_main`.
+                tray::raise_main(app);
             }
         });
 }

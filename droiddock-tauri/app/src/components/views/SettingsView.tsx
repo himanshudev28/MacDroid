@@ -14,7 +14,14 @@ import {
   type ClockStyle,
   type Theme,
 } from "../../lib/appearance";
-import { widgetSet, accessibilityTrusted, openAccessibilitySettings } from "../../lib/bridge";
+import {
+  widgetSet,
+  accessibilityTrusted,
+  openAccessibilitySettings,
+  accessibilityReset,
+  spacesBindingActive,
+  spacesBindingClear,
+} from "../../lib/bridge";
 import {
   setSetting,
   pauseSet,
@@ -85,6 +92,11 @@ function SettingsView({
   const [name, setName] = useState(config?.deviceName ?? "");
   const [autostart, setAutostart] = useState(false);
   const [axTrusted, setAxTrusted] = useState(true);
+  // Both default to "nothing wrong": these drive warnings, and a warning that
+  // flashes up for one frame on every open is worse than one that arrives a
+  // moment late.
+  const [spacesBound, setSpacesBound] = useState(false);
+  const [spacesFixFailed, setSpacesFixFailed] = useState(false);
   const [syncProg, setSyncProg] = useState<PhotoSyncProgress | null>(null);
   const [backfilling, setBackfilling] = useState(false);
   const [tab, setTab] = useState<CategoryId>("connection");
@@ -115,6 +127,25 @@ function SettingsView({
       clearInterval(id);
     };
   }, [config?.remoteControl]);
+
+  // Read once per visit to the tab, not on a timer: the assignment only changes
+  // when someone uses the Dock's menu, and re-reading it means shelling out to
+  // `defaults`. Re-running on tab change is what refreshes it after the user
+  // has been off fixing it by hand.
+  useEffect(() => {
+    if (tab !== "system") return;
+    let alive = true;
+    spacesBindingActive()
+      .then((bound) => {
+        if (!alive) return;
+        setSpacesBound(bound);
+        if (!bound) setSpacesFixFailed(false);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [tab]);
 
   useEffect(() => {
     setName(config?.deviceName ?? "");
@@ -599,16 +630,68 @@ function SettingsView({
               <div className="ax-warn">
                 <Icon name="alert-triangle" />
                 <div>
-                  <strong>Accessibility permission not granted</strong>
+                  <strong>macOS is ignoring DroidDock's input</strong>
                   <p>
-                    macOS silently discards synthesised input until DroidDock is
-                    ticked in Privacy &amp; Security → Accessibility, so every
-                    remote action will appear to do nothing. If DroidDock is
-                    already listed, untick and re-tick it — macOS caches the old
-                    answer after an app is rebuilt.
+                    Until DroidDock holds Accessibility permission, macOS
+                    discards every synthesised click and keystroke without an
+                    error, so remote control just appears to do nothing.
+                  </p>
+                  <p>
+                    <strong>If DroidDock already looks ticked</strong> in Privacy
+                    &amp; Security → Accessibility, the tick is stale. macOS
+                    stores the permission against a signature of the exact app
+                    binary, and every DroidDock update replaces that binary — the
+                    row survives the update, the permission doesn't.{" "}
+                    <em>Reset permission</em> deletes the stale row and asks
+                    again for the copy you're running; tick DroidDock when macOS
+                    prompts.
                   </p>
                 </div>
-                <button onClick={() => openAccessibilitySettings()}>Open Settings</button>
+                <div className="ax-warn-actions">
+                  <button
+                    onClick={() => {
+                      accessibilityReset().catch(() => {});
+                    }}
+                  >
+                    Reset permission
+                  </button>
+                  <button onClick={() => openAccessibilitySettings()}>Open Settings</button>
+                </div>
+              </div>
+            )}
+            {spacesBound && (
+              <div className="ax-warn">
+                <Icon name="alert-triangle" />
+                <div>
+                  <strong>DroidDock is assigned to every desktop</strong>
+                  <p>
+                    macOS has a Space assignment recorded for this app (Dock icon
+                    → Options → Assign To), and the Dock applies it to every
+                    window DroidDock opens — which is why the main window shows
+                    up on whichever desktop you switch to. It's stored with your
+                    Dock preferences, so it outlives reinstalls and updates.
+                  </p>
+                  {spacesFixFailed && (
+                    <p>
+                      Clearing it from here didn't take. Right-click DroidDock in
+                      the Dock → Options → Assign To → None.
+                    </p>
+                  )}
+                </div>
+                <div className="ax-warn-actions">
+                  <button
+                    onClick={() => {
+                      spacesBindingClear()
+                        .then((ok) => {
+                          setSpacesBound(!ok);
+                          setSpacesFixFailed(!ok);
+                        })
+                        .catch(() => setSpacesFixFailed(true));
+                    }}
+                  >
+                    Keep on one desktop
+                  </button>
+                </div>
               </div>
             )}
             <Toggle

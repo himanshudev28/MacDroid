@@ -145,6 +145,33 @@ pub fn open_accessibility_settings() {
     imp::open_accessibility_settings();
 }
 
+/// Tear down the Accessibility grant and ask for it again from scratch.
+///
+/// # Why "already ticked" and "not trusted" are not a contradiction
+///
+/// TCC does not remember *"the user allowed DroidDock"*. It remembers *"the
+/// user allowed the program that satisfies this code-signing requirement"*, and
+/// for a bundle signed the way this one is — ad-hoc, no Team ID, no Developer
+/// ID — that requirement degrades to an exact hash of the binary. Every rebuild
+/// produces a different binary, so every release invalidates the grant while
+/// leaving the row in place: System Settings still lists DroidDock, the switch
+/// is still on, and `AXIsProcessTrusted` still says no. Unticking and re-ticking
+/// often doesn't help either, because the stale row is what's being toggled.
+///
+/// `tccutil reset` deletes the row outright — including macOS's memory of
+/// having already prompted for it — and the `AXIsProcessTrustedWithOptions`
+/// call that follows re-registers *this* binary and puts the standard grant
+/// alert back on screen. The user then flips one switch and the hash on file is
+/// the hash that's running.
+///
+/// Not something to do quietly on the user's behalf: it revokes a permission
+/// they granted. It is wired to a button they press.
+#[tauri::command]
+pub async fn accessibility_reset(app: AppHandle) -> bool {
+    let bundle_id = app.config().identifier.clone();
+    imp::reset_accessibility(&bundle_id)
+}
+
 fn num(raw: &Value, key: &str) -> Option<f64> {
     raw.get(key).and_then(Value::as_f64)
 }
@@ -351,16 +378,48 @@ mod imp {
             .spawn();
     }
 
-    // Declared by hand rather than pulling in objc2-application-services for a
-    // single predicate. `AXIsProcessTrusted` takes no arguments and never
-    // prompts, so there is no CFDictionary to build.
+    // Declared by hand rather than pulling in objc2-application-services for
+    // two predicates. `AXIsProcessTrusted` takes no arguments and never
+    // prompts; the `WithOptions` form takes a CFDictionary, which an
+    // NSDictionary is (toll-free bridged), so there is still nothing to build
+    // by hand.
     #[link(name = "ApplicationServices", kind = "framework")]
     extern "C" {
         fn AXIsProcessTrusted() -> bool;
+        fn AXIsProcessTrustedWithOptions(options: *const std::ffi::c_void) -> bool;
     }
 
     pub fn accessibility_trusted() -> bool {
         unsafe { AXIsProcessTrusted() }
+    }
+
+    pub fn reset_accessibility(bundle_id: &str) -> bool {
+        use objc2_foundation::{NSDictionary, NSNumber, NSString};
+
+        // Blocking on purpose: prompting before the old row is gone would just
+        // re-check the stale grant and show nothing.
+        let reset = std::process::Command::new("/usr/bin/tccutil")
+            .args(["reset", "Accessibility", bundle_id])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !reset {
+            eprintln!("[remote] tccutil reset Accessibility {bundle_id} failed");
+        }
+
+        // The literal rather than the `kAXTrustedCheckOptionPrompt` global:
+        // that constant *is* this string, and using it avoids linking a
+        // framework global for one dictionary key.
+        let key = NSString::from_str("AXTrustedCheckOptionPrompt");
+        let options = NSDictionary::from_slices(&[&*key], &[&*NSNumber::new_bool(true)]);
+
+        // SAFETY: NSDictionary is toll-free bridged to CFDictionaryRef, and
+        // `options` outlives the call.
+        unsafe {
+            AXIsProcessTrustedWithOptions(
+                objc2::rc::Retained::as_ptr(&options).cast::<std::ffi::c_void>(),
+            )
+        }
     }
 
     pub fn open_accessibility_settings() {
@@ -393,6 +452,7 @@ mod imp {
     pub async fn output_volume() -> Option<u8> { None }
     pub fn accessibility_trusted() -> bool { true }
     pub fn open_accessibility_settings() {}
+    pub fn reset_accessibility(_bundle_id: &str) -> bool { true }
 }
 
 #[cfg(test)]
