@@ -180,7 +180,10 @@ pub fn open_frame(key: &LinkKey, buf: &[u8]) -> Option<Vec<u8>> {
 
 /// Standard alphabet, padding tolerated — the mirror of `crate::base64_encode`,
 /// kept here rather than pulling a crate for two call sites.
-fn base64_decode(s: &str) -> Option<Vec<u8>> {
+///
+/// `pub(crate)` since clipboard images arrive the same way encrypted envelopes
+/// do: base64 inside a JSON message.
+pub(crate) fn base64_decode(s: &str) -> Option<Vec<u8>> {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut lookup = [255u8; 256];
     for (i, c) in TABLE.iter().enumerate() {

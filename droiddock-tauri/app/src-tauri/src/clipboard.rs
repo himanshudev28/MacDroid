@@ -14,8 +14,11 @@
 //! parity means one switch, not two. Flagged in the compatibility report.
 
 use crate::ws_server::{self, SharedState};
-use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
-use objc2_foundation::NSString;
+use objc2_app_kit::{
+    NSBitmapImageFileType, NSBitmapImageRep, NSPasteboard, NSPasteboardTypePNG,
+    NSPasteboardTypeString, NSPasteboardTypeTIFF,
+};
+use objc2_foundation::{NSData, NSDictionary, NSString};
 use serde_json::{json, Value};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -29,6 +32,27 @@ pub struct ClipboardGuard {
     last_from_phone: Mutex<Option<String>>,
     last_seen: Mutex<Option<String>>,
     last_change_count: Mutex<isize>,
+    /// The same two echo guards as the text pair, but for images — hashed
+    /// rather than kept, because holding two copies of every screenshot that
+    /// passes through the clipboard for the life of the process is not a price
+    /// worth paying to compare them.
+    last_image_seen: Mutex<Option<u64>>,
+    last_image_from_phone: Mutex<Option<u64>>,
+}
+
+/// Ceiling on a clipboard image, in bytes.
+///
+/// OkHttp closes the socket outright once its send queue passes 16 MiB, and
+/// base64 adds a third on top — so an unbounded clipboard image is a way to
+/// drop the link by copying a large enough picture. 8 MiB of PNG covers any
+/// screenshot from any display Apple sells and leaves the margin intact.
+const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
+
+fn hash_bytes(bytes: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut h);
+    h.finish()
 }
 
 fn enabled(app: &AppHandle) -> bool {
@@ -56,6 +80,39 @@ fn read_clipboard_text() -> Option<String> {
     }
 }
 
+/// Whatever image is on the pasteboard, as PNG bytes.
+///
+/// PNG is preferred when it's there; otherwise TIFF is re-encoded, because
+/// macOS very often leaves *only* TIFF (a Preview or Safari copy does) and
+/// Android's `BitmapFactory` cannot decode TIFF at all — the paste would
+/// silently produce nothing on the other end.
+fn read_clipboard_image() -> Option<Vec<u8>> {
+    unsafe {
+        let pb = NSPasteboard::generalPasteboard();
+        if let Some(png) = pb.dataForType(NSPasteboardTypePNG) {
+            return Some(png.to_vec());
+        }
+        let tiff = pb.dataForType(NSPasteboardTypeTIFF)?;
+        let rep = NSBitmapImageRep::imageRepWithData(&tiff)?;
+        let png = rep.representationUsingType_properties(
+            NSBitmapImageFileType::PNG,
+            &NSDictionary::new(),
+        )?;
+        Some(png.to_vec())
+    }
+}
+
+/// Put PNG bytes on the pasteboard and return the resulting `changeCount`.
+fn write_clipboard_image(png: &[u8]) -> isize {
+    unsafe {
+        let pb = NSPasteboard::generalPasteboard();
+        pb.clearContents();
+        let data = NSData::with_bytes(png);
+        pb.setData_forType(Some(&data), NSPasteboardTypePNG);
+        pb.changeCount()
+    }
+}
+
 /// Write text to the pasteboard and return the resulting `changeCount`.
 fn write_clipboard_text(text: &str) -> isize {
     unsafe {
@@ -77,6 +134,15 @@ pub fn on_incoming(app: &AppHandle, raw: &Value) {
     if !enabled(app) {
         return;
     }
+    // An image arrives as base64 in the same message type, distinguished by
+    // `kind`. Checked before the text branch because an image message carries
+    // no `text` at all — an older Mac's guard would simply skip it, which is
+    // exactly the backward compatibility this shape buys.
+    if raw.get("kind").and_then(Value::as_str) == Some("image") {
+        on_incoming_image(app, raw);
+        return;
+    }
+
     // wifi.js guards on `typeof msg.text === 'string'`.
     let Some(text) = raw.get("text").and_then(Value::as_str) else {
         return;
@@ -90,6 +156,48 @@ pub fn on_incoming(app: &AppHandle, raw: &Value) {
     // change" and skips entirely — the changeCount equivalent of Electron's
     // lastClipFromPhone string-compare, only cheaper.
     *guard.last_change_count.lock().unwrap() = new_count;
+}
+
+/// A clipboard *image* arrived from the phone.
+///
+/// Rejected rather than truncated when oversized: half a picture on the
+/// pasteboard is worse than none, and the phone is the side that chose to send
+/// it, so the ceiling is enforced on both ends independently.
+fn on_incoming_image(app: &AppHandle, raw: &Value) {
+    let Some(b64) = raw.get("data").and_then(Value::as_str) else {
+        return;
+    };
+    let Some(bytes) = crate::crypto::base64_decode(b64) else {
+        eprintln!("[clipboard] dropping an image whose base64 didn't decode");
+        return;
+    };
+    if bytes.is_empty() || bytes.len() > MAX_IMAGE_BYTES {
+        eprintln!("[clipboard] dropping a {}-byte image from the phone", bytes.len());
+        return;
+    }
+
+    let guard = app.state::<ClipboardGuard>();
+    *guard.last_image_from_phone.lock().unwrap() = Some(hash_bytes(&bytes));
+    // A picture replaces whatever text was there, so the text guards have to
+    // stop describing the pasteboard — otherwise the next tick compares the new
+    // image against a stale string and the guards drift.
+    *guard.last_seen.lock().unwrap() = None;
+
+    let new_count = write_clipboard_image(&bytes);
+    *guard.last_change_count.lock().unwrap() = new_count;
+}
+
+/// The `clipboard` message for an image. Base64 in JSON, like `wallpaper` and
+/// `app-icon` already are — a new binary frame kind would buy a third of the
+/// bytes back on something copied a few times a day, at the cost of another
+/// framing path to keep correct.
+fn image_message(bytes: &[u8]) -> Value {
+    json!({
+        "type": "clipboard",
+        "kind": "image",
+        "mime": "image/png",
+        "data": crate::base64_encode(bytes),
+    })
 }
 
 // ── Outbound: Mac → phone (explicit push) ────────────────────────────────
@@ -117,20 +225,32 @@ pub async fn clipboard_push_now(
 
     // Read + guard bookkeeping in a sync block so no Retained<NSPasteboard>
     // or MutexGuard is alive across the await below.
-    let text = {
-        let Some(text) = read_clipboard_text() else {
-            return Err("Clipboard is empty".into());
-        };
-        if text.is_empty() {
-            return Err("Clipboard is empty".into());
-        }
+    let message = {
         let guard = app.state::<ClipboardGuard>();
-        *guard.last_seen.lock().unwrap() = Some(text.clone());
-        *guard.last_change_count.lock().unwrap() = read_change_count();
-        text
+        let text = read_clipboard_text().filter(|t| !t.is_empty());
+        match text {
+            Some(text) => {
+                *guard.last_seen.lock().unwrap() = Some(text.clone());
+                *guard.last_change_count.lock().unwrap() = read_change_count();
+                json!({ "type": "clipboard", "text": text })
+            }
+            // Only reached when there is no text at all — see `pick_outbound`
+            // for why text wins whenever both are present.
+            None => {
+                let Some(image) = read_clipboard_image() else {
+                    return Err("Clipboard is empty".into());
+                };
+                if image.len() > MAX_IMAGE_BYTES {
+                    return Err("That image is too large to send over the link".into());
+                }
+                *guard.last_image_seen.lock().unwrap() = Some(hash_bytes(&image));
+                *guard.last_change_count.lock().unwrap() = read_change_count();
+                image_message(&image)
+            }
+        }
     };
 
-    ws_server::push(&state, json!({ "type": "clipboard", "text": text })).await;
+    ws_server::push(&state, message).await;
     Ok(())
 }
 
@@ -175,7 +295,7 @@ pub async fn run(app: AppHandle, state: SharedState) {
 
         // Compute what (if anything) to send in a fully synchronous block, so
         // no Retained<NSPasteboard> / MutexGuard is ever alive across an await.
-        let to_send: Option<String> = {
+        let to_send: Option<Value> = {
             if !enabled(&app) {
                 None
             } else {
@@ -187,15 +307,46 @@ pub async fn run(app: AppHandle, state: SharedState) {
                 } else {
                     *last_count = count;
                     drop(last_count);
-                    decide_outbound(&guard, read_clipboard_text())
+                    pick_outbound(&guard)
                 }
             }
         };
 
-        if let Some(text) = to_send {
-            ws_server::push(&state, json!({ "type": "clipboard", "text": text })).await;
+        if let Some(message) = to_send {
+            ws_server::push(&state, message).await;
         }
     }
+}
+
+/// What this pasteboard change should send, if anything.
+///
+/// **Text wins whenever there is any.** macOS routinely leaves an image
+/// alongside text on the same pasteboard — a Finder file copy carries the
+/// filename *and* an icon, and rich-text copies often carry a rendering — so
+/// "an image is present" is not evidence the user copied a picture. Text being
+/// absent is much stronger evidence, and it costs nothing: the text path is
+/// exactly what shipped before, so nothing that worked can start sending
+/// screenshots instead.
+fn pick_outbound(guard: &ClipboardGuard) -> Option<Value> {
+    if let Some(text) = read_clipboard_text().filter(|t| !t.is_empty()) {
+        return decide_outbound(guard, Some(text)).map(|t| json!({ "type": "clipboard", "text": t }));
+    }
+    // Resync the text guard even when the clipboard holds no text, matching
+    // what `decide_outbound` does for the empty case.
+    *guard.last_seen.lock().unwrap() = None;
+
+    let image = read_clipboard_image()?;
+    if image.is_empty() || image.len() > MAX_IMAGE_BYTES {
+        return None;
+    }
+    let hash = hash_bytes(&image);
+    let differs = {
+        let seen = guard.last_image_seen.lock().unwrap();
+        let from_phone = guard.last_image_from_phone.lock().unwrap();
+        *seen != Some(hash) && *from_phone != Some(hash)
+    };
+    *guard.last_image_seen.lock().unwrap() = Some(hash);
+    differs.then(|| image_message(&image))
 }
 
 /// wifi.js watcher logic, verbatim:

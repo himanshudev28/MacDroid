@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The one directory DroidDock serves over its FileProvider: received clipboard
+  images, in the app's own cache.
+
+  Deliberately narrow. A clipboard image clip is a `content://` URI, and the
+  system grants whichever app pastes it read access to that URI — so anything
+  reachable through this provider is reachable by any app the user pastes into.
+  `cacheDir/clipboard` holds nothing but pictures this Mac just sent.
+-->
+<paths>
+    <cache-path name="clipboard" path="clipboard/" />
+</paths>

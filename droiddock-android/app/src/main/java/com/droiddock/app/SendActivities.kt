@@ -32,6 +32,25 @@ class SendClipboardActivity : Activity() {
         // getItemAt(0) on that throws — this activity is launched straight from the
         // Quick Settings tile, so that throw is a visible crash.
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+
+        // Images first, and only here. This activity exists to hold focus for a
+        // moment, which is the one state in which Android will let a background
+        // app read the clipboard at all — so it is also the only place a
+        // picture can be picked up. The Mac→phone direction needs no such
+        // trick and syncs on its own. See ClipImage for why that asymmetry is
+        // the platform's and not a gap here.
+        val image = ClipImage.readFromClipboard(this)
+        if (image != null) {
+            val ok = ConnectionManager.sendClipboardImage(image)
+            Toast.makeText(
+                this,
+                if (ok) "Image sent to Mac" else "Not connected to Mac",
+                Toast.LENGTH_SHORT
+            ).show()
+            finish()
+            return
+        }
+
         val text = runCatching {
             cm.primaryClip?.takeIf { it.itemCount > 0 }
                 ?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty()
