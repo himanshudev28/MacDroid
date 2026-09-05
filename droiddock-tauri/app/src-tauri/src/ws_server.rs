@@ -402,6 +402,7 @@ pub async fn run(app: AppHandle, state: SharedState, port: u16) {
             // left an app that looked completely healthy but could never accept
             // a phone, with the only clue on a stderr nobody reads.
             eprintln!("ws_server: failed to bind 0.0.0.0:{port} after 10 retries");
+            LISTENING.store(false, Ordering::Relaxed);
             emit_event(
                 &app,
                 "wifi-event",
@@ -417,6 +418,7 @@ pub async fn run(app: AppHandle, state: SharedState, port: u16) {
         }
     };
     eprintln!("[ws] listening on 0.0.0.0:{port}");
+    LISTENING.store(true, Ordering::Relaxed);
     loop {
         match listener.accept().await {
             Ok((stream, _peer)) => {
@@ -1238,6 +1240,19 @@ pub async fn push_caps(app: &AppHandle, state: &SharedState) {
     if push(state, json!({ "type": "caps", "caps": caps.clone() })).await {
         *state.last_caps.lock().await = caps;
     }
+}
+
+/// Whether the accept loop is actually bound to its port.
+///
+/// Losing the port is the app's most deceptive failure: a second copy of
+/// DroidDock takes it first, and the loser presents a completely healthy
+/// window that can never accept a phone. The bind failure was already
+/// detected and toasted — this makes it a state the health panel can *ask*
+/// about, minutes later, when the toast is long gone.
+static LISTENING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn is_listening() -> bool {
+    LISTENING.load(Ordering::Relaxed)
 }
 
 fn live_config(app: &AppHandle) -> crate::config::Config {
