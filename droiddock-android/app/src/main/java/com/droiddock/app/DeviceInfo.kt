@@ -44,6 +44,14 @@ object DeviceInfo {
         if (receiver != null) return
         receiver = object : BroadcastReceiver() {
             override fun onReceive(c: Context?, i: Intent?) {
+                // ACTION_BATTERY_CHANGED is one of the highest-frequency
+                // broadcasts on Android. `snapshot()` was evaluated eagerly on
+                // every one that cleared the debounce — a BatteryManager binder
+                // call plus a nested sticky-intent registerReceiver plus a
+                // JSONObject — and then discarded inside `send` whenever no Mac
+                // was linked. Check first; the arguments are only worth
+                // building for a message that can actually go out.
+                if (!ConnectionManager.connected.value) return
                 val now = System.currentTimeMillis()
                 if (now - lastPush < 30_000) return // debounce per spec
                 lastPush = now

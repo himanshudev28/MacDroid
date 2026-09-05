@@ -7,13 +7,16 @@
 //! *listings*, media metadata. That is where the personal data on this link
 //! actually lives.
 //!
-//! **Not covered:** binary frames — file-transfer chunks, photo thumbnails,
-//! app icons, and mirror video. Those ride a separate framing path
-//! (`[kind][id][seq]` + payload) on the hot transfer/mirror loops, and wrapping
-//! each 256 KiB chunk and each 30fps video frame would mean surgery on the
-//! highest-throughput, least-verified code in the app for the least privacy
-//! gain per byte. **So this is not end-to-end encryption of everything**, and
-//! the Settings copy says so rather than implying otherwise.
+//! **Also covered, as of `enc2`:** binary frames — file-transfer chunks, photo
+//! thumbnails, app icons and mirror video. These ride a separate framing path
+//! (`[kind][id][seq]` + payload) and are sealed whole, header included; see
+//! `seal_frame` below. Negotiated as its own capability so a phone that
+//! understands sealed JSON but not sealed frames keeps working.
+//!
+//! With both engaged, everything after the handshake is encrypted. The
+//! handshake itself is not, and cannot be: `hello` carries the token that
+//! derives the key, and `welcome` is the message that announces encryption is
+//! on. What that leaks is the phone's name and the fact of a connection.
 //!
 //! # Key
 //!
@@ -110,6 +113,71 @@ pub fn open(key: &LinkKey, envelope: &Value) -> Result<Value, String> {
     serde_json::from_slice(&plain).map_err(|_| "bad envelope".into())
 }
 
+// ── Binary frames (`enc2`) ───────────────────────────────────────────────
+//
+// The JSON envelope above covers control messages. This covers the other half
+// of the link: file chunks, thumbnails, app icons and mirror video, which ride
+// the `[kind][id][seq]` framing in `crate::transfer` rather than the JSON path.
+//
+// **Negotiated separately from `enc`**, as its own `enc2` capability. A phone
+// that understands sealed JSON but not sealed frames is a real combination —
+// this shipped later — and conflating them would break that phone's transfers
+// the moment the user turned encryption on.
+
+/// Frame kind marking a sealed frame. Distinct from every kind in
+/// `crate::transfer`, so an unsealed receiver hits its `_ => {}` default and
+/// drops the frame rather than misreading a nonce as a header.
+pub const KIND_SEALED: u8 = 0x80;
+
+/// The capability advertised for sealed binary frames.
+pub const CAP_FRAMES: &str = "enc2";
+
+/// Seal a complete binary frame — header included.
+///
+/// The whole frame is the plaintext, not just the payload: the header carries
+/// the transfer id and sequence number, and leaving those in the clear would
+/// leak the shape of every transfer (how many files, how large, in what order)
+/// to exactly the passive listener this is defending against.
+///
+/// Layout out: `[KIND_SEALED][12B nonce][AES-256-GCM(frame)]`, so the overhead
+/// is a fixed 29 bytes — negligible against a 256 KiB chunk and acceptable on a
+/// video frame.
+pub fn seal_frame(key: &LinkKey, frame: &[u8]) -> Result<Vec<u8>, String> {
+    let cipher = Aes256Gcm::new(&key.0);
+    let mut nonce_bytes = [0u8; NONCE_LEN];
+    // Random per frame, for the same reason `seal` uses random: a counter that
+    // restarts on reconnect would repeat a nonce, and GCM does not survive that.
+    // 96 random bits over the number of frames a mirror session can produce
+    // leaves collision probability far below anything that matters here.
+    getrandom::fill(&mut nonce_bytes).map_err(|e| format!("no system randomness: {e}"))?;
+
+    let sealed = cipher
+        .encrypt(&Nonce::from(nonce_bytes), frame)
+        .map_err(|_| "encrypt failed".to_string())?;
+
+    let mut out = Vec::with_capacity(1 + NONCE_LEN + sealed.len());
+    out.push(KIND_SEALED);
+    out.extend_from_slice(&nonce_bytes);
+    out.extend_from_slice(&sealed);
+    Ok(out)
+}
+
+/// Unwrap a sealed frame back into the original one.
+///
+/// Returns `None` on anything malformed or unauthentic — same opaque-failure
+/// posture as `open`. The caller drops the frame; there is nothing useful a
+/// transfer can do with a frame that failed authentication.
+pub fn open_frame(key: &LinkKey, buf: &[u8]) -> Option<Vec<u8>> {
+    if buf.first() != Some(&KIND_SEALED) || buf.len() < 1 + NONCE_LEN {
+        return None;
+    }
+    let nonce: [u8; NONCE_LEN] = buf[1..1 + NONCE_LEN].try_into().ok()?;
+    let cipher = Aes256Gcm::new(&key.0);
+    cipher
+        .decrypt(&Nonce::from(nonce), &buf[1 + NONCE_LEN..])
+        .ok()
+}
+
 /// Standard alphabet, padding tolerated — the mirror of `crate::base64_encode`,
 /// kept here rather than pulling a crate for two call sites.
 fn base64_decode(s: &str) -> Option<Vec<u8>> {
@@ -142,6 +210,75 @@ fn base64_decode(s: &str) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// The round trip, and that the header is genuinely inside the ciphertext —
+    /// a transfer id visible in the clear would leak the shape of every
+    /// transfer, which is the thing sealing frames is for.
+    #[test]
+    fn a_sealed_frame_round_trips_and_hides_its_header() {
+        let key = derive("pairing-token");
+        // [KIND_DATA][transferId=0x01020304][seq=5] + payload
+        let frame = vec![1, 1, 2, 3, 4, 0, 0, 0, 5, 0xAA, 0xBB, 0xCC];
+        let sealed = seal_frame(&key, &frame).expect("seals");
+
+        assert_eq!(sealed[0], KIND_SEALED);
+        assert_eq!(open_frame(&key, &sealed).as_deref(), Some(frame.as_slice()));
+        // Neither the header bytes nor the payload appear verbatim.
+        assert!(!sealed.windows(frame.len()).any(|w| w == frame.as_slice()));
+        assert!(!sealed[1..].windows(4).any(|w| w == [1, 2, 3, 4]));
+    }
+
+    /// Nonces must never repeat — GCM loses confidentiality *and* integrity on
+    /// reuse, so two seals of identical plaintext must differ.
+    #[test]
+    fn identical_frames_seal_differently() {
+        let key = derive("pairing-token");
+        let frame = vec![1, 0, 0, 0, 1, 0, 0, 0, 1, 42];
+        let a = seal_frame(&key, &frame).unwrap();
+        let b = seal_frame(&key, &frame).unwrap();
+        assert_ne!(a, b, "a repeated nonce would be a total break");
+        // Both still open to the same plaintext.
+        assert_eq!(open_frame(&key, &a).unwrap(), frame);
+        assert_eq!(open_frame(&key, &b).unwrap(), frame);
+    }
+
+    /// Authentication has to actually reject. A flipped bit anywhere in the
+    /// ciphertext, a wrong key, and a truncated frame must all fail closed.
+    #[test]
+    fn tampering_and_wrong_keys_are_rejected() {
+        let key = derive("pairing-token");
+        let other = derive("a-different-token");
+        let frame = vec![1, 0, 0, 0, 7, 0, 0, 0, 2, 9, 9, 9, 9];
+        let sealed = seal_frame(&key, &frame).unwrap();
+
+        assert!(open_frame(&other, &sealed).is_none(), "wrong key must fail");
+
+        for i in [0usize, 1, 13, sealed.len() - 1] {
+            let mut bad = sealed.clone();
+            bad[i] ^= 0x01;
+            assert!(open_frame(&key, &bad).is_none(), "flipped bit at {i} must fail");
+        }
+
+        // Truncations, including shorter than the nonce.
+        for cut in [1usize, 5, 13, sealed.len() - 1] {
+            assert!(open_frame(&key, &sealed[..cut]).is_none(), "truncation to {cut} must fail");
+        }
+        assert!(open_frame(&key, &[]).is_none());
+        // A plaintext frame handed to open_frame is not sealed, so it must not
+        // be mistaken for one.
+        assert!(open_frame(&key, &frame).is_none());
+    }
+
+    /// The sealed marker must not collide with any real frame kind, or an
+    /// unsealed peer would try to parse a nonce as a header.
+    #[test]
+    fn the_sealed_kind_is_distinct_from_every_real_frame_kind() {
+        assert_ne!(KIND_SEALED, crate::transfer::KIND_DATA);
+        assert_ne!(KIND_SEALED, crate::transfer::KIND_THUMB);
+        // Kind 3 is the mirror frame (see transfer.rs module docs).
+        assert_ne!(KIND_SEALED, 3);
+    }
     use super::*;
 
     #[test]

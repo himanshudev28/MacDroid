@@ -18,7 +18,7 @@
 //! path yet. Flagged in the checkpoint as a known, explicit gap.
 
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -117,6 +117,31 @@ async fn which(cmd: &str) -> Option<String> {
 /// Mirrors `resolveTool`: PATH (augmented) first, then the hardcoded
 /// candidate list, else `None` (not found — Wi-Fi features still work).
 pub async fn resolve_tool(name: &str) -> Option<String> {
+    // `adb` is resolved candidates-first, and the candidate list starts with the
+    // Android SDK's platform-tools. That ordering is load-bearing, not cosmetic.
+    //
+    // adb refuses to share its port-5037 server between client versions: a
+    // client that finds a server of a different version **kills it** and starts
+    // its own. So on a machine with both an SDK adb and a Homebrew adb, every
+    // Android Studio or Gradle invocation restarts the server underneath us, and
+    // whatever we had in flight dies with
+    //
+    //     protocol fault (couldn't read status message): Undefined error: 0
+    //
+    // which is what wireless QR pairing was failing with. Preferring the SDK's
+    // copy puts us on the same binary as the rest of the Android toolchain, so
+    // there is nothing to fight over. PATH remains the fallback for anyone
+    // without an SDK install.
+    //
+    // Only `adb` cares: `scrcpy` and `brew` have no shared daemon, so they keep
+    // resolving from PATH first, where a user's own build should win.
+    if name == "adb" {
+        for p in candidates(name) {
+            if p.is_file() {
+                return Some(p.to_string_lossy().to_string());
+            }
+        }
+    }
     if let Some(found) = which(name).await {
         return Some(found);
     }
@@ -391,6 +416,15 @@ fn group_devices(raw: Vec<RawDevice>, cache: &mut HashMap<String, String>) -> Ve
 pub struct AdbState {
     pub adb: Mutex<Option<String>>,
     pub scrcpy: Mutex<Option<String>>,
+    /// Parsed `(major, minor)` of the resolved scrcpy, probed once at `init`.
+    ///
+    /// Load-bearing, not cosmetic: the virtual-display flags this module emits
+    /// arrived across four different scrcpy releases, and passing one to an
+    /// older binary is a hard failure at spawn, not a degraded mirror. Probing
+    /// once here is what lets `desktop`/`mirror_app` drop the flags the local
+    /// scrcpy can't parse instead of handing the user a dead window.
+    /// `None` means "couldn't tell" — treated as the oldest supported build.
+    pub scrcpy_ver: Mutex<Option<(u32, u32)>>,
     pub brew: Mutex<Option<String>>,
     pub devices: Mutex<Vec<Device>>,
     serial_id_cache: Mutex<HashMap<String, String>>,
@@ -409,6 +443,7 @@ impl Default for AdbState {
         Self {
             adb: Mutex::new(None),
             scrcpy: Mutex::new(None),
+            scrcpy_ver: Mutex::new(None),
             brew: Mutex::new(None),
             devices: Mutex::new(Vec::new()),
             serial_id_cache: Mutex::new(HashMap::new()),
@@ -430,6 +465,81 @@ pub struct ToolsStatus {
     pub brew: bool,
     pub adb_path: Option<String>,
     pub scrcpy_path: Option<String>,
+    /// `"4.1"` etc., or `None` when scrcpy is missing or didn't answer.
+    pub scrcpy_version: Option<String>,
+    /// Which optional virtual-display features the resolved scrcpy supports.
+    /// The UI reads these to disable actions with a reason rather than letting
+    /// the spawn fail — see `ScrcpyCaps`.
+    pub caps: ScrcpyCaps,
+}
+
+/// Feature gates derived from the probed scrcpy version.
+///
+/// Each flag below arrived in a specific release, and an older binary rejects
+/// the whole command line rather than ignoring the unknown option:
+///
+/// | flag                          | since |
+/// |-------------------------------|-------|
+/// | `--new-display`               | 3.0   |
+/// | `--start-app`                 | 3.0   |
+/// | `--no-vd-system-decorations`  | 3.0   |
+/// | `--no-vd-destroy-content`     | 3.1   |
+/// | `--display-ime-policy`        | 3.2   |
+/// | `--flex-display` / `-x`       | 4.0   |
+/// | `--keyboard=uhid`             | 2.4   |
+#[derive(Serialize, Clone, Copy, Default, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ScrcpyCaps {
+    /// Virtual displays at all — desktop mode and per-app windows need this.
+    pub virtual_display: bool,
+    /// `--no-vd-destroy-content`: leave the app running on the phone at close.
+    pub keep_content: bool,
+    /// `--flex-display`: resize the Android display with the Mac window.
+    pub flex_display: bool,
+    /// `--keyboard=uhid`: low-level key injection.
+    pub uhid: bool,
+    /// `--display-ime-policy=local`: put the Android keyboard in the mirrored
+    /// window instead of on the phone's own screen.
+    pub ime_policy: bool,
+}
+
+impl ScrcpyCaps {
+    fn from_version(v: Option<(u32, u32)>) -> Self {
+        let Some((maj, min)) = v else {
+            return Self::default();
+        };
+        let at_least = |a: u32, b: u32| maj > a || (maj == a && min >= b);
+        Self {
+            virtual_display: at_least(3, 0),
+            keep_content: at_least(3, 1),
+            ime_policy: at_least(3, 2),
+            flex_display: at_least(4, 0),
+            uhid: at_least(2, 4),
+        }
+    }
+}
+
+/// Ask a resolved scrcpy for its version. Output looks like
+/// `scrcpy 4.1 <https://github.com/Genymobile/scrcpy>` on the first line.
+///
+/// Short timeout and a swallowed error on purpose: a scrcpy that can't answer
+/// this is one we treat as ancient, which is the conservative direction — the
+/// optional flags stay off and mirroring still works exactly as it did.
+async fn probe_scrcpy_version(path: &str) -> Option<(u32, u32)> {
+    let out = run(path, &["--version"], Duration::from_secs(5)).await.ok()?;
+    let first = out.lines().next()?;
+    let num = first.split_whitespace().nth(1)?;
+    // Tolerate "4.1", "4.1.0" and "3.0-rc1" alike — only the first two
+    // components decide any gate above.
+    let mut parts = num.split(['.', '-']);
+    let maj = parts.next()?.parse().ok()?;
+    let min = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    Some((maj, min))
+}
+
+/// The caps of the currently resolved scrcpy.
+pub fn scrcpy_caps(state: &AdbState) -> ScrcpyCaps {
+    ScrcpyCaps::from_version(*state.scrcpy_ver.lock().unwrap())
 }
 
 fn tools_status(state: &AdbState) -> ToolsStatus {
@@ -445,12 +555,18 @@ fn tools_status(state: &AdbState) -> ToolsStatus {
     let adb_path = state.adb.lock().unwrap().clone();
     let scrcpy_path = state.scrcpy.lock().unwrap().clone();
     let brew = state.brew.lock().unwrap().is_some();
+    // Same one-lock-per-field discipline as above: `scrcpy_caps` takes the
+    // `scrcpy_ver` lock itself, so it is called into a local first.
+    let ver = *state.scrcpy_ver.lock().unwrap();
+    let caps = ScrcpyCaps::from_version(ver);
     ToolsStatus {
         adb: adb_path.is_some(),
         scrcpy: scrcpy_path.is_some(),
         brew,
         adb_path,
         scrcpy_path,
+        scrcpy_version: ver.map(|(a, b)| format!("{a}.{b}")),
+        caps,
     }
 }
 
@@ -640,10 +756,18 @@ pub async fn init(app: AppHandle, base_dir: PathBuf) {
     let adb = resolve_tool("adb").await;
     let scrcpy = resolve_tool("scrcpy").await;
     let brew = resolve_tool("brew").await;
+    // Probed before the state lock, not inside it: this shells out, and the
+    // guards in this block are `std::sync::Mutex` held across no await point
+    // by design.
+    let scrcpy_ver = match scrcpy.as_deref() {
+        Some(p) => probe_scrcpy_version(p).await,
+        None => None,
+    };
     {
         let state = app.state::<AdbState>();
         *state.adb.lock().unwrap() = adb;
         *state.scrcpy.lock().unwrap() = scrcpy;
+        *state.scrcpy_ver.lock().unwrap() = scrcpy_ver;
         *state.brew.lock().unwrap() = brew;
     }
     ensure_adb(app.clone(), base_dir).await;
@@ -700,8 +824,56 @@ fn start_reconnect_scheduler(app: AppHandle) {
 // ── Wireless pairing / mDNS / reconnect (mirrors the corresponding adb.js fns) ──
 
 /// Android 11+ Wireless Debugging pairing. Returns the device guid.
+/// Whether an `adb` failure is the transport giving out rather than the command
+/// being answered "no".
+///
+/// The distinction is what makes retrying safe. These messages all mean the
+/// request never reached the phone — the adb *server* went away underneath the
+/// client, most often because another adb of a different version restarted it
+/// (see `resolve_tool`). Retrying re-sends a request that was never delivered.
+///
+/// A wrong pairing code, by contrast, comes back as a normal unsuccessful
+/// result, and retrying that would burn the phone's one-shot pairing session
+/// for nothing.
+fn is_transient_adb_error(e: &str) -> bool {
+    let e = e.to_lowercase();
+    [
+        "protocol fault",
+        "couldn't read status message",
+        "connection reset",
+        "device offline",
+        "device still connecting",
+        "closed",
+        "cannot connect to daemon",
+        "server is out of date",
+    ]
+    .iter()
+    .any(|needle| e.contains(needle))
+}
+
 pub async fn pair_wireless(adb: &str, host_port: &str, code: &str) -> Result<String, String> {
-    let out = run(adb, &["pair", host_port, code], Duration::from_secs(15)).await?;
+    // Three attempts, because the failure this guards against is a server
+    // restart: the first command dies, the client transparently starts a new
+    // server, and the next attempt succeeds. This is what QR pairing was
+    // failing on — a single `protocol fault (couldn't read status message)`
+    // aborted the whole flow with the phone still waiting on its scan screen.
+    let mut last = String::new();
+    for attempt in 0..3 {
+        match run(adb, &["pair", host_port, code], Duration::from_secs(15)).await {
+            Ok(out) => return parse_pair_output(&out),
+            Err(e) if is_transient_adb_error(&e) && attempt < 2 => {
+                last = e;
+                // Long enough for a restarting adb server to finish binding.
+                tokio::time::sleep(Duration::from_millis(1200)).await;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(if last.is_empty() { "Pairing failed".into() } else { last })
+}
+
+/// Pull the device guid out of a successful `adb pair` result.
+fn parse_pair_output(out: &str) -> Result<String, String> {
     if !out.to_lowercase().contains("successfully paired") {
         return Err(if out.trim().is_empty() { "Pairing failed".into() } else { out.trim().to_string() });
     }
@@ -859,11 +1031,13 @@ pub fn scrcpy_quality_args(app: &AppHandle) -> Vec<String> {
     v
 }
 
-pub fn mirror(app: AppHandle, scrcpy: &str, serial: &str, adb: Option<&str>) -> Result<(), String> {
+pub fn mirror(app: AppHandle, scrcpy: &str, serial: &str, caps: ScrcpyCaps, adb: Option<&str>) -> Result<(), String> {
     let quality = scrcpy_quality_args(&app);
+    let prefs = mirror_prefs(&app);
     std::process::Command::new(scrcpy)
         .args(["-s", serial, "--window-title", "DroidDock — Mirror"])
         .args(&quality)
+        .args(scrcpy_option_args(&prefs, caps))
         .envs(scrcpy_env(adb))
         // Detached with stdio ignored, matching the Electron reference's
         // `spawn(..., {detached:true, stdio:'ignore'})`. Without this each
@@ -920,32 +1094,158 @@ fn auto_desktop_size(app: &AppHandle) -> String {
     format!("{}x{}", w & !1, h & !1)
 }
 
-pub fn desktop(app: AppHandle, scrcpy: &str, serial: &str, size: Option<&str>, adb: Option<&str>) -> Result<(), String> {
-    // "Flex display": `--new-display=1920x1080` sizes the virtual display, and
-    // scrcpy lets you resize the window afterwards.
-    //
-    // "Auto" used to pass the bare `--new-display`, which lets the *device*
-    // choose — and a phone chooses its own portrait geometry. The result was a
-    // tall, phone-shaped window running Android's desktop UI, which is the one
-    // shape desktop mode exists to avoid. Auto now derives a landscape size
-    // from this Mac's own screen instead.
-    let display_arg = match size {
-        Some(s) if !s.is_empty() => format!("--new-display={s}"),
-        _ => format!("--new-display={}", auto_desktop_size(&app)),
+/// The density a virtual display is created at, and therefore whether Android
+/// serves its phone layout or its desktop one.
+///
+/// This is the whole mechanism behind "why does the app open stretched".
+/// Android picks a layout from `smallestScreenWidthDp = px ÷ (dpi ÷ 160)`, so
+/// the same 1920×1080 surface is:
+///
+/// - ~731 dp at a phone's native ~420 dpi → the phone layout, magnified
+/// - 1920 dp at 160 dpi → the `sw720dp` bucket → tablet/desktop layouts
+///
+/// Passing a size with no `/dpi` inherits the phone's own density, which is
+/// exactly what the old code did and why desktop mode looked like a blown-up
+/// phone. Expressed as a user choice rather than a constant because "which
+/// layout do I want" is a preference, not a correctness question — some apps
+/// genuinely behave better in their phone layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiMode {
+    /// ~160 dpi. Tablet/desktop layouts, freeform windows.
+    Desktop,
+    /// ~240 dpi. Larger touch targets, still the large-screen layouts.
+    Tablet,
+    /// No `/dpi` at all — the device's own density, i.e. the phone layout.
+    /// This reproduces the pre-existing behaviour exactly.
+    Phone,
+}
+
+impl UiMode {
+    /// Parses the config string. Anything unrecognised falls back to `Desktop`,
+    /// which is the mode the feature exists to provide.
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "phone" => Self::Phone,
+            "tablet" => Self::Tablet,
+            _ => Self::Desktop,
+        }
+    }
+
+    /// The `/dpi` suffix for a `--new-display` value, empty for `Phone`.
+    fn dpi_suffix(self) -> &'static str {
+        match self {
+            Self::Desktop => "/160",
+            Self::Tablet => "/240",
+            Self::Phone => "",
+        }
+    }
+}
+
+/// Read the mirror-related settings once, so a single spawn can't observe two
+/// different configs.
+struct MirrorPrefs {
+    ui_mode: UiMode,
+    flex: bool,
+    app_window_chrome: bool,
+    app_window_keep_alive: bool,
+    codec: String,
+    audio: bool,
+    uhid: bool,
+    stay_awake: bool,
+    turn_screen_off: bool,
+    always_on_top: bool,
+}
+
+fn mirror_prefs(app: &AppHandle) -> MirrorPrefs {
+    let cfg = app.state::<crate::AppState>().config.lock().unwrap().clone();
+    MirrorPrefs {
+        ui_mode: UiMode::parse(&cfg.desktop_ui_mode),
+        flex: cfg.desktop_flex,
+        app_window_chrome: cfg.app_window_chrome,
+        app_window_keep_alive: cfg.app_window_keep_alive,
+        codec: cfg.mirror_codec,
+        audio: cfg.mirror_audio,
+        uhid: cfg.scrcpy_uhid,
+        stay_awake: cfg.scrcpy_stay_awake,
+        turn_screen_off: cfg.scrcpy_turn_screen_off,
+        always_on_top: cfg.scrcpy_always_on_top,
+    }
+}
+
+/// Flags shared by every scrcpy launch that the user can opt into.
+///
+/// All default to off/absent, so with a freshly-defaulted config this returns
+/// only what scrcpy would have done anyway — the existing mirror behaviour is
+/// unchanged unless the user turns something on.
+fn scrcpy_option_args(p: &MirrorPrefs, caps: ScrcpyCaps) -> Vec<String> {
+    let mut v = Vec::new();
+    // "h264" is the default and means "say nothing" — scrcpy's own default is
+    // H.264, and naming a codec the device can't encode is a hard failure.
+    if p.codec == "h265" {
+        v.push("--video-codec=h265".to_string());
+    }
+    // scrcpy forwards audio by default on Android 11+; this flag is only ever
+    // the opt-*out*, which is why `audio: true` adds nothing.
+    if !p.audio {
+        v.push("--no-audio".to_string());
+    }
+    if p.uhid && caps.uhid {
+        v.push("--keyboard=uhid".to_string());
+    }
+    if p.stay_awake {
+        v.push("--stay-awake".to_string());
+    }
+    if p.turn_screen_off {
+        v.push("--turn-screen-off".to_string());
+    }
+    if p.always_on_top {
+        v.push("--always-on-top".to_string());
+    }
+    v
+}
+
+pub fn desktop(
+    app: AppHandle,
+    scrcpy: &str,
+    serial: &str,
+    size: Option<&str>,
+    caps: ScrcpyCaps,
+    adb: Option<&str>,
+) -> Result<(), String> {
+    if !caps.virtual_display {
+        return Err(SCRCPY_TOO_OLD.into());
+    }
+    let prefs = mirror_prefs(&app);
+
+    // `--new-display=<WxH>/<dpi>`. The size decides the canvas; the density
+    // decides which Android layout fills it. "Auto" derives a landscape size
+    // from this Mac's screen, because a phone left to choose picks its own
+    // portrait geometry — the one shape desktop mode exists to avoid.
+    let geometry = match size {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => auto_desktop_size(&app),
     };
-    std::process::Command::new(scrcpy)
-        .args([
-            "-s",
-            serial,
-            &display_arg,
-            "--window-title",
-            "DroidDock — Desktop",
-        ])
-        // Desktop mode drives ~3× the pixels of a portrait phone view, so
-        // scrcpy's 8 Mbps default is exactly where the mush came from. These
-        // are the user's settings now rather than a constant.
-        .args(scrcpy_quality_args(&app))
-        .envs(scrcpy_env(adb))
+    let display_arg = format!("--new-display={geometry}{}", prefs.ui_mode.dpi_suffix());
+
+    let mut cmd = std::process::Command::new(scrcpy);
+    cmd.args(["-s", serial, &display_arg, "--window-title", "DroidDock — Desktop"]);
+    // Flex display: resizing the Mac window resizes the Android display itself
+    // rather than scaling a fixed one.
+    if prefs.flex && caps.flex_display {
+        cmd.arg("--flex-display");
+    }
+    // Without this the Android keyboard opens on the *phone's* screen while you
+    // type into the Mac window — which defeats the point of a desktop you can
+    // work in. Android's default IME policy sends it to the default display.
+    if caps.ime_policy {
+        cmd.arg("--display-ime-policy=local");
+    }
+    // Deliberately NOT `scrcpy_quality_args`: that carries `--max-size`, which
+    // re-caps the very display this function just sized. Bit rate and fps still
+    // apply — desktop mode drives ~3× the pixels of a portrait phone view.
+    cmd.args(desktop_quality_args(&app));
+    cmd.args(scrcpy_option_args(&prefs, caps));
+    cmd.envs(scrcpy_env(adb))
         // Detached with stdio ignored, matching the Electron reference's
         // `spawn(..., {detached:true, stdio:'ignore'})`. Without this each
         // session left a zombie behind and scrcpy's chatter went to our stdio.
@@ -959,6 +1259,23 @@ pub fn desktop(app: AppHandle, scrcpy: &str, serial: &str, size: Option<&str>, a
         .map_err(|e| e.to_string())
 }
 
+/// What the UI shows when the local scrcpy predates virtual displays.
+const SCRCPY_TOO_OLD: &str =
+    "Desktop mode needs scrcpy 3.0 or newer — run `brew upgrade scrcpy`, or use Install scrcpy in Settings";
+
+/// Bit rate and frame rate without `--max-size`.
+///
+/// Split out from `scrcpy_quality_args` because the two virtual-display modes
+/// size their display explicitly; adding a longest-edge cap on top silently
+/// undoes that, which is why desktop mode looked soft at every setting.
+fn desktop_quality_args(app: &AppHandle) -> Vec<String> {
+    let cfg = app.state::<crate::AppState>().config.lock().unwrap().clone();
+    vec![
+        format!("--video-bit-rate={}M", cfg.mirror_bitrate_mbps.clamp(1, 50)),
+        format!("--max-fps={}", cfg.mirror_fps.clamp(15, 120)),
+    ]
+}
+
 /// Mirror with one app started on it. On a new virtual display this is how you
 /// get "that Android app, in its own Mac window" rather than a mirror of the
 /// whole phone — the Apps grid's "open on Mac" action.
@@ -968,12 +1285,39 @@ pub fn mirror_app(
     serial: &str,
     package: &str,
     new_display: bool,
+    caps: ScrcpyCaps,
     adb: Option<&str>,
 ) -> Result<(), String> {
+    if new_display && !caps.virtual_display {
+        return Err(SCRCPY_TOO_OLD.into());
+    }
+    let prefs = mirror_prefs(&app);
     let mut cmd = std::process::Command::new(scrcpy);
     cmd.args(["-s", serial]);
     if new_display {
-        cmd.arg("--new-display");
+        // Size deliberately omitted — with flex display the *window* drives the
+        // display size, so only the density needs stating. The old bare
+        // `--new-display` let the phone choose both, and a phone chooses its
+        // own portrait geometry at its own dpi: the tall, stretched window this
+        // is fixing.
+        cmd.arg(format!("--new-display={}", prefs.ui_mode.dpi_suffix()));
+        if prefs.flex && caps.flex_display {
+            cmd.arg("--flex-display");
+        }
+        // No launcher, status bar or nav bar around the app — this is what
+        // makes it read as a Mac window of that app rather than a phone screen
+        // that happens to have the app open.
+        if !prefs.app_window_chrome {
+            cmd.arg("--no-vd-system-decorations");
+        }
+        // On close, hand the app back to the phone instead of killing it.
+        if prefs.app_window_keep_alive && caps.keep_content {
+            cmd.arg("--no-vd-destroy-content");
+        }
+        // Keyboard in this window, not on the phone — see `desktop`.
+        if caps.ime_policy {
+            cmd.arg("--display-ime-policy=local");
+        }
     }
     // scrcpy takes `--start-app=+pkg` to force-stop first, so re-launching an
     // app that is already running on the phone still lands on the new display
@@ -983,6 +1327,15 @@ pub fn mirror_app(
         "--window-title".to_string(),
         format!("DroidDock — {package}"),
     ]);
+    // Bit rate and fps, but no `--max-size` on a virtual display — see
+    // `desktop_quality_args`. Without a new display this is an ordinary mirror
+    // and keeps the resolution cap it always had.
+    if new_display {
+        cmd.args(desktop_quality_args(&app));
+    } else {
+        cmd.args(scrcpy_quality_args(&app));
+    }
+    cmd.args(scrcpy_option_args(&prefs, caps));
     cmd.envs(scrcpy_env(adb))
         // Detached with stdio ignored, matching the Electron reference's
         // `spawn(..., {detached:true, stdio:'ignore'})`. Without this each
@@ -995,6 +1348,116 @@ pub fn mirror_app(
         .spawn()
         .map(|c| reap(app, "App window", c))
         .map_err(|e| e.to_string())
+}
+
+// ── Android freeform / desktop-windowing settings (opt-in) ───────────────
+//
+// A low-density virtual display is enough to get large-screen *layouts*. The
+// full freeform desktop — draggable, resizable app windows on that display —
+// additionally needs three secure system settings on the phone.
+//
+// These are the user's device, not ours: they persist after DroidDock is
+// uninstalled, so nothing here is applied as a side effect of starting a
+// mirror. The UI asks, this applies, and `desktop_settings_revert` puts back
+// the values that were there before rather than blindly writing 0.
+
+/// The globals that control freeform windowing, in the order the UI shows them.
+const FREEFORM_KEYS: [&str; 3] = [
+    "enable_freeform_support",
+    "force_desktop_mode_on_external_displays",
+    "enable_non_resizable_multi_window",
+];
+
+/// Android 15 is where desktop windowing on a secondary display became real.
+const FREEFORM_MIN_SDK: u32 = 35;
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct FreeformStatus {
+    /// The phone's API level, if it could be read.
+    pub sdk: Option<u32>,
+    /// Whether this phone is new enough for the settings to mean anything.
+    pub supported: bool,
+    /// Current value of each key, in `FREEFORM_KEYS` order. `None` = unset.
+    pub values: Vec<Option<String>>,
+    /// True when all three read as `1`.
+    pub enabled: bool,
+}
+
+async fn read_setting(adb: &str, serial: &str, key: &str) -> Option<String> {
+    let out = run(adb, &["-s", serial, "shell", "settings", "get", "global", key], DEFAULT_TIMEOUT)
+        .await
+        .ok()?;
+    let v = out.trim().to_string();
+    // `settings get` prints the literal string "null" for an unset key.
+    if v.is_empty() || v == "null" {
+        None
+    } else {
+        Some(v)
+    }
+}
+
+/// Read the phone's current freeform settings without changing anything.
+pub async fn freeform_status(adb: &str, serial: &str) -> FreeformStatus {
+    let sdk = run(adb, &["-s", serial, "shell", "getprop", "ro.build.version.sdk"], DEFAULT_TIMEOUT)
+        .await
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok());
+    let mut values = Vec::with_capacity(FREEFORM_KEYS.len());
+    for key in FREEFORM_KEYS {
+        values.push(read_setting(adb, serial, key).await);
+    }
+    let enabled = values.iter().all(|v| v.as_deref() == Some("1"));
+    FreeformStatus {
+        sdk,
+        supported: sdk.is_some_and(|s| s >= FREEFORM_MIN_SDK),
+        values,
+        enabled,
+    }
+}
+
+/// Turn freeform windowing on, capturing the prior values first so
+/// `desktop_settings_revert` can restore exactly what was there.
+///
+/// Returns the captured prior state for the caller to persist.
+pub async fn freeform_enable(adb: &str, serial: &str) -> Result<Map<String, Value>, String> {
+    let mut prev = Map::new();
+    for key in FREEFORM_KEYS {
+        let before = read_setting(adb, serial, key).await;
+        prev.insert(
+            key.to_string(),
+            before.map(Value::String).unwrap_or(Value::Null),
+        );
+        run(adb, &["-s", serial, "shell", "settings", "put", "global", key, "1"], DEFAULT_TIMEOUT)
+            .await
+            .map_err(|e| format!("couldn't set {key}: {e}"))?;
+    }
+    Ok(prev)
+}
+
+/// Put the three settings back the way `freeform_enable` found them.
+///
+/// A key that was unset before is deleted rather than set to 0 — those are
+/// different states to Android, and writing 0 would leave a trace of us behind
+/// on a device we were asked to leave alone.
+pub async fn freeform_revert(adb: &str, serial: &str, prev: &Map<String, Value>) -> Result<(), String> {
+    for key in FREEFORM_KEYS {
+        match prev.get(key).and_then(Value::as_str) {
+            Some(v) => {
+                run(adb, &["-s", serial, "shell", "settings", "put", "global", key, v], DEFAULT_TIMEOUT)
+                    .await
+                    .map_err(|e| format!("couldn't restore {key}: {e}"))?;
+            }
+            // Either explicitly captured as null, or we have no record at all —
+            // both mean "there was nothing here", so remove ours.
+            None => {
+                run(adb, &["-s", serial, "shell", "settings", "delete", "global", key], DEFAULT_TIMEOUT)
+                    .await
+                    .map_err(|e| format!("couldn't clear {key}: {e}"))?;
+            }
+        }
+    }
+    Ok(())
 }
 
 // ── Device info / filesystem / media (ported for fidelity; see module doc) ──
@@ -1356,7 +1819,15 @@ pub async fn adb_scrcpy_install(app: AppHandle, state: tauri::State<'_, AdbState
     brew_install(&brew, "scrcpy").await?;
     let scrcpy = resolve_tool("scrcpy").await;
     let found = scrcpy.is_some();
+    // Re-probe, or a scrcpy installed in this very call would keep the caps
+    // that were computed when it didn't exist — every virtual-display action
+    // would stay disabled until the next app launch.
+    let ver = match scrcpy.as_deref() {
+        Some(p) => probe_scrcpy_version(p).await,
+        None => None,
+    };
     *state.scrcpy.lock().unwrap() = scrcpy;
+    *state.scrcpy_ver.lock().unwrap() = ver;
     let _ = app.emit("tools", tools_status(&state));
     if found {
         Ok(())
@@ -1547,7 +2018,8 @@ pub async fn adb_camera(app: AppHandle, state: tauri::State<'_, AdbState>, seria
 pub async fn adb_mirror(app: AppHandle, state: tauri::State<'_, AdbState>, serial: String) -> Result<(), String> {
     let scrcpy = state.scrcpy.lock().unwrap().clone().ok_or("scrcpy not found — brew install scrcpy")?;
     let adb = state.adb.lock().unwrap().clone();
-    mirror(app, &scrcpy, &serial, adb.as_deref())
+    let caps = scrcpy_caps(&state);
+    mirror(app, &scrcpy, &serial, caps, adb.as_deref())
 }
 
 /// Tier D: mirror a *new virtual display* rather than the phone's own screen.
@@ -1560,7 +2032,8 @@ pub async fn adb_desktop(
 ) -> Result<(), String> {
     let scrcpy = state.scrcpy.lock().unwrap().clone().ok_or("scrcpy not found — brew install scrcpy")?;
     let adb = state.adb.lock().unwrap().clone();
-    desktop(app, &scrcpy, &serial, size.as_deref(), adb.as_deref())
+    let caps = scrcpy_caps(&state);
+    desktop(app, &scrcpy, &serial, size.as_deref(), caps, adb.as_deref())
 }
 
 /// Tier D: open one Android app in its own Mac window. With `new_display` the
@@ -1576,7 +2049,76 @@ pub async fn adb_mirror_app(
 ) -> Result<(), String> {
     let scrcpy = state.scrcpy.lock().unwrap().clone().ok_or("scrcpy not found — brew install scrcpy")?;
     let adb = state.adb.lock().unwrap().clone();
-    mirror_app(app, &scrcpy, &serial, &package, new_display, adb.as_deref())
+    let caps = scrcpy_caps(&state);
+    mirror_app(app, &scrcpy, &serial, &package, new_display, caps, adb.as_deref())
+}
+
+/// Read the phone's freeform/desktop-windowing settings. Pure read — nothing
+/// on the device changes, so the UI can call this whenever it likes.
+#[tauri::command]
+pub async fn adb_freeform_status(state: tauri::State<'_, AdbState>) -> Result<FreeformStatus, String> {
+    let adb = state.adb.lock().unwrap().clone().ok_or("ADB not found")?;
+    let serial = first_device_serial(&state).ok_or("No ADB device")?;
+    Ok(freeform_status(&adb, &serial).await)
+}
+
+/// Turn freeform windowing on, remembering the prior values for Revert.
+///
+/// Only ever reached from an explicit button — never as a side effect of
+/// starting a mirror. These settings outlive DroidDock's own install.
+#[tauri::command]
+pub async fn adb_freeform_enable(
+    app: AppHandle,
+    state: tauri::State<'_, AdbState>,
+) -> Result<FreeformStatus, String> {
+    let adb = state.adb.lock().unwrap().clone().ok_or("ADB not found")?;
+    let serial = first_device_serial(&state).ok_or("No ADB device")?;
+    let status = freeform_status(&adb, &serial).await;
+    if !status.supported {
+        return Err(format!(
+            "Needs Android 15 or newer — this phone reports API {}",
+            status.sdk.map(|s| s.to_string()).unwrap_or_else(|| "unknown".into())
+        ));
+    }
+    let prev = freeform_enable(&adb, &serial).await?;
+    {
+        let app_state = app.state::<crate::AppState>();
+        let mut cfg = app_state.config.lock().unwrap();
+        // Only record the *first* capture. Enabling twice must not overwrite
+        // the original values with our own 1s — that would make Revert a no-op
+        // and strand the phone in a state we can no longer undo.
+        if cfg.freeform_prev.is_none() {
+            cfg.freeform_prev = Some(prev);
+        }
+        crate::config::save(&app, &cfg);
+    }
+    Ok(freeform_status(&adb, &serial).await)
+}
+
+/// Put the phone's freeform settings back the way we found them.
+#[tauri::command]
+pub async fn adb_freeform_revert(
+    app: AppHandle,
+    state: tauri::State<'_, AdbState>,
+) -> Result<FreeformStatus, String> {
+    let adb = state.adb.lock().unwrap().clone().ok_or("ADB not found")?;
+    let serial = first_device_serial(&state).ok_or("No ADB device")?;
+    let prev = {
+        let app_state = app.state::<crate::AppState>();
+        let cfg = app_state.config.lock().unwrap();
+        cfg.freeform_prev.clone()
+    };
+    // No record means we never enabled it — clearing the keys is still the
+    // right restore, since "we didn't set them" and "they were unset" are the
+    // same end state from the phone's point of view.
+    freeform_revert(&adb, &serial, &prev.unwrap_or_default()).await?;
+    {
+        let app_state = app.state::<crate::AppState>();
+        let mut cfg = app_state.config.lock().unwrap();
+        cfg.freeform_prev = None;
+        crate::config::save(&app, &cfg);
+    }
+    Ok(freeform_status(&adb, &serial).await)
 }
 
 #[tauri::command]
@@ -1656,6 +2198,103 @@ pub fn adb_call_start_polling(app: AppHandle, state: tauri::State<AdbState>, ser
 
 #[cfg(test)]
 mod tests {
+    use super::{is_transient_adb_error, parse_pair_output, ScrcpyCaps, UiMode};
+
+    /// The exact string wireless QR pairing died on must be recognised as
+    /// transient, or the retry that fixes it never runs.
+    #[test]
+    fn the_pairing_failure_we_actually_hit_is_treated_as_transient() {
+        assert!(is_transient_adb_error(
+            "protocol fault (couldn't read status message): Undefined error: 0"
+        ));
+        assert!(is_transient_adb_error("adb: device offline"));
+        assert!(is_transient_adb_error("error: closed"));
+        assert!(is_transient_adb_error("Connection reset by peer"));
+        assert!(is_transient_adb_error("adb server is out of date. killing..."));
+    }
+
+    /// A rejected pairing must NOT be retried: the phone's pairing session is
+    /// single-use, so a second attempt with a bad code burns it and the user
+    /// has to restart the whole flow on the phone.
+    #[test]
+    fn a_rejected_pairing_is_never_retried() {
+        assert!(!is_transient_adb_error("failed to pair: wrong code"));
+        assert!(!is_transient_adb_error("adb: failed to pair to 192.168.1.5:37000"));
+        assert!(!is_transient_adb_error(""));
+        assert!(!is_transient_adb_error("Pairing failed"));
+    }
+
+    /// The guid is what every later reconnect keys on, so parsing it out of
+    /// adb's chatty success line is load-bearing.
+    #[test]
+    fn a_successful_pair_yields_its_guid() {
+        let ok = "Successfully paired to 192.168.1.5:37000 [guid=adb-RZ8N70ABCDE-Xy9Qk2]";
+        assert_eq!(parse_pair_output(ok).unwrap(), "adb-RZ8N70ABCDE-Xy9Qk2");
+
+        // Success without a guid, and outright failure, are both errors rather
+        // than an empty guid that would poison the reconnect path.
+        assert!(parse_pair_output("Successfully paired to 1.2.3.4:5").is_err());
+        assert!(parse_pair_output("failed to pair").is_err());
+        assert!(parse_pair_output("").is_err());
+    }
+
+    /// The density suffix is the whole mechanism behind desktop-vs-phone
+    /// layout. `Phone` must emit *nothing* — a `/0` or a `/420` would both be
+    /// wrong, the first invalid and the second a guess at the device's density.
+    #[test]
+    fn ui_mode_dpi_suffixes() {
+        assert_eq!(UiMode::Desktop.dpi_suffix(), "/160");
+        assert_eq!(UiMode::Tablet.dpi_suffix(), "/240");
+        assert_eq!(UiMode::Phone.dpi_suffix(), "");
+    }
+
+    /// An unrecognised value must land on `Desktop`, not panic and not silently
+    /// pick `Phone` — a config written by a newer build should degrade to the
+    /// mode the feature exists to provide.
+    #[test]
+    fn ui_mode_parse_is_total() {
+        assert_eq!(UiMode::parse("desktop"), UiMode::Desktop);
+        assert_eq!(UiMode::parse("tablet"), UiMode::Tablet);
+        assert_eq!(UiMode::parse("phone"), UiMode::Phone);
+        assert_eq!(UiMode::parse(""), UiMode::Desktop);
+        assert_eq!(UiMode::parse("something-newer"), UiMode::Desktop);
+    }
+
+    /// The gates that stop us handing a flag to a scrcpy that can't parse it.
+    /// Getting these wrong is a hard spawn failure, not a degraded mirror.
+    #[test]
+    fn scrcpy_caps_track_the_release_each_flag_landed_in() {
+        // Unknown version: assume the oldest, enable nothing optional.
+        let unknown = ScrcpyCaps::from_version(None);
+        assert!(!unknown.virtual_display);
+        assert!(!unknown.flex_display);
+        assert!(!unknown.keep_content);
+        assert!(!unknown.uhid);
+
+        // 2.4 brought uhid and nothing else here.
+        let v24 = ScrcpyCaps::from_version(Some((2, 4)));
+        assert!(v24.uhid);
+        assert!(!v24.virtual_display);
+
+        // 3.0 is where --new-display arrived. The UI claimed 2.5 for a long
+        // time; this is the assertion that keeps that claim from coming back.
+        assert!(!ScrcpyCaps::from_version(Some((2, 5))).virtual_display);
+        let v30 = ScrcpyCaps::from_version(Some((3, 0)));
+        assert!(v30.virtual_display);
+        assert!(!v30.keep_content);
+        assert!(!v30.flex_display);
+
+        // 3.1 adds --no-vd-destroy-content, 3.2 --display-ime-policy,
+        // 4.0 --flex-display.
+        assert!(ScrcpyCaps::from_version(Some((3, 1))).keep_content);
+        assert!(!ScrcpyCaps::from_version(Some((3, 1))).ime_policy);
+        assert!(ScrcpyCaps::from_version(Some((3, 2))).ime_policy);
+        assert!(!ScrcpyCaps::from_version(Some((3, 9))).flex_display);
+        let v41 = ScrcpyCaps::from_version(Some((4, 1)));
+        assert!(v41.flex_display && v41.keep_content && v41.virtual_display && v41.uhid);
+        assert!(v41.ime_policy);
+    }
+
     /// `tools_status` must never take the same lock twice in one expression.
     ///
     /// It used to, and because a struct literal keeps its temporaries alive

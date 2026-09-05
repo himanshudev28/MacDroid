@@ -17,6 +17,7 @@ export default function NotificationsView({
   onDismiss,
   onToggleNative,
   onToggleMute,
+  onOpenOnMac,
   onToast,
 }: {
   linked: boolean;
@@ -27,6 +28,10 @@ export default function NotificationsView({
   onToggleNative: (on: boolean) => void;
   /// Mute/unmute macOS banners for one package. The in-app list is unaffected.
   onToggleMute: (pkg: string, muted: boolean) => void;
+  /// Open the notifying app in its own Mac window (scrcpy virtual display).
+  /// Null when there's no ADB device — this route needs scrcpy, which needs
+  /// ADB, and a button that can only fail is worse than no button.
+  onOpenOnMac: ((pkg: string, app: string) => void) | null;
   onToast: (kind: "ok" | "bad" | "info", text: string) => void;
 }) {
   const nativeOn = config?.nativeNotifs ?? true;
@@ -148,6 +153,16 @@ export default function NotificationsView({
                             </span>
                           )}
                         </button>
+                        {pkg && onOpenOnMac && (
+                          <button
+                            onClick={() => onOpenOnMac(pkg, app)}
+                            title={`Open ${app} in a window on this Mac`}
+                            aria-label={`Open ${app} in a window on this Mac`}
+                            className="btn-icon shrink-0 opacity-0 group-hover/hdr:opacity-100"
+                          >
+                            <Icon name="monitor" size={12} />
+                          </button>
+                        )}
                         {pkg && (
                           <button
                             onClick={() => onToggleMute(pkg, !muted)}
@@ -168,11 +183,19 @@ export default function NotificationsView({
                       </div>
                     )}
                     <div className="divide-y divide-line">
-                      {shown.map((n, i) =>
+                      {/* Keyed on `n.key` alone. Appending the array index
+                          made the key positional, and new notifications are
+                          *prepended* — so one arrival shifted every index,
+                          changed every key, and made React unmount and remount
+                          the entire list. That threw away each row's local
+                          state, which for `NotifRow` means a reply someone was
+                          halfway through typing. `App` already dedupes the
+                          list by `key`, so it is unique on its own. */}
+                      {shown.map((n) =>
                         n.type === "call" ? (
-                          <CallRow key={n.key + i} n={n} onDismiss={onDismiss} />
+                          <CallRow key={n.key} n={n} onDismiss={onDismiss} />
                         ) : (
-                          <NotifRow key={n.key + i} n={n} onDismiss={onDismiss} onToast={onToast} />
+                          <NotifRow key={n.key} n={n} onDismiss={onDismiss} onToast={onToast} />
                         )
                       )}
                     </div>
@@ -190,11 +213,11 @@ export default function NotificationsView({
             </div>
           ) : (
             <div className="card rise-fast divide-y divide-line overflow-hidden">
-              {items.map((n, i) =>
+              {items.map((n) =>
                 n.type === "call" ? (
-                  <CallRow key={n.key + i} n={n} onDismiss={onDismiss} />
+                  <CallRow key={n.key} n={n} onDismiss={onDismiss} />
                 ) : (
-                  <NotifRow key={n.key + i} n={n} onDismiss={onDismiss} onToast={onToast} />
+                  <NotifRow key={n.key} n={n} onDismiss={onDismiss} onToast={onToast} />
                 )
               )}
             </div>

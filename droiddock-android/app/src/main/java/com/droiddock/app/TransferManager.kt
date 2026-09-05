@@ -170,8 +170,8 @@ object TransferManager {
                     val n = ins.read(buf)
                     if (n < 0) break
                     while (currentCoroutineContext().isActive && (ws?.queueSize() ?: 0) > MAX_INFLIGHT) delay(20)
-                    val s = ws ?: break
-                    s.send(frame(transferId, seq++, buf, n))
+                    if (ws == null) break
+                    ConnectionManager.sendBinary(frame(transferId, seq++, buf, n))
                     bytesSent += n
 
                     val nowNs = System.nanoTime()
@@ -222,13 +222,13 @@ object TransferManager {
 
     /** Send a photo thumbnail (small, single frame) keyed by the request id. */
     fun sendThumb(reqId: Int, bytes: ByteArray) {
-        val s = ws ?: return
+        if (ws == null) return
         val b = Buffer()
         b.writeByte(KIND_THUMB)
         b.writeInt(reqId)
         b.writeInt(0)
         b.write(bytes)
-        s.send(b.readByteString())
+        ConnectionManager.sendBinary(b.readByteArray())
     }
 
     fun onBinary(bytes: ByteString) {
@@ -354,8 +354,8 @@ object TransferManager {
                         if (n < 0) break
                         // backpressure: keep ≤4MB queued on the socket
                         while (isActive && (ws?.queueSize() ?: 0) > MAX_INFLIGHT) delay(20)
-                        val s = ws ?: break
-                        s.send(frame(tid, seq++, buf, n))
+                        if (ws == null) break
+                        ConnectionManager.sendBinary(frame(tid, seq++, buf, n))
                     }
                 }
                 if (isActive) send(
@@ -456,13 +456,16 @@ object TransferManager {
     }
 
     /* ---- helpers ---- */
-    private fun frame(tid: Int, seq: Int, payload: ByteArray, len: Int): ByteString {
+    /** Returns a plain ByteArray, not a ByteString: every frame now leaves via
+     *  [ConnectionManager.sendBinary], which may seal it before it reaches the
+     *  socket. */
+    private fun frame(tid: Int, seq: Int, payload: ByteArray, len: Int): ByteArray {
         val b = Buffer()
         b.writeByte(KIND_DATA)
         b.writeInt(tid) // okio writeInt = big-endian
         b.writeInt(seq)
         b.write(payload, 0, len)
-        return b.readByteString()
+        return b.readByteArray()
     }
 
     private fun beInt(b: ByteString, off: Int): Int =

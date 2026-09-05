@@ -17,6 +17,19 @@ const PAINT: Partial<Record<ClockStyle, string>> = {
 /// clock on the wire would mean a message every minute for zero added truth.
 /// (AirSync's `TimeView` does exactly the same thing: plain local `Date()`.)
 ///
+/// Built once, at module scope — see the note at the call site.
+const TIME_FMT = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
+const TIME_WITH_SECONDS = new Intl.DateTimeFormat(undefined, {
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+});
+const DATE_FMT = new Intl.DateTimeFormat(undefined, {
+  weekday: "long",
+  month: "short",
+  day: "numeric",
+});
+
 /// `compact` shrinks it to make room for the mini player. Eight styles, chosen
 /// in Settings › Appearance — see `ClockStyle`.
 export default function PhoneClock({ compact = false }: { compact?: boolean }) {
@@ -42,22 +55,21 @@ export default function PhoneClock({ compact = false }: { compact?: boolean }) {
   }, [seconds]);
 
   // Respect the user's 12/24h system preference the same way macOS does.
-  const parts = new Intl.DateTimeFormat(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    ...(seconds ? { second: "2-digit" as const } : {}),
-  }).formatToParts(now);
+  //
+  // The two formatters are module-level singletons rather than fresh objects
+  // per render: constructing an `Intl.DateTimeFormat` builds an ICU pattern and
+  // is by far the most expensive thing this component does. It only ever needs
+  // two shapes (with and without seconds), neither of which depends on `now`,
+  // and the component re-renders far more often than it ticks — its parent
+  // re-renders for reasons of its own.
+  const parts = (seconds ? TIME_WITH_SECONDS : TIME_FMT).formatToParts(now);
   const at = (t: string) => parts.find((p) => p.type === t)?.value;
   const hour = at("hour") ?? "--";
   const minute = at("minute") ?? "--";
   const second = at("second");
   const dayPeriod = at("dayPeriod");
 
-  const weekday = new Intl.DateTimeFormat(undefined, {
-    weekday: "long",
-    month: "short",
-    day: "numeric",
-  }).format(now);
+  const weekday = DATE_FMT.format(now);
 
   // Two shadows on every style, not one: the tight pass gives glyph edges
   // their own contrast against whatever pixel is behind them, the wide pass

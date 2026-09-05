@@ -29,6 +29,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -563,8 +564,9 @@ private fun DroidDockScreen(
                     },
                 )
                 "control" -> ControlScreen(
-                    remoteAvailable = macCaps.contains("remote"),
-                    connected       = connected,
+                    remoteAvailable  = macCaps.contains("remote"),
+                    macAppsAvailable = macCaps.contains("macapps"),
+                    connected        = connected,
                 ) { MirrorTab(
                     connected   = connected,
                     overlayOk   = overlayOk,
@@ -914,13 +916,12 @@ private fun ConnectionHeroCard(
 private fun MacNowPlayingCard(media: ConnectionManager.MacMedia?) {
     // Flip the glyph on tap and let the Mac's next report confirm it.
     //
-    // Two reasons the reported state can't drive this alone. The Mac polls
-    // every 3s, so the button would sit wrong for up to three seconds after
-    // every press. And for a browser tab there is no state to report at all —
-    // AppleScript exposes a tab's title and URL, not whether its video is
-    // playing — so a YouTube pause would never be reflected however long you
-    // waited. `remember(media)` clears the guess the moment a fresh report
-    // arrives, so the Mac still wins for the players it can actually read.
+    // Only a cosmetic head start now: the Mac pushes a fresh report about
+    // 600ms after the media key lands, and notices a play or pause made over
+    // there within about a second, for browser tabs and unscriptable apps
+    // included. This just spares the button from sitting wrong for that round
+    // trip. `remember(media)` clears the guess the moment a report arrives, so
+    // the Mac always has the last word.
     var optimistic by remember(media) { mutableStateOf<Boolean?>(null) }
 
     val playing = optimistic ?: (media?.playing == true)
@@ -1957,11 +1958,16 @@ private fun FilesScreen(
 @Composable
 private fun ControlScreen(
     remoteAvailable: Boolean,
+    macAppsAvailable: Boolean,
     connected: Boolean,
     mirror: @Composable () -> Unit,
 ) {
     var mode by remember { mutableStateOf("mirror") }
+    // A capability can vanish mid-session (the Mac's switch is turned off, or we
+    // reconnect to an older build). Bounce off a segment that no longer exists
+    // rather than showing an empty pane.
     if (mode == "remote" && !remoteAvailable) mode = "mirror"
+    if (mode == "macapps" && !macAppsAvailable) mode = "mirror"
 
     // Same inset ownership as FilesScreen above.
     Column(
@@ -1969,16 +1975,24 @@ private fun ControlScreen(
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.statusBars)
     ) {
-        if (remoteAvailable) {
+        if (remoteAvailable || macAppsAvailable) {
             Spacer(Modifier.height(8.dp))
             SegmentedHeader(
-                options = listOf("mirror" to "Mirror & Camera", "remote" to "Mac Remote"),
+                options = buildList {
+                    add("mirror" to "Mirror & Camera")
+                    if (remoteAvailable) add("remote" to "Mac Remote")
+                    if (macAppsAvailable) add("macapps" to "Mac Apps")
+                },
                 selected = mode,
                 onSelect = { mode = it },
             )
         }
         Box(Modifier.weight(1f)) {
-            if (mode == "remote") MacRemoteTab(connected = connected) else mirror()
+            when (mode) {
+                "remote" -> MacRemoteTab(connected = connected)
+                "macapps" -> MacAppsTab(connected = connected)
+                else -> mirror()
+            }
         }
     }
 }
@@ -2296,6 +2310,123 @@ private fun RecentTransferRow(record: TransferRecord) {
  * keep in sync, and nothing here can express an action the Mac's allow-list
  * doesn't already permit.
  */
+/**
+ * The Mac's applications, launchable from the phone.
+ *
+ * Mirror image of the Mac's Apps grid. Gated on the "macapps" capability, which
+ * the Mac only advertises while "Let the phone control this Mac" is on — so if
+ * this tab is visible at all, the permission is already granted. The Mac still
+ * re-checks on every message; a stale screen gets an error rather than a launch.
+ */
+@Composable
+private fun MacAppsTab(connected: Boolean) {
+    var apps by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var query by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
+
+    suspend fun load() {
+        error = null
+        apps = null
+        runCatching { ConnectionManager.macAppsList() }
+            .onSuccess { arr ->
+                apps = (0 until arr.length()).mapNotNull { i ->
+                    val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                    val pkg = o.optString("pkg")
+                    val label = o.optString("label")
+                    if (pkg.isEmpty() || label.isEmpty()) null else pkg to label
+                }
+            }
+            .onFailure {
+                apps = emptyList()
+                error = it.message ?: "Couldn't read the Mac's apps"
+            }
+    }
+
+    LaunchedEffect(connected) { if (connected) load() }
+
+    // Prefix matches first, same ranking the Mac's own grid uses so searching
+    // behaves identically on both ends.
+    val shown = remember(apps, query) {
+        val q = query.trim().lowercase()
+        val all = apps ?: emptyList()
+        if (q.isEmpty()) all
+        else all.filter { it.second.lowercase().contains(q) }
+            .sortedWith(compareByDescending<Pair<String, String>> {
+                it.second.lowercase().startsWith(q)
+            }.thenBy { it.second.lowercase() })
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp)
+            .padding(top = 8.dp, bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        if (!connected) {
+            Text("Not connected to your Mac.", color = Bad, fontSize = 12.sp)
+            return@Column
+        }
+
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            singleLine = true,
+            label = { Text("Search apps") },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        when {
+            apps == null -> Text("Reading your Mac's apps…", color = Dim, fontSize = 12.sp)
+            error != null -> Text(error!!, color = Bad, fontSize = 12.sp)
+            shown.isEmpty() -> Text(
+                if (query.isBlank()) "No apps found." else "Nothing matching \"$query\".",
+                color = Dim, fontSize = 12.sp
+            )
+            else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(shown, key = { it.first }) { (pkg, label) ->
+                    Surface(
+                        color = Surface2,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .clickable {
+                                    scope.launch {
+                                        runCatching { ConnectionManager.macAppLaunch(pkg) }
+                                            .onSuccess {
+                                                Toast.makeText(ctx, "Opening $label on your Mac", Toast.LENGTH_SHORT).show()
+                                            }
+                                            .onFailure {
+                                                Toast.makeText(ctx, it.message ?: "Couldn't open $label", Toast.LENGTH_LONG).show()
+                                            }
+                                    }
+                                }
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Filled.Laptop,
+                                contentDescription = null,
+                                tint = Dim,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(label, fontSize = 14.sp)
+                                Text(pkg, color = Dim, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun MacRemoteTab(connected: Boolean) {
     var typed by remember { mutableStateOf("") }
@@ -2515,6 +2646,10 @@ private fun MacFilesTab(connected: Boolean) {
     var error       by remember { mutableStateOf<String?>(null) }
     var pullingPath by remember { mutableStateOf<String?>(null) }
     var pullFrac    by remember { mutableStateOf(0f) }
+    // The Mac's shared folders, learned from the synthetic root listing (the
+    // only place their absolute paths are ever sent). Needed to know where
+    // "up" stops — see the Up button below.
+    var roots       by remember { mutableStateOf<List<String>>(emptyList()) }
 
     LaunchedEffect(path, connected) {
         if (!connected) {
@@ -2527,6 +2662,11 @@ private fun MacFilesTab(connected: Boolean) {
         runCatching { ConnectionManager.macFsList(path) }
             .onSuccess { arr ->
                 entries = (0 until arr.length()).map { arr.getJSONObject(it) }
+                if (path.isEmpty()) {
+                    roots = entries.mapNotNull { e ->
+                        e.optString("path").takeIf { it.isNotEmpty() }
+                    }
+                }
             }
             .onFailure { error = it.message ?: "Could not load folder" }
         loading = false
@@ -2551,7 +2691,18 @@ private fun MacFilesTab(connected: Boolean) {
         ) {
             if (path.isNotEmpty()) {
                 IconButton(
-                    onClick = { path = path.substringBeforeLast('/', "") },
+                    onClick = {
+                        // Walking up out of a shared folder lands on a path the
+                        // Mac's allowlist rejects — /Users/you/Desktop's parent
+                        // is /Users/you, which was never shared. Going up from a
+                        // root (or from anything whose parent is outside every
+                        // root) therefore returns to the list of shared folders,
+                        // not to a dead end that renders "path escapes allowed
+                        // roots".
+                        val parent = path.substringBeforeLast('/', "")
+                        path = if (roots.any { it == parent || parent.startsWith("$it/") })
+                            parent else ""
+                    },
                     modifier = Modifier.size(28.dp)
                 ) {
                     Icon(Icons.Default.ArrowBack, "Up", tint = Fg, modifier = Modifier.size(16.dp))

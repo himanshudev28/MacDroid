@@ -8,7 +8,8 @@ import RecentApps from "./RecentApps";
 import Icon from "../Icon";
 import LinkPulse from "../LinkPulse";
 import type { WifiStatus } from "../../lib/wifi";
-import type { AdbDevice, AppDeviceInfo, DroidConfig, LinkQuality, MediaState } from "../../lib/bridge";
+import { useNowPlaying } from "../../lib/mediaStore";
+import type { AdbDevice, AppDeviceInfo, DroidConfig, LinkQuality } from "../../lib/bridge";
 
 /// The phone, as a persistent object you glance at — the app's centre of
 /// gravity, always on screen regardless of which view is open.
@@ -20,7 +21,6 @@ import type { AdbDevice, AppDeviceInfo, DroidConfig, LinkQuality, MediaState } f
 export default function PhoneCard({
   status,
   info,
-  media,
   config,
   adb,
   quality,
@@ -28,13 +28,11 @@ export default function PhoneCard({
   port,
   actions,
   wallpaper = null,
-  albumArt = null,
   onRecentError,
   onPair,
 }: {
   status: WifiStatus;
   info: AppDeviceInfo | null;
-  media: MediaState | null;
   config: DroidConfig | null;
   adb: AdbDevice | null;
   quality: LinkQuality | null;
@@ -43,14 +41,14 @@ export default function PhoneCard({
   actions: QuickAction[];
   /// The phone's own wallpaper — the card's resting backdrop.
   wallpaper?: string | null;
-  /// The current track's cover. Takes over *only while the player is showing*,
-  /// so the chevron means one coherent thing: show what's playing, or don't.
-  /// Passed separately from `wallpaper` rather than pre-resolved by the caller,
-  /// because the state that decides between them (`playerOpen`) lives here.
-  albumArt?: string | null;
   onRecentError: (msg: string) => void;
   onPair: () => void;
 }) {
+  // Subscribed here rather than passed down from `App`: this card and the Media
+  // view are the only things that show now-playing, and the phone pushes it
+  // once a second. Reading it at the point of use keeps that tick inside this
+  // subtree instead of re-rendering the whole app — see `lib/mediaStore`.
+  const { media, albumArt } = useNowPlaying();
   const [playerOpen, setPlayerOpen] = useState(true);
   // An active media session is enough. Requiring a title *or* artist as well
   // hid the player for sessions that report neither — a browser tab, or an app
@@ -90,7 +88,7 @@ export default function PhoneCard({
         {wallpaper && (
           <img src={wallpaper} alt="" className="absolute inset-0 h-full w-full object-cover" />
         )}
-        {albumArt && (
+        {media?.active && albumArt && (
           <img
             src={albumArt}
             alt=""

@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- DroidDock home-screen widget.
+     Only views on the RemoteViews allowlist appear here — no ConstraintLayout,
+     no custom views — because the launcher, not this app, inflates it. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg"
+    android:padding="12dp">
+
+    <!-- Header: brand, link status, status dot. Whole row opens the app. -->
+    <LinearLayout
+        android:id="@+id/widget_header"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <ImageView
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:layout_marginEnd="8dp"
+            android:src="@drawable/ic_widget_mark"
+            android:tint="@color/widget_accent"
+            android:contentDescription="@string/app_name" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/widget_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/app_name"
+                android:textColor="@color/widget_text"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+            <TextView
+                android:id="@+id/widget_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/widget_subtext"
+                android:textSize="12sp"
+                android:maxLines="1"
+                android:ellipsize="end" />
+        </LinearLayout>
+
+        <ImageView
+            android:id="@+id/widget_dot"
+            android:layout_width="10dp"
+            android:layout_height="10dp"
+            android:layout_marginStart="8dp"
+            android:src="@drawable/widget_dot"
+            android:contentDescription="@null" />
+    </LinearLayout>
+
+    <!-- Actions. Hidden by the provider when the widget is resized down to a
+         single row, where there is no height for them. -->
+    <LinearLayout
+        android:id="@+id/widget_actions"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="10dp"
+        android:orientation="horizontal"
+        android:baselineAligned="false">
+
+        <LinearLayout
+            android:id="@+id/widget_btn_link"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:minHeight="48dp"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="@drawable/widget_chip"
+            android:padding="6dp">
+
+            <ImageView
+                android:id="@+id/widget_btn_link_icon"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:src="@drawable/ic_widget_link"
+                android:contentDescription="@null" />
+
+            <TextView
+                android:id="@+id/widget_btn_link_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:textColor="@color/widget_subtext"
+                android:textSize="10sp"
+                android:maxLines="1"
+                android:ellipsize="end" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/widget_btn_clip"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:minHeight="48dp"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="@drawable/widget_chip"
+            android:padding="6dp">
+
+            <ImageView
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:src="@drawable/ic_widget_clip"
+                android:tint="@color/widget_icon"
+                android:contentDescription="@null" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="@string/widget_action_clip"
+                android:textColor="@color/widget_subtext"
+                android:textSize="10sp"
+                android:maxLines="1"
+                android:ellipsize="end" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/widget_btn_mirror"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:minHeight="48dp"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="@drawable/widget_chip"
+            android:padding="6dp">
+
+            <ImageView
+                android:id="@+id/widget_btn_mirror_icon"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:src="@drawable/ic_widget_mirror"
+                android:contentDescription="@null" />
+
+            <TextView
+                android:id="@+id/widget_btn_mirror_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:textColor="@color/widget_subtext"
+                android:textSize="10sp"
+                android:maxLines="1"
+                android:ellipsize="end" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

@@ -21,6 +21,17 @@ import {
 
 export default function MirrorWindow() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // The 2D context, cached against the canvas it came from. `getContext` only
+  // honours its options on the *first* call for an element, so the options
+  // below have to be set once and the result kept, not re-requested per frame:
+  //   · `alpha: false`    — the video is opaque. Without this every frame is
+  //                         composited as a transparent surface over the
+  //                         window, which in a `transparent: true` window means
+  //                         blending it against the vibrancy material 30-60
+  //                         times a second for no visible difference.
+  //   · `desynchronized`  — lets WebKit skip a compositor round-trip for a
+  //                         canvas whose contents are already a video stream.
+  const ctxRef = useRef<{ el: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null>(null);
   const decoderRef = useRef<VideoDecoder | null>(null);
   const tsRef = useRef(0);
   const waitingKeyRef = useRef(true);
@@ -41,15 +52,30 @@ export default function MirrorWindow() {
           /* closing */
         }
       }
+      const paint = (frame: VideoFrame) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        let cached = ctxRef.current;
+        if (!cached || cached.el !== canvas) {
+          const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
+          if (!ctx) return;
+          cached = { el: canvas, ctx };
+          ctxRef.current = cached;
+        }
+        if (canvas.width !== frame.displayWidth) canvas.width = frame.displayWidth;
+        if (canvas.height !== frame.displayHeight) canvas.height = frame.displayHeight;
+        cached.ctx.drawImage(frame, 0, 0);
+      };
+
       const dec = new VideoDecoder({
         output: (frame) => {
-          const canvas = canvasRef.current;
-          const ctx = canvas?.getContext("2d");
-          if (canvas && ctx) {
-            if (canvas.width !== frame.displayWidth) canvas.width = frame.displayWidth;
-            if (canvas.height !== frame.displayHeight) canvas.height = frame.displayHeight;
-            ctx.drawImage(frame, 0, 0);
-          }
+          // Decode always, paint only when there is something to paint on.
+          // Every delta frame is defined against the ones before it, so
+          // *skipping decodes* while the window is covered would desync the
+          // stream and smear until the next keyframe — but painting pixels
+          // behind another app's window is pure waste, and this canvas is the
+          // most expensive surface in the app.
+          if (!document.hidden) paint(frame);
           frame.close();
         },
         error: (e) => console.warn("mirror decode:", e?.message || e),

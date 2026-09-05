@@ -243,9 +243,11 @@ function Tile({
   );
 }
 
-/* Memoised: App holds `media`, which the phone pushes once a second while
-   something is playing. Without this, every one of those ticks re-rendered this
-   whole view (thumbnail grids, file lists) even though none of its props
-   changed. All props here are primitives or stable useCallback refs, so the
-   comparison is sound. */
+/* Memoised. This was originally defence against the phone's 1 Hz now-playing
+   push re-rendering every view; that push no longer reaches `App` at all (it
+   lives in `lib/mediaStore`, read only by the two components that show it). The
+   memo stays because `App` still re-renders for its own reasons — an arriving
+   notification, a toast appearing and expiring, a transfer's progress — and
+   none of those change this view's props. All props here are primitives or
+   stable useCallback refs, so the comparison is sound. */
 export default memo(PhotosView);

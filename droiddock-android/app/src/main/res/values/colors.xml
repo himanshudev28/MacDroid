@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Home-screen widget palette (light). The night variant lives in
+     values-night/colors.xml; the launcher inflates these RemoteViews with this
+     app's resources and the current uiMode, so the widget follows the phone's
+     theme for free.
+
+     Deliberately opaque rather than translucent: a widget sits on an arbitrary
+     wallpaper, and a see-through surface is where status text stops being
+     readable on exactly the photo the user picked. -->
+<resources>
+    <color name="widget_bg">#FFFFFFFF</color>
+    <color name="widget_chip">#FFEDEFF3</color>
+    <color name="widget_text">#FF14171C</color>
+    <color name="widget_subtext">#FF5C6470</color>
+    <color name="widget_icon">#FF3A414D</color>
+    <!-- Amber darkened from the launcher icon's #FFB454, which fails contrast
+         on white. -->
+    <color name="widget_accent">#FFC97C10</color>
+
+    <!-- Link status dot. -->
+    <color name="widget_dot_on">#FF16A34A</color>
+    <color name="widget_dot_wait">#FFC97C10</color>
+    <color name="widget_dot_off">#FF9AA1AC</color>
+</resources>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Painted white so the provider can recolour it with setColorFilter — one
+     drawable for all three link states instead of three near-identical files. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <solid android:color="#FFFFFFFF" />
+    <size android:width="10dp" android:height="10dp" />
+</shape>

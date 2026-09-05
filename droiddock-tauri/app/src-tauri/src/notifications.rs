@@ -24,7 +24,7 @@
 use crate::ws_server::{self, SharedState};
 use serde_json::{json, Value};
 use std::collections::VecDeque;
-use std::sync::Mutex;
+use std::sync::{Mutex, Once};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_notification::NotificationExt;
 
@@ -148,6 +148,37 @@ pub fn on_notification(app: &AppHandle, m: &Value) {
     }
 }
 
+/// Claim the bundle identity our native banners are posted under, once.
+///
+/// `mac-notification-sys` decides this lazily on its first send, and its
+/// fallback is `get_bundle_identifier_or_default("use_default")` — literally an
+/// NSAppleScript `get id of application "use_default"`. No app is named that, so
+/// AppleScript asks LaunchServices, which puts the "Choose Application — Where
+/// is use_default?" file picker on screen: a modal browse-your-Applications
+/// dialog, in front of the user, because a phone notification arrived. Claiming
+/// the identity first completes the crate's one-shot init so that lookup never
+/// runs.
+///
+/// The value matches what `tauri-plugin-notification` passes on its own path
+/// (dev builds aren't registered with LaunchServices, so it borrows Terminal's
+/// id). Identity here is first-writer-wins and process-wide, so both paths must
+/// choose the same id — otherwise the reply banner and the plain banner would be
+/// attributed to different apps depending on which one fired first.
+fn claim_banner_identity(app: &AppHandle) {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let id = if tauri::is_dev() {
+            "com.apple.Terminal".to_string()
+        } else {
+            app.config().identifier.clone()
+        };
+        // Ignored like the plugin ignores it: `AlreadySet` is the ordinary case
+        // when a plain banner got here first, and nothing can be done about a
+        // real failure beyond letting macOS attribute the banner itself.
+        let _ = mac_notification_sys::set_application(&id);
+    });
+}
+
 /// Replyable notification via `mac-notification-sys`. `send_notification` blocks
 /// on the notification's run loop until the user interacts, so it runs on a
 /// blocking thread; a captured reply is pushed to the phone as
@@ -160,6 +191,7 @@ fn show_reply_banner(app: &AppHandle, key: &str, title: &str, body: &str) {
 
     tauri::async_runtime::spawn_blocking(move || {
         use mac_notification_sys::{MainButton, Notification, NotificationResponse};
+        claim_banner_identity(&app);
         let mut opts = Notification::new();
         opts.main_button(MainButton::Response("Reply"));
         match mac_notification_sys::send_notification(&title, None, &body, Some(&opts)) {

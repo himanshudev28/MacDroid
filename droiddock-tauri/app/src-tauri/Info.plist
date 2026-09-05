@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the bundle's generated Info.plist by tauri-bundler, which picks up
+  an `Info.plist` sitting next to tauri.conf.json.
+
+  These are TCC purpose strings. macOS gates ~/Desktop, ~/Documents, ~/Downloads
+  and removable volumes behind "Files and Folders" consent, and a bundle with no
+  purpose string for a folder gets no usable prompt for it — the read just comes
+  back "Operation not permitted", which surfaces on the phone as an empty or
+  failing folder even though the folder is in the Mac's allowlist. The allowlist
+  in Settings ("Mac files") is DroidDock's own permission layer; this is macOS's,
+  and both have to say yes.
+-->
+<plist version="1.0">
+<dict>
+  <key>NSDesktopFolderUsageDescription</key>
+  <string>DroidDock reads this folder so your paired phone can browse and download from the folders you shared in Settings › Mac files.</string>
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>DroidDock reads this folder so your paired phone can browse and download from the folders you shared in Settings › Mac files.</string>
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>DroidDock reads this folder so your paired phone can browse and download from the folders you shared in Settings › Mac files, and saves files your phone sends here.</string>
+  <key>NSRemovableVolumesUsageDescription</key>
+  <string>DroidDock reads external drives only if you add one to the shared folder list in Settings › Mac files.</string>
+  <key>NSNetworkVolumesUsageDescription</key>
+  <string>DroidDock reads network volumes only if you add one to the shared folder list in Settings › Mac files.</string>
+</dict>
+</plist>

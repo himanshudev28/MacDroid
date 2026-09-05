@@ -150,6 +150,12 @@ pub async fn run(app: AppHandle, state: SharedState) {
     }
 
     let mut ticker = tokio::time::interval(Duration::from_secs(1));
+    // Parking below can leave the interval arbitrarily far behind. `Burst` (the
+    // default) would then fire every missed tick back-to-back on reconnect —
+    // an hour offline meaning 3600 immediate pasteboard reads. `Delay` fires
+    // once, now, and restarts the cadence from there, which is what "poll every
+    // second while linked" actually means.
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         ticker.tick().await;
 
@@ -158,6 +164,12 @@ pub async fn run(app: AppHandle, state: SharedState) {
         // reconnect — skipping the whole tick (not advancing changeCount /
         // last_seen) reproduces that.
         if !ws_server::is_connected(&state).await {
+            // …and rather than re-ticking into this same `continue` once a
+            // second for as long as the Mac sits unpaired, sleep on the link
+            // itself. Same semantics, no wakeups: the pasteboard is not read,
+            // the guards do not advance, and the first poll after a phone
+            // arrives happens immediately instead of up to a second later.
+            ws_server::await_connected(&state).await;
             continue;
         }
 

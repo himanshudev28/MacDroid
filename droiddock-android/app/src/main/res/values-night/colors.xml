@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="widget_bg">#FF12151A</color>
+    <color name="widget_chip">#FF1E232B</color>
+    <color name="widget_text">#FFF2F4F7</color>
+    <color name="widget_subtext">#FF98A2B0</color>
+    <color name="widget_icon">#FFC9D1DC</color>
+    <color name="widget_accent">#FFFFB454</color>
+
+    <color name="widget_dot_on">#FF3DD68C</color>
+    <color name="widget_dot_wait">#FFFFB454</color>
+    <color name="widget_dot_off">#FF6B7280</color>
+</resources>

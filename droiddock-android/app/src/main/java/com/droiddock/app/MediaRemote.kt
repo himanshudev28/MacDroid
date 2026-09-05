@@ -66,9 +66,19 @@ object MediaRemote {
     /** [forceArt] re-sends album art even if the track hasn't changed — used on
      *  link-up, where the Mac has no cache yet. */
     fun push(forceArt: Boolean) {
+        handler.removeCallbacks(ticker)
+        // Nothing is listening → don't build the snapshot and don't re-arm.
+        //
+        // `snapshot()` runs on the main thread and costs two AudioManager
+        // binder calls, a PackageManager label lookup and a twelve-field JSON
+        // build; `send` then dropped all of it on the floor because `ws` was
+        // null. Playing music with no Mac in sight paid that once a second,
+        // indefinitely, for a message nobody received. The ticker restarts from
+        // `onLinkUp` when a Mac actually arrives.
+        if (!ConnectionManager.connected.value) return
+
         ConnectionManager.send(snapshot(forceArt))
 
-        handler.removeCallbacks(ticker)
         val c = controller
         if (c != null && c.playbackState?.state == PlaybackState.STATE_PLAYING) {
             handler.postDelayed(ticker, 1000)
@@ -168,7 +178,16 @@ object MediaRemote {
         push()
     }
 
-    private fun appLabel(ctx: Context, pkg: String): String = runCatching {
+    /** `pkg` → display label. A media session's package changes when the user
+     *  switches player, i.e. rarely — but `snapshot()` asked PackageManager for
+     *  the label once a second, which is a binder round trip on the main thread
+     *  for an answer that cannot change while the app is installed. */
+    private val labelCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private fun appLabel(ctx: Context, pkg: String): String =
+        labelCache.getOrPut(pkg) { appLabelUncached(ctx, pkg) }
+
+    private fun appLabelUncached(ctx: Context, pkg: String): String = runCatching {
         ctx.packageManager.getApplicationLabel(ctx.packageManager.getApplicationInfo(pkg, 0))
             .toString()
     }.getOrDefault(pkg)

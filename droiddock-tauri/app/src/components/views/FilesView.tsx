@@ -153,48 +153,77 @@ function FilesView({
 
   const remotePath = (name: string) => (path === "/" ? `/${name}` : `${path}/${name}`);
 
-  const download = async (e: FsEntry) => {
-    setBusy((b) => ({ ...b, [e.name]: true }));
-    try {
-      await fsPull(remotePath(e.name), e.name);
-      onToast("ok", `Saved — ${e.name}`);
-    } catch (err) {
-      onToast("bad", String(err));
-    } finally {
-      setBusy((b) => ({ ...b, [e.name]: false }));
-    }
-  };
+  /* The five row handlers below are `useCallback`'d, and each takes the entry
+     it acts on rather than closing over it.
 
-  const openInPlace = async (e: FsEntry) => {
-    try {
-      await fsOpenInPlace(remotePath(e.name));
-      onToast("ok", `Opening ${e.name} — edits will sync back automatically`);
-    } catch (err) {
-      onToast("bad", String(err));
-    }
-  };
+     That is what makes `Row`'s `memo` real. Built inline per row they were a
+     fresh function identity on every render of this view — and this view
+     re-renders on every `transfer-progress` event, so a 500-entry folder was
+     re-rendering 500 rows for each one. Keyed off `path` (not the entry) they
+     change only when the user navigates. */
+  const openDir = useCallback((e: FsEntry) => {
+    if (!e.dir) return;
+    setPath((p) => (p === "/" ? `/${e.name}` : `${p}/${e.name}`));
+  }, []);
 
-  const rename = async (e: FsEntry, newName: string) => {
-    try {
-      await fsRename(remotePath(e.name), newName);
-      onToast("ok", `Renamed to ${newName}`);
-      load(path);
-    } catch (err) {
-      onToast("bad", String(err));
-    }
-  };
+  const download = useCallback(
+    async (e: FsEntry) => {
+      setBusy((b) => ({ ...b, [e.name]: true }));
+      try {
+        await fsPull(remotePath(e.name), e.name);
+        onToast("ok", `Saved — ${e.name}`);
+      } catch (err) {
+        onToast("bad", String(err));
+      } finally {
+        setBusy((b) => ({ ...b, [e.name]: false }));
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [path, onToast]
+  );
 
-  const remove = async (e: FsEntry) => {
-    const what = e.dir ? "folder" : "file";
-    if (!window.confirm(`Delete this ${what} from your phone?\n\n${e.name}`)) return;
-    try {
-      await fsDelete(remotePath(e.name));
-      onToast("ok", `Deleted ${e.name}`);
-      load(path);
-    } catch (err) {
-      onToast("bad", String(err));
-    }
-  };
+  const openInPlace = useCallback(
+    async (e: FsEntry) => {
+      try {
+        await fsOpenInPlace(remotePath(e.name));
+        onToast("ok", `Opening ${e.name} — edits will sync back automatically`);
+      } catch (err) {
+        onToast("bad", String(err));
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [path, onToast]
+  );
+
+  const rename = useCallback(
+    async (e: FsEntry, newName: string) => {
+      try {
+        await fsRename(remotePath(e.name), newName);
+        onToast("ok", `Renamed to ${newName}`);
+        load(path);
+      } catch (err) {
+        onToast("bad", String(err));
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [path, onToast, load]
+  );
+
+  const remove = useCallback(
+    async (e: FsEntry) => {
+      const what = e.dir ? "folder" : "file";
+      if (!window.confirm(`Delete this ${what} from your phone?\n\n${e.name}`)) return;
+      try {
+        await fsDelete(remotePath(e.name));
+        onToast("ok", `Deleted ${e.name}`);
+        load(path);
+      } catch (err) {
+        onToast("bad", String(err));
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [path, onToast, load]
+  );
 
   if (!linked) {
     return (
@@ -324,11 +353,11 @@ function FilesView({
                   entry={e}
                   busy={!!busy[e.name]}
                   pendingSync={!e.dir && !!pendingSync[remotePath(e.name)]}
-                  onOpen={() => e.dir && setPath((p) => (p === "/" ? `/${e.name}` : `${p}/${e.name}`))}
-                  onEditOpen={() => openInPlace(e)}
-                  onDownload={() => download(e)}
-                  onRename={(n) => rename(e, n)}
-                  onDelete={() => remove(e)}
+                  onOpen={openDir}
+                  onEditOpen={openInPlace}
+                  onDownload={download}
+                  onRename={rename}
+                  onDelete={remove}
                 />
               </li>
             ))}
@@ -339,7 +368,10 @@ function FilesView({
   );
 }
 
-function Row({
+/// Memoised, and its callbacks take the entry rather than closing over it —
+/// see the note on the handlers in `FilesView`. Without both halves, every
+/// `transfer-progress` event re-rendered every row in the directory.
+const Row = memo(function Row({
   entry,
   busy,
   pendingSync,
@@ -352,11 +384,11 @@ function Row({
   entry: FsEntry;
   busy: boolean;
   pendingSync: boolean;
-  onOpen: () => void;
-  onEditOpen: () => void;
-  onDownload: () => void;
-  onRename: (newName: string) => void;
-  onDelete: () => void;
+  onOpen: (entry: FsEntry) => void;
+  onEditOpen: (entry: FsEntry) => void;
+  onDownload: (entry: FsEntry) => void;
+  onRename: (entry: FsEntry, newName: string) => void;
+  onDelete: (entry: FsEntry) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(entry.name);
@@ -374,7 +406,7 @@ function Row({
     committed.current = true;
     const next = name.trim();
     setEditing(false);
-    if (next && next !== entry.name) onRename(next);
+    if (next && next !== entry.name) onRename(entry, next);
     else setName(entry.name);
   };
   const cancel = (ev?: React.SyntheticEvent) => {
@@ -386,8 +418,10 @@ function Row({
 
   return (
     <div
-      onDoubleClick={editing ? undefined : entry.dir ? onOpen : onEditOpen}
-      onClick={entry.dir && !editing ? onOpen : undefined}
+      onDoubleClick={
+        editing ? undefined : entry.dir ? () => onOpen(entry) : () => onEditOpen(entry)
+      }
+      onClick={entry.dir && !editing ? () => onOpen(entry) : undefined}
       className={`group flex items-center gap-3 px-3.5 py-2 transition-colors hover:bg-panel2 ${
         entry.dir && !editing ? "cursor-pointer" : ""
       }`}
@@ -436,7 +470,7 @@ function Row({
               <button
                 onClick={(ev) => {
                   ev.stopPropagation();
-                  onDownload();
+                  onDownload(entry);
                 }}
                 disabled={busy}
                 title="Save to Mac Downloads"
@@ -455,7 +489,7 @@ function Row({
             <button
               onClick={(ev) => {
                 ev.stopPropagation();
-                onDelete();
+                onDelete(entry);
               }}
               title="Delete from phone"
               className="flex h-7 w-7 items-center justify-center rounded-lg text-dim opacity-0 transition-all hover:bg-[color-mix(in_srgb,var(--color-bad)_12%,transparent)] hover:text-bad group-hover:opacity-100"
@@ -467,11 +501,13 @@ function Row({
       </div>
     </div>
   );
-}
+});
 
-/* Memoised: App holds `media`, which the phone pushes once a second while
-   something is playing. Without this, every one of those ticks re-rendered this
-   whole view (thumbnail grids, file lists) even though none of its props
-   changed. All props here are primitives or stable useCallback refs, so the
-   comparison is sound. */
+/* Memoised. This was originally defence against the phone's 1 Hz now-playing
+   push re-rendering every view; that push no longer reaches `App` at all (it
+   lives in `lib/mediaStore`, read only by the two components that show it). The
+   memo stays because `App` still re-renders for its own reasons — an arriving
+   notification, a toast appearing and expiring, a transfer's progress — and
+   none of those change this view's props. All props here are primitives or
+   stable useCallback refs, so the comparison is sound. */
 export default memo(FilesView);

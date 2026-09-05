@@ -1,6 +1,19 @@
 import { useEffect, useState } from "react";
 import Icon from "../Icon";
+import type { ScrcpyCaps } from "../../lib/bridge";
 import { mirrorPopout, mirrorFocus, mirrorStop, onMirrorStarted, onMirrorStopped, onMirrorError } from "../../lib/bridge";
+
+/// The three virtual-display densities, in the order they're offered.
+///
+/// Android picks its layout from `px ÷ (dpi ÷ 160)`, so forcing a low density
+/// is the entire difference between a desktop and a magnified phone. "Phone"
+/// is kept because it is what this app did before the setting existed, and
+/// because some apps genuinely behave better in their phone layout.
+const UI_MODES = [
+  ["desktop", "Desktop", "Large-screen layouts and freeform windows."],
+  ["tablet", "Tablet", "Large-screen layouts, bigger touch targets."],
+  ["phone", "Phone", "The phone's own layout, scaled up to the window."],
+] as const;
 
 /// Screen Mirror tab. Wi-Fi mirror is fully wired (Phase 11); ADB mirror
 /// (Phase 13) spawns scrcpy directly against the connected ADB device — its
@@ -18,7 +31,12 @@ export default function MirrorView({
   linked,
   adbSerial,
   scrcpyReady,
+  scrcpyVersion,
+  caps,
+  uiMode,
+  onUiMode,
   onAdbMirror,
+  onAdbEmbedded,
   onAdbDesktop,
   defaultMode,
   onToast,
@@ -26,7 +44,17 @@ export default function MirrorView({
   linked: boolean;
   adbSerial: string | null;
   scrcpyReady: boolean;
+  /// e.g. "4.1" — shown so "needs 3.0+" is checkable rather than a guess.
+  scrcpyVersion: string | null;
+  caps: ScrcpyCaps | null;
+  /// Which Android layout a virtual display asks for. Exposed here, not just
+  /// in Settings, because it's the one knob people flip per-app rather than
+  /// once — some apps are better in their phone layout.
+  uiMode: "desktop" | "tablet" | "phone";
+  onUiMode: (m: "desktop" | "tablet" | "phone") => void;
   onAdbMirror: () => void;
+  /// The in-app ADB mirror — scrcpy's stream in our own pop-out window.
+  onAdbEmbedded: () => void;
   onAdbDesktop: () => void;
   /// Which card is highlighted as the primary route (Settings › Mirroring).
   defaultMode: "wifi" | "adb" | "desktop";
@@ -127,22 +155,118 @@ export default function MirrorView({
           />
 
           <LaunchCard
-            title="Desktop mode"
-            primary={defaultMode === "desktop"}
-            subtitle="Mirrors a second, virtual Android display instead of the phone's own screen — a real desktop with freeform windows, while the phone stays usable. Needs Android 11+ and scrcpy 2.5 or newer."
+            title="ADB mirror, in this app"
+            subtitle="Same scrcpy stream, but it plays in DroidDock's own pop-out instead of a separate scrcpy window — and needs no “Allow screen capture” tap on the phone."
             tag="ADB"
             live={!!adbSerial}
-            requirement={adbSerial ? null : "No ADB device connected"}
+            requirement={
+              !scrcpyReady
+                ? "scrcpy not installed"
+                : adbSerial
+                  ? null
+                  : "No ADB device connected"
+            }
             requirementHint={
-              scrcpyReady
-                ? "Connect a phone via USB or wireless ADB from the Devices tab."
-                : "Install scrcpy first (Devices tab → Tools)."
+              !scrcpyReady
+                ? "Install scrcpy first (Devices tab → Tools)."
+                : "Connect a phone via USB or wireless ADB from the Devices tab."
+            }
+            buttonLabel="Mirror in this app"
+            onClick={onAdbEmbedded}
+          />
+
+          <LaunchCard
+            title="Desktop mode"
+            primary={defaultMode === "desktop"}
+            subtitle="Mirrors a second, virtual Android display instead of the phone's own screen — the phone stays usable. Needs Android 11+ and scrcpy 3.0 or newer."
+            tag="ADB"
+            live={!!adbSerial}
+            requirement={
+              // Version first: with an old scrcpy this fails at spawn no matter
+              // what is plugged in, and "no device" would be a misleading reason.
+              !scrcpyReady
+                ? "scrcpy not installed"
+                : caps && !caps.virtualDisplay
+                  ? `scrcpy ${scrcpyVersion ?? "(unknown version)"} is too old`
+                  : adbSerial
+                    ? null
+                    : "No ADB device connected"
+            }
+            requirementHint={
+              !scrcpyReady
+                ? "Install scrcpy first (Devices tab → Tools)."
+                : caps && !caps.virtualDisplay
+                  ? "Virtual displays need scrcpy 3.0 or newer. Run `brew upgrade scrcpy`, then reopen DroidDock."
+                  : "Connect a phone via USB or wireless ADB from the Devices tab."
             }
             buttonLabel="Start desktop"
             onClick={onAdbDesktop}
           />
+
+          <ModeCard uiMode={uiMode} onUiMode={onUiMode} caps={caps} scrcpyVersion={scrcpyVersion} />
         </div>
       </div>
+    </div>
+  );
+}
+
+/// The layout picker for both virtual-display routes — desktop mode and
+/// "open this app on the Mac" from the Apps grid.
+///
+/// It lives on the Mirror tab rather than only in Settings because it is the
+/// one mirroring setting people change often: an app that looks wrong in the
+/// desktop layout is fixed by flipping this and relaunching, and burying that
+/// two screens away makes the fix undiscoverable.
+function ModeCard({
+  uiMode,
+  onUiMode,
+  caps,
+  scrcpyVersion,
+}: {
+  uiMode: "desktop" | "tablet" | "phone";
+  onUiMode: (m: "desktop" | "tablet" | "phone") => void;
+  caps: ScrcpyCaps | null;
+  scrcpyVersion: string | null;
+}) {
+  const unsupported = !!caps && !caps.virtualDisplay;
+  return (
+    <div className="card p-5">
+      <div className="flex items-start gap-3.5">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-panel3">
+          <Icon name="squareStack" size={17} className="text-fg/80" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-semibold text-fg">Window layout</p>
+          <p className="mt-1 text-[12px] leading-relaxed text-dim">
+            Which layout Android serves on the virtual display — used by Desktop mode and by
+            opening a single app on this Mac.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        {UI_MODES.map(([value, label, hint]) => (
+          <button
+            key={value}
+            onClick={() => onUiMode(value)}
+            disabled={unsupported}
+            aria-pressed={uiMode === value}
+            title={hint}
+            className={`rounded-xl px-3 py-2.5 text-left transition-colors disabled:opacity-40 ${
+              uiMode === value ? "bg-panel3 ring-1 ring-(--color-link)" : "bg-panel3/50 hover:bg-panel3"
+            }`}
+          >
+            <span className="block text-[12px] font-semibold text-fg">{label}</span>
+            <span className="mt-0.5 block text-[10.5px] leading-snug text-dim">{hint}</span>
+          </button>
+        ))}
+      </div>
+
+      <p className="mt-3 text-[11px] leading-relaxed text-dim">
+        {unsupported
+          ? `scrcpy ${scrcpyVersion ?? "(unknown version)"} can't create virtual displays — this applies from 3.0 onward.`
+          : "Takes effect the next time you start desktop mode or open an app on this Mac."}
+      </p>
     </div>
   );
 }

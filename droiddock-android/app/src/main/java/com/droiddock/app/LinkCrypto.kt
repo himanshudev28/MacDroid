@@ -16,14 +16,28 @@ import javax.crypto.spec.SecretKeySpec
  * 12-byte random nonce per message. Anything that changes here has to change
  * there too, which is what [INFO]'s version suffix is for.
  *
- * Scope, stated plainly: this covers JSON messages only. Binary frames — file
- * chunks, thumbnails, app icons, mirror video — stay in the clear, because they
- * ride a separate framing path on the hot transfer loops. It is not end-to-end
- * encryption of everything on this link.
+ * Scope: [CAP] covers JSON messages. [CAP_FRAMES] additionally covers binary
+ * frames — file chunks, thumbnails, app icons, mirror video — which ride the
+ * `[kind][id][seq]` framing rather than the JSON path. They are negotiated
+ * separately because the frame half shipped later, and a Mac that understands
+ * one but not the other must keep working rather than break transfers.
+ *
+ * With both engaged, everything after the handshake is encrypted. `hello` and
+ * `welcome` are not, and cannot be: the first carries the token the key is
+ * derived from, the second announces that encryption engaged at all.
  */
 object LinkCrypto {
     /** Advertised in `hello.caps`; the Mac echoes it in `welcome.caps` if it engaged. */
     const val CAP = "enc"
+
+    /** Same, for sealed binary frames. Separate from [CAP] on purpose. */
+    const val CAP_FRAMES = "enc2"
+
+    /** First byte of a sealed frame. Must match `crypto.rs`'s `KIND_SEALED`,
+     *  and must not collide with any real frame kind (1 = data, 2 = thumb,
+     *  3 = mirror video) — an unsealed peer drops it instead of parsing the
+     *  nonce as a header. */
+    const val KIND_SEALED: Byte = 0x80.toByte()
 
     private const val INFO = "droiddock-link-v1"
     private const val SALT = "droiddock-hkdf-salt-v1"
@@ -59,6 +73,34 @@ object LinkCrypto {
             .put("n", Base64.encodeToString(nonce, Base64.NO_WRAP))
             .put("d", Base64.encodeToString(sealed, Base64.NO_WRAP))
     }
+
+    /**
+     * Seal a whole binary frame, header included.
+     *
+     * The header carries the transfer id and sequence number; leaving those in
+     * the clear would leak the shape of every transfer to the passive listener
+     * this defends against. Layout: `[KIND_SEALED][12B nonce][GCM(frame)]`.
+     */
+    fun sealFrame(key: SecretKeySpec, frame: ByteArray): ByteArray {
+        val nonce = ByteArray(NONCE_LEN).also { rng.nextBytes(it) }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(TAG_BITS, nonce))
+        val sealed = cipher.doFinal(frame)
+        val out = ByteArray(1 + NONCE_LEN + sealed.size)
+        out[0] = KIND_SEALED
+        System.arraycopy(nonce, 0, out, 1, NONCE_LEN)
+        System.arraycopy(sealed, 0, out, 1 + NONCE_LEN, sealed.size)
+        return out
+    }
+
+    /** Unwrap a sealed frame, or null if it isn't one / can't be authenticated. */
+    fun openFrame(key: SecretKeySpec, buf: ByteArray): ByteArray? = runCatching {
+        if (buf.isEmpty() || buf[0] != KIND_SEALED || buf.size < 1 + NONCE_LEN) return null
+        val nonce = buf.copyOfRange(1, 1 + NONCE_LEN)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BITS, nonce))
+        cipher.doFinal(buf, 1 + NONCE_LEN, buf.size - 1 - NONCE_LEN)
+    }.getOrNull()
 
     /** Unwrap an envelope, or null if it can't be authenticated. Callers drop
      *  nulls rather than falling back to plaintext — a failed tag means

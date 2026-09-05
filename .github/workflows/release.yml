@@ -82,16 +82,18 @@ jobs:
           # `latest.json` — the manifest the updater in `updater.rs` polls.
           #
           # It is fetched from `releases/latest/download/latest.json`, which
-          # only resolves for a PUBLISHED release. With `releaseDraft: true`
-          # below, that means the update endpoint goes live at the moment you
-          # publish the draft by hand. That is the intended review gate, not a
-          # bug — but it does mean a draft release is invisible to every
-          # existing install until you press Publish.
+          # only resolves for a PUBLISHED release. Now that this job publishes
+          # directly, the update endpoint goes live the moment the run finishes
+          # and every existing install is offered the build on its next poll.
+          # The review gate has moved to the tag: pushing `v*` ships, so don't
+          # push one you aren't ready to hand to users.
           includeUpdaterJson: true
           releaseBody: ${{ steps.notes.outputs.body }}
-          # Drafted, not published: the build lands as a draft to inspect and
-          # release by hand. Flip to false once a run has been trusted end to end.
-          releaseDraft: true
+          # Published straight away, no manual step. Drafting was the
+          # training-wheels setting while the pipeline was unproven; v2.0.1 ran
+          # clean end to end — correct notes, all five assets, updater manifest
+          # resolving on publish — so the hand-publish is gone.
+          releaseDraft: false
           prerelease: false
 
   android:
@@ -173,8 +175,11 @@ jobs:
         with:
           files: DroidDock-Android.apk
           # MUST match the mac job's `releaseDraft`. Both jobs write the same
-          # release for this tag, and this action defaults to `draft: false` —
-          # so on the v1.0.0 run it took the draft the mac job had just created
-          # and published it, silently overriding the intent. Whichever job
-          # finishes last decides, so the two settings have to agree.
-          draft: true
+          # release for this tag and whichever finishes last decides the flag —
+          # on the v1.0.0 run this action's `draft: false` took the draft the
+          # mac job had just created and published it, overriding the intent.
+          # Both sides are false deliberately now, but they still have to agree:
+          # flipping only one back to true would restore exactly that race, and
+          # it would put the decision to ship in the APK job — the one that
+          # doesn't own the release.
+          draft: false

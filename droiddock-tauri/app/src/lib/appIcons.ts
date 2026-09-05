@@ -12,6 +12,39 @@ import { appIcon, appLaunch } from "./bridge";
 const cache = new Map<string, string | null>();
 const inflight = new Map<string, Promise<string | null>>();
 
+/// How many icon requests may be on the wire at once.
+///
+/// Every tile in the Apps grid asks for its icon the moment it mounts, and the
+/// grid is not virtualised — so opening the tab on a phone with 300 apps fired
+/// 300 simultaneous round-trips over Wi-Fi, each with a 12s timeout on the Rust
+/// side. The phone answers them one at a time regardless, so the only thing the
+/// fan-out achieved was making every request contend with the mirror stream and
+/// with each other, and turning a slow phone into a wall of timeouts. Four at a
+/// time saturates the link without starving anything else on it — the photo
+/// thumbnail path had already settled on the same shape (`CONCURRENCY = 3`).
+const MAX_INFLIGHT = 4;
+
+let active = 0;
+const waiting: (() => void)[] = [];
+
+/// Wait for a slot. Resolves immediately while under the cap.
+function acquire(): Promise<void> {
+  if (active < MAX_INFLIGHT) {
+    active++;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => waiting.push(resolve));
+}
+
+function release() {
+  const next = waiting.shift();
+  // Hand the slot straight to the next waiter rather than decrementing and
+  // letting it re-check — that keeps exactly MAX_INFLIGHT in flight with no
+  // window where a newly-queued request could jump the line.
+  if (next) next();
+  else active--;
+}
+
 /// `null` means "asked, and there is no icon" — cached like a hit so a broken
 /// package doesn't get retried forever.
 export function fetchIcon(pkg: string): Promise<string | null> {
@@ -21,7 +54,8 @@ export function fetchIcon(pkg: string): Promise<string | null> {
   const existing = inflight.get(pkg);
   if (existing) return existing;
 
-  const p = appIcon(pkg)
+  const p = acquire()
+    .then(() => appIcon(pkg))
     .then((url) => {
       cache.set(pkg, url);
       return url;
@@ -30,7 +64,10 @@ export function fetchIcon(pkg: string): Promise<string | null> {
       cache.set(pkg, null);
       return null;
     })
-    .finally(() => inflight.delete(pkg));
+    .finally(() => {
+      inflight.delete(pkg);
+      release();
+    });
 
   inflight.set(pkg, p);
   return p;
@@ -41,6 +78,11 @@ export function fetchIcon(pkg: string): Promise<string | null> {
 export function clearIcons(): void {
   cache.clear();
   inflight.clear();
+  // The queue is deliberately left alone. A waiter only exists while the cap is
+  // full, so every one of them is behind a request that is about to fail
+  // against the dead link — each failure hands its slot on, and the queue
+  // drains itself in order. Resolving them here instead would run them without
+  // a slot and leave `active` counting requests that no longer exist.
 }
 
 /// Subscribe a component to one package's icon.

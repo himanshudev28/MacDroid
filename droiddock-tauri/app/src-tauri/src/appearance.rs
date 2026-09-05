@@ -87,6 +87,54 @@ pub fn pin_to_own_space(window: &tauri::WebviewWindow) {
 #[cfg(not(target_os = "macos"))]
 pub fn pin_to_own_space(_window: &tauri::WebviewWindow) {}
 
+/// How many Spaces the window server thinks this window is on. `None` when the
+/// private API is unavailable. Used by the probe so the log shows the number
+/// changing rather than only `isOnActiveSpace`, which cannot distinguish
+/// "pinned here" from "on every desktop".
+#[cfg(target_os = "macos")]
+pub fn space_count(window: &tauri::WebviewWindow) -> Option<usize> {
+    use objc2_app_kit::NSWindow;
+    use objc2_foundation::{NSArray, NSNumber};
+    use std::ffi::{c_int, c_void, CString};
+
+    type CFArrayRef = *const c_void;
+    type MainConnectionId = unsafe extern "C" fn() -> c_int;
+    type CopySpacesForWindows = unsafe extern "C" fn(c_int, c_int, CFArrayRef) -> CFArrayRef;
+
+    let Ok(ptr) = window.ns_window() else { return None };
+    if ptr.is_null() {
+        return None;
+    }
+    // SAFETY: as in `pin_to_own_space` — a live NSWindow Tauri owns, main thread.
+    unsafe {
+        let ns: &NSWindow = &*(ptr as *const NSWindow);
+        let n = ns.windowNumber();
+        if n <= 0 {
+            return None;
+        }
+        let c1 = CString::new("CGSMainConnectionID").ok()?;
+        let c2 = CString::new("CGSCopySpacesForWindows").ok()?;
+        let s1 = libc::dlsym(libc::RTLD_DEFAULT, c1.as_ptr());
+        let s2 = libc::dlsym(libc::RTLD_DEFAULT, c2.as_ptr());
+        if s1.is_null() || s2.is_null() {
+            return None;
+        }
+        let conn: MainConnectionId = std::mem::transmute(s1);
+        let copy_spaces: CopySpacesForWindows = std::mem::transmute(s2);
+        let ids = NSArray::from_retained_slice(&[NSNumber::new_i64(n as i64)]);
+        let p = copy_spaces(conn(), 7, objc2::rc::Retained::as_ptr(&ids) as CFArrayRef);
+        if p.is_null() {
+            return None;
+        }
+        objc2::rc::Retained::from_raw(p as *mut NSArray<NSNumber>).map(|a| a.count())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn space_count(_window: &tauri::WebviewWindow) -> Option<usize> {
+    None
+}
+
 /// Make this app frontmost **without dragging its other windows to the desktop
 /// you happen to be on**.
 ///
@@ -205,9 +253,13 @@ pub fn spawn_space_probe(app: tauri::AppHandle) {
         return;
     }
     eprintln!("[spaces] probe on — sampling the main window every 500ms");
+    if let Some(w) = app.get_webview_window("main") {
+        let w2 = w.clone();
+        let _ = w.run_on_main_thread(move || dump_window_identity(&w2));
+    }
 
     std::thread::spawn(move || {
-        let mut last: Option<(bool, u64, bool)> = None;
+        let mut last: Option<(bool, u64, bool, i64, Option<usize>)> = None;
         let mut n: u64 = 0;
         loop {
             std::thread::sleep(std::time::Duration::from_millis(500));
@@ -224,6 +276,8 @@ pub fn spawn_space_probe(app: tauri::AppHandle) {
                     is_on_active_space(&w),
                     collection_behavior(&w),
                     w.is_visible().unwrap_or(false),
+                    window_level(&w),
+                    space_count(&w),
                 ));
             }) {
                 eprintln!("[spaces] #{n} main-thread hop failed: {e}");
@@ -240,10 +294,11 @@ pub fn spawn_space_probe(app: tauri::AppHandle) {
             // sampler died" produce identical logs otherwise, and telling them
             // apart is the entire point of running this.
             if last.as_ref() != Some(&now) || n % 20 == 0 {
-                let (on_space, behavior, visible) = now;
+                let (on_space, behavior, visible, level, spaces) = now;
                 eprintln!(
                     "[spaces] #{n} on_active_space={on_space} \
-                     collectionBehavior={behavior:#x} visible={visible}"
+                     collectionBehavior={behavior:#x} visible={visible} level={level} \
+                     spaces={spaces:?}"
                 );
                 last = Some(now);
             }
@@ -253,6 +308,57 @@ pub fn spawn_space_probe(app: tauri::AppHandle) {
 
 #[cfg(not(target_os = "macos"))]
 pub fn spawn_space_probe(_app: tauri::AppHandle) {}
+
+/// The window's `level`. `NSNormalWindowLevel` is 0; anything above it is a
+/// floating window, and macOS shows floating windows over *every* Space no
+/// matter what `collectionBehavior` says — which is the one way a window can
+/// be on all desktops while reporting a perfectly ordinary collection
+/// behaviour. Sampled by the probe so the two can be told apart.
+#[cfg(target_os = "macos")]
+fn window_level(window: &tauri::WebviewWindow) -> i64 {
+    use objc2_app_kit::NSWindow;
+
+    let Ok(ptr) = window.ns_window() else { return i64::MIN };
+    if ptr.is_null() {
+        return i64::MIN;
+    }
+    // SAFETY: as in `pin_to_own_space`.
+    let ns: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
+    ns.level() as i64
+}
+
+/// One-shot dump of everything about the `NSWindow` that could plausibly put it
+/// on every Space. Logged once, at probe start.
+///
+/// `styleMask` is the interesting one: a window without
+/// `NSWindowStyleMask::Titled` is *borderless*, and AppKit does not hand
+/// borderless windows to the Spaces manager the way it does ordinary titled
+/// ones — which is a way for a window to sit on every desktop while reporting
+/// `level = 0` and a `collectionBehavior` with no `CanJoinAllSpaces` in it.
+#[cfg(target_os = "macos")]
+fn dump_window_identity(window: &tauri::WebviewWindow) {
+    use objc2_app_kit::{NSApplication, NSPanel, NSWindow};
+    use objc2_foundation::MainThreadMarker;
+
+    let Ok(ptr) = window.ns_window() else { return };
+    if ptr.is_null() {
+        return;
+    }
+    // SAFETY: as in `pin_to_own_space`.
+    let ns: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
+
+    let style = ns.styleMask().0;
+    let titled = style & 1 != 0; // NSWindowStyleMaskTitled
+    let is_panel = ns.downcast_ref::<NSPanel>().is_some();
+    let count = MainThreadMarker::new().map(|mtm| NSApplication::sharedApplication(mtm).windows().len());
+
+    eprintln!(
+        "[window] identity: styleMask={style:#x} titled={titled} panel={is_panel} \
+         opaque={} level={} nswindows={count:?}",
+        ns.isOpaque(),
+        ns.level(),
+    );
+}
 
 /// The window's raw `collectionBehavior`, for the probe above.
 #[cfg(target_os = "macos")]
@@ -438,12 +544,52 @@ fn parse_bindings(text: &str) -> Vec<(String, String)> {
 
 // ── Surfaced to Settings ─────────────────────────────────────────────────────
 
-/// `true` when the Dock has this app assigned to a desktop — the one cause of
-/// "the window shows up on every Space" that the app cannot fix by writing to
-/// its own windows.
+/// `true` when the window is on more than one desktop, or the Dock has this app
+/// assigned to one — the one cause of "the window shows up on every Space" that
+/// the app cannot fix by writing to its own windows.
+///
+/// # Why this asks the window server as well as the preference file
+///
+/// Reading `com.apple.spaces` alone is not reliable, and this was found the
+/// hard way: a Mac whose Dock menu had DroidDock on **All Desktops** reported
+/// no `app-bindings` key at all, through both `defaults` and
+/// [`dock_space_binding`]. The Dock evidently holds the assignment without
+/// having flushed it to disk, so a file read says "unassigned" while every
+/// window the app opens lands on every desktop. The warning this drives never
+/// appeared, and the whole thing was invisible from inside the app.
+///
+/// `CGSCopySpacesForWindows` has no such problem — it answers from the window
+/// server, which is the thing that actually owns Space membership, and it
+/// correctly reported 3 on the machine where the file read reported nothing. So
+/// the *symptom* is the primary signal here and the preference is the fallback,
+/// rather than the other way round.
 #[tauri::command]
 pub fn spaces_binding_active(app: tauri::AppHandle) -> bool {
-    dock_space_binding(&app.config().identifier).is_some()
+    use tauri::Manager;
+
+    if dock_space_binding(&app.config().identifier).is_some() {
+        return true;
+    }
+    let Some(win) = app.get_webview_window("main") else {
+        return false;
+    };
+    // `windowNumber` is an AppKit read, so it goes to the main thread — this
+    // command runs on a worker. Falls back to "not assigned" if the hop or the
+    // reply times out, because a warning we are unsure about is worse than none.
+    let (tx, rx) = std::sync::mpsc::channel();
+    let w = win.clone();
+    if win
+        .run_on_main_thread(move || {
+            let _ = tx.send(space_count(&w));
+        })
+        .is_err()
+    {
+        return false;
+    }
+    rx.recv_timeout(std::time::Duration::from_secs(2))
+        .ok()
+        .flatten()
+        .is_some_and(|n| n > 1)
 }
 
 /// Clear that assignment and re-pin the window. Reports whether it took, so

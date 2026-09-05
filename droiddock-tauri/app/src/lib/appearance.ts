@@ -129,6 +129,14 @@ export function applyGlass(v: number = getGlass()): void {
   // destinations rather than two shades of the same thing.
   root.setProperty("--chrome-alpha", (1 - s * 0.62).toFixed(3));
   root.setProperty("--surface-alpha", (1 - s * 0.45).toFixed(3));
+
+  // At 0 every term above is its own identity — blur(0px), saturate(100%),
+  // brightness(1) — so the `backdrop-filter` on the chrome and the content
+  // surface is a no-op that WebKit nevertheless allocates a backdrop root for
+  // and re-runs. This flag lets the stylesheet drop the property entirely:
+  // same pixels, no compositing. It also makes the bottom of the slider a real
+  // "cost nothing" setting rather than just a transparency one.
+  document.documentElement.dataset.glass = s === 0 ? "off" : "on";
 }
 
 // ── Clock ────────────────────────────────────────────────────────────────

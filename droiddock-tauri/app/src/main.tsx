@@ -6,6 +6,7 @@ import MenubarPanel from "./components/MenubarPanel";
 import StatusWidget from "./components/StatusWidget";
 import ErrorBoundary from "./ErrorBoundary";
 import { initAppearance } from "./lib/appearance";
+import { watchWindowVisibility } from "./lib/idle";
 import "./index.css";
 
 // Before React mounts, not inside an effect. Theme and glass are read from
@@ -14,6 +15,11 @@ import "./index.css";
 // then flip, which is visible on every window open, including the menu-bar
 // panel and the mirror pop-out. All four routes below want it.
 initAppearance();
+
+// Same reasoning, same place: all four routes are windows that can end up
+// covered, on another Space, or hidden, and none of them should be spending GPU
+// while they are. See lib/idle.ts.
+watchWindowVisibility();
 
 // DroidDock runs in a WKWebView, so a right-click (or two-finger tap) gets the
 // *web view's* menu — Reload, Back, Inspect Element — which is a browser

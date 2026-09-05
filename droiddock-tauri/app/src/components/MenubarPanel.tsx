@@ -277,8 +277,8 @@ export default function MenubarPanel() {
           <p className="px-1 py-6 text-center text-[11.5px] text-faint">Nothing new.</p>
         ) : (
           <div className="card divide-y divide-line overflow-hidden">
-            {notifs.map((n, i) => (
-              <div key={n.key + i} className="group flex items-start gap-2.5 px-3 py-2.5">
+            {notifs.map((n) => (
+              <div key={n.key} className="group flex items-start gap-2.5 px-3 py-2.5">
                 <NotifIcon pkg={n.pkg} app={n.app} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">

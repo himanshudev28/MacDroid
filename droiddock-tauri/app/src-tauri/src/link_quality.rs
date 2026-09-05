@@ -123,6 +123,9 @@ fn now_ms() -> i64 {
 /// Probe loop, for the app's lifetime. Silent while nothing is linked.
 pub async fn run(app: AppHandle, state: SharedState) {
     let mut ticker = tokio::time::interval(PING_EVERY);
+    // See the note in `clipboard::run`: the loop parks while nothing is linked,
+    // so the interval must not try to make up the ticks it slept through.
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_grade = "";
 
     loop {
@@ -134,6 +137,10 @@ pub async fn run(app: AppHandle, state: SharedState) {
                 quality.reset();
                 last_grade = "";
             }
+            // Nothing to probe and nothing that can change until a phone shows
+            // up, so wait for that rather than for the next tick. The reset
+            // above still runs first, on the one tick that observes the drop.
+            ws_server::await_connected(&state).await;
             continue;
         }
 

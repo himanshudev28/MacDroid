@@ -241,10 +241,26 @@ object Prefs {
      *  When false, phone→Mac clipboard is manual only (share sheet / "Send" button). */
     fun setClipboardAuto(ctx: Context, v: Boolean) {
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putBoolean("clipAuto", v).apply()
+        clipAutoCache = v
     }
 
+    /**
+     * Cached because [clipboardAuto] is read on the accessibility hot path.
+     *
+     * `ClipAccessibilityService.onAccessibilityEvent` checks it before doing
+     * anything else, and that fires on every `TYPE_VIEW_TEXT_SELECTION_CHANGED`
+     * — i.e. on every cursor movement while typing in *any* app on the phone.
+     * A SharedPreferences lookup per keystroke is exactly the cost
+     * `AccessibilityControl.enabled` was made a `@Volatile` field to avoid.
+     * This is the same treatment; [setClipboardAuto] is the only writer, so the
+     * cache cannot go stale.
+     */
+    @Volatile private var clipAutoCache: Boolean? = null
+
     fun clipboardAuto(ctx: Context): Boolean =
-        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).getBoolean("clipAuto", true)
+        clipAutoCache ?: ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getBoolean("clipAuto", true)
+            .also { clipAutoCache = it }
 
     /**
      * Which tab the app opens on.

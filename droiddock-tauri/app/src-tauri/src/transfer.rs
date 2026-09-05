@@ -20,6 +20,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -99,6 +100,26 @@ struct Progress {
 
 fn emit_progress(app: &AppHandle, p: Progress) {
     let _ = app.emit("transfer-progress", p);
+}
+
+/// Floor on the gap between two *interim* progress events.
+///
+/// One event per 256 KiB chunk is roughly 80 a second on a fast LAN. Each is a
+/// Tauri event broadcast to every window, and each lands in a `setState` that
+/// re-renders the whole file list — for a bar no eye can read redrawing at
+/// 80 Hz. Ten a second looks identical and costs an eighth as much.
+const PROGRESS_EVERY: Duration = Duration::from_millis(100);
+
+/// [`emit_progress`], rate-limited. Only for the in-flight updates: terminal
+/// ones (`done: true`, with or without an error) go through `emit_progress`
+/// directly so the UI always settles on the truth, however soon after the
+/// previous update they land.
+fn emit_progress_throttled(app: &AppHandle, p: Progress, last: &mut Option<Instant>) {
+    if last.is_some_and(|t| t.elapsed() < PROGRESS_EVERY) {
+        return;
+    }
+    *last = Some(Instant::now());
+    emit_progress(app, p);
 }
 
 /// Build one binary frame — `pub` so `mac_fs::pull_to_phone` (Phase 19) can
@@ -268,6 +289,7 @@ async fn stream_file(
     let mut seq: u32 = 0;
     let mut sent: u64 = 0;
 
+    let mut last_progress: Option<Instant> = None;
     loop {
         // Non-blocking control check between chunks. Any event here must end
         // the stream — matching only Cancel would silently consume an early
@@ -300,9 +322,10 @@ async fn stream_file(
         }
         seq += 1;
         sent += n as u64;
-        emit_progress(
+        emit_progress_throttled(
             app,
             Progress { transfer_id, name: name.into(), sent, total: size, dir: "push", done: false, error: None },
+            &mut last_progress,
         );
     }
 
@@ -430,6 +453,7 @@ async fn receive_to_file(
         .map_err(|e| format!("cannot create file: {e}"))?;
     let mut received: u64 = 0;
 
+    let mut last_progress: Option<Instant> = None;
     let outcome = loop {
         match rx.recv().await {
             Some(RecvEvent::Chunk(bytes)) => {
@@ -437,9 +461,10 @@ async fn receive_to_file(
                     break Err("write error".to_string());
                 }
                 received += bytes.len() as u64;
-                emit_progress(
+                emit_progress_throttled(
                     app,
                     Progress { transfer_id, name: name.into(), sent: received, total: size, dir, done: false, error: None },
+                    &mut last_progress,
                 );
             }
             Some(RecvEvent::Done) => break Ok(()),

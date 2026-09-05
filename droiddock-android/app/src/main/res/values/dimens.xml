@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12 gave widgets a system corner radius so every widget on the
+         home screen matches; values-v31 hands these over to it. These literals
+         are what Android 8–11 use, where that dimension doesn't exist. -->
+    <dimen name="widget_radius">16dp</dimen>
+    <dimen name="widget_inner_radius">12dp</dimen>
+</resources>

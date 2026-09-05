@@ -130,6 +130,11 @@ pub async fn push_now(app: &AppHandle, state: &SharedState) {
 /// listening.
 pub async fn run(app: AppHandle, state: SharedState) {
     loop {
+        // Cheapest of the four loops — a minute apart, and `push_now` bails
+        // before the `pmset` fork when nothing is listening. Gated anyway, so
+        // that "unlinked means genuinely idle" holds for the whole app rather
+        // than for most of it.
+        ws_server::await_connected(&state).await;
         tokio::time::sleep(TICK).await;
         push_now(&app, &state).await;
     }

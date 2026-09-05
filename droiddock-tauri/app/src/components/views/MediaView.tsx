@@ -1,14 +1,19 @@
 import Icon from "../Icon";
 import EmptyState from "../EmptyState";
 import { fmtDuration } from "../../lib/ui";
-import { mediaCmd, type MediaState } from "../../lib/bridge";
+import { mediaCmd } from "../../lib/bridge";
+import { useMedia } from "../../lib/mediaStore";
 
 /// Phase 10 — now-playing card. Fields come from the phone's `media` push
 /// (title/artist/app/playing/vol/volMax/pos/dur — no album art in the wire
 /// protocol, so a music glyph stands in). Controls send `media-cmd` with an
 /// integer `value` (ms for seek, a 0..volMax step for setvol). Live position
 /// updates arrive once a second while playing.
-export default function MediaView({ media }: { media: MediaState | null }) {
+export default function MediaView() {
+  // Read at the point of use rather than threaded down from `App` — the phone
+  // pushes this once a second, and this view is one of only two things that
+  // show it. See `lib/mediaStore`.
+  const media = useMedia();
   if (!media || !media.active) {
     return (
       <EmptyState

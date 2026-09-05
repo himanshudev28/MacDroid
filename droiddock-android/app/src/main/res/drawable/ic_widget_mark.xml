@@ -1,0 +1,11 @@
+<!-- The launcher icon's "D", without its plate: at 20dp on an arbitrary
+     wallpaper the rounded square reads as a smudge, and the glyph alone is what
+     makes the widget recognisably DroidDock. Tinted by the layout. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M38,30h14a22,24 0 0 1 0,48H38zM48,40v28h4a12,14 0 0 0 0,-28z"/>
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M70,50h8v8h-8z"/>
+</vector>

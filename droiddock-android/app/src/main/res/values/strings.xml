@@ -38,4 +38,19 @@
     <string name="update_action_download">Download</string>
     <string name="update_action_install">Install</string>
     <string name="update_action_allow">Allow</string>
+
+    <!-- Home-screen widget (DockWidget.kt). The status line carries the one
+         thing the Quick Settings tiles can't: which Mac, and whether the link
+         is down because you asked or because the phone hasn't found it yet. -->
+    <string name="widget_description">Mac link status, with Disconnect, Send clipboard and Mirror.</string>
+    <string name="widget_status_linked">Linked to %1$s</string>
+    <string name="widget_status_searching">Searching for your Mac…</string>
+    <string name="widget_status_off">Disconnected</string>
+    <string name="widget_status_paused">Paused</string>
+    <string name="widget_mac_fallback">Mac</string>
+    <string name="widget_action_connect">Connect</string>
+    <string name="widget_action_disconnect">Disconnect</string>
+    <string name="widget_action_clip">Clipboard</string>
+    <string name="widget_action_mirror">Mirror</string>
+    <string name="widget_action_stop">Stop</string>
 </resources>
