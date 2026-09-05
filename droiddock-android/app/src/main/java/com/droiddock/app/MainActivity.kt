@@ -3617,6 +3617,7 @@ private fun UpdateRow(known: UpdateChecker.Release?) {
             else stringResource(R.string.update_needs_permission)
         is UpdateUi.Downloading -> stringResource(R.string.update_downloading, s.release.version, s.percent)
         is UpdateUi.Ready       -> stringResource(R.string.update_ready, s.release.version)
+        is UpdateUi.Blocked     -> stringResource(R.string.update_signed_differently, s.release.version)
         is UpdateUi.Failed      -> stringResource(R.string.update_failed, s.message)
     }
 
@@ -3624,6 +3625,7 @@ private fun UpdateRow(known: UpdateChecker.Release?) {
         is UpdateUi.Available   -> if (canInstall) stringResource(R.string.update_action_download)
                                    else stringResource(R.string.update_action_allow)
         is UpdateUi.Ready       -> stringResource(R.string.update_action_install)
+        is UpdateUi.Blocked     -> stringResource(R.string.update_action_get)
         else                    -> stringResource(R.string.update_action_check)
     }
 
@@ -3657,9 +3659,28 @@ private fun UpdateRow(known: UpdateChecker.Release?) {
                             val pct = if (total > 0) (done * 100 / total).toInt() else 0
                             state = UpdateUi.Downloading(s.release, pct)
                         }
-                    }.onSuccess { state = UpdateUi.Ready(s.release, it) }
-                        .onFailure { state = UpdateUi.Failed(it.message ?: "download failed") }
+                    }.onSuccess { apk ->
+                        // Checked here rather than at the install tap: this is
+                        // the first moment the certificate can be read, and it
+                        // is better to say why now than to draw an Install
+                        // button whose only outcome is the system's
+                        // "app isn't compatible with your phone".
+                        state = if (UpdateChecker.signedLikeInstalled(ctx, apk))
+                            UpdateUi.Ready(s.release, apk)
+                        else
+                            UpdateUi.Blocked(s.release)
+                    }.onFailure { state = UpdateUi.Failed(it.message ?: "download failed") }
                 }
+            }
+
+            is UpdateUi.Blocked -> {
+                runCatching {
+                    ctx.startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse(UpdateChecker.RELEASES_PAGE))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                }
+                return@ServiceRow
             }
 
             is UpdateUi.Ready -> scope.launch {
@@ -3721,7 +3742,75 @@ private sealed interface UpdateUi {
     data class Available(val release: UpdateChecker.Release) : UpdateUi
     data class Downloading(val release: UpdateChecker.Release, val percent: Int) : UpdateUi
     data class Ready(val release: UpdateChecker.Release, val apk: File) : UpdateUi
+
+    /**
+     * Downloaded, but signed by a different key than the running app — an
+     * in-place update is impossible, so the row stops offering one and explains
+     * the manual route instead. See `UpdateChecker.signedLikeInstalled`.
+     */
+    data class Blocked(val release: UpdateChecker.Release) : UpdateUi
     data class Failed(val message: String) : UpdateUi
+}
+
+/**
+ * Language picker, shaped like [ThemeRow] because it is the same kind of
+ * choice: a display preference that takes effect immediately.
+ *
+ * Changing it recomposes on its own — `t` reads `I18n.locale`, which is Compose
+ * state, so every composable showing text is already registered as a reader.
+ * No activity recreation and no manual invalidation.
+ */
+@Composable
+private fun LanguageRow() {
+    val ctx = LocalContext.current
+    val current = I18n.locale
+    val options = listOf("" to t("System")) + I18n.available()
+    Column(Modifier.fillMaxWidth().padding(vertical = 13.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconBadge(Icons.Outlined.Language, Blue)
+            Spacer(Modifier.width(13.dp))
+            Column(Modifier.weight(1f)) {
+                Text(t("Language"), color = Fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    if (I18n.onlyEnglish()) {
+                        t("Only English is bundled with this build, so there is nothing else to switch to yet. System follows your phone's language once a translation for it exists.")
+                    } else {
+                        t("Anything DroidDock hasn't been translated into shows in English.")
+                    },
+                    color = Dim, fontSize = 11.sp, lineHeight = 15.sp
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(11.dp))
+                .background(Surface3)
+                .padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            options.forEach { (tag, label) ->
+                val selected = tag == current
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(if (selected) Amber else Color.Transparent)
+                        .clickable { I18n.set(ctx, tag) }
+                        .padding(vertical = 9.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = label,
+                        color = if (selected) OnAmber else Dim,
+                        fontSize = 12.sp,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
+                    )
+                }
+            }
+        }
+    }
 }
 
 /**

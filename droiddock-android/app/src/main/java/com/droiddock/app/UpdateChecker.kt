@@ -4,7 +4,9 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
+import android.content.pm.PackageManager
 import android.os.Build
+import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -44,6 +46,9 @@ object UpdateChecker {
 
     /** Must match the name the workflow's `cp` gives the asset. */
     private const val APK_ASSET = "DroidDock-Android.apk"
+
+    /** Where to send someone who has to install by hand. See [signedLikeInstalled]. */
+    const val RELEASES_PAGE = "https://github.com/himanshudev28/MacDroid/releases/latest"
 
     /** Don't ask GitHub more than once a day on app open. */
     const val CHECK_INTERVAL_MS = 24L * 60 * 60 * 1000
@@ -182,6 +187,63 @@ object UpdateChecker {
             }
         }
         target
+    }
+
+    /**
+     * Whether [apk] is signed by the same certificate as the running app.
+     *
+     * Android will only let an APK replace one signed by the **same** key. When
+     * it doesn't, the session fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`,
+     * which the system dialog renders as "app isn't compatible with your phone"
+     * — a message that sends people looking for an Android-version or CPU
+     * problem that isn't there, on a phone that is already running the app.
+     *
+     * The case that hits real users is a build installed over USB. A local
+     * `assembleDebug` — or `assembleRelease` with no keystore in the
+     * environment, which falls back to the debug key on purpose so
+     * contributors can build — carries the machine's `~/.android/debug.keystore`
+     * certificate. Releases carry the CI keystore. Neither can ever update the
+     * other, however the version numbers compare.
+     *
+     * Certificates are compared rather than assumed, so this stays correct if
+     * the release keystore is ever rotated, and nothing here has to be kept in
+     * sync with a hardcoded fingerprint.
+     */
+    fun signedLikeInstalled(ctx: Context, apk: File): Boolean {
+        val ours   = signerDigests(ctx) { flags -> ctx.packageManager.getPackageInfo(ctx.packageName, flags) }
+        val theirs = signerDigests(ctx) { flags -> ctx.packageManager.getPackageArchiveInfo(apk.absolutePath, flags) }
+        // An unreadable APK or an unsigned one is not evidence of a mismatch —
+        // let the installer be the judge rather than blocking a good update on
+        // a failed parse.
+        if (ours.isEmpty() || theirs.isEmpty()) return true
+        return ours.intersect(theirs).isNotEmpty()
+    }
+
+    /**
+     * SHA-256 of every certificate a package is signed by.
+     *
+     * Two APIs, because `GET_SIGNING_CERTIFICATES` only exists from API 28 and
+     * this app runs from 26. On the modern path `apkContentsSigners` is the set
+     * that actually signed these bytes; on a rotated key it is the current
+     * certificate, which is the one the installer matches against.
+     */
+    private inline fun signerDigests(
+        ctx: Context,
+        get: (Int) -> android.content.pm.PackageInfo?,
+    ): Set<String> {
+        val signatures = if (Build.VERSION.SDK_INT >= 28) {
+            val info = runCatching { get(PackageManager.GET_SIGNING_CERTIFICATES) }.getOrNull()
+            info?.signingInfo?.let {
+                if (it.hasMultipleSigners()) it.apkContentsSigners else it.signingCertificateHistory
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            runCatching { get(PackageManager.GET_SIGNATURES) }.getOrNull()?.signatures
+        }
+        val digest = MessageDigest.getInstance("SHA-256")
+        return signatures.orEmpty().filterNotNull()
+            .map { digest.digest(it.toByteArray()).joinToString("") { b -> "%02x".format(b) } }
+            .toSet()
     }
 
     /**

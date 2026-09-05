@@ -34,6 +34,9 @@
     <string name="update_failed">Couldn\'t check: %1$s</string>
     <string name="update_needs_permission">Allow DroidDock to install apps first</string>
     <string name="update_install_failed">Update install failed: %1$s</string>
+    <string name="update_signed_differently">This copy was installed from a computer and is signed with a different key, so Android won\'t replace it. Uninstall DroidDock, then install %1$s by hand — pairing has to be set up again.</string>
+    <string name="update_action_get">Get it</string>
+    <string name="update_install_conflict">Android won\'t replace this copy of DroidDock — it was installed from a computer and is signed with a different key. Uninstall it, then install the download by hand.</string>
     <string name="update_action_check">Check</string>
     <string name="update_action_download">Download</string>
     <string name="update_action_install">Install</string>

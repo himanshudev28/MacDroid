@@ -37,6 +37,15 @@ class UpdateInstallReceiver : BroadcastReceiver() {
 
             PackageInstaller.STATUS_SUCCESS -> Unit
 
+            // A signature mismatch, almost always. The raw message for it is
+            // `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, which reads as an
+            // Android-version or CPU problem on a phone that is plainly running
+            // the app already. UpdateChecker.signedLikeInstalled catches this
+            // before the download is ever offered for install; this is the
+            // backstop for a copy replaced underneath us in between.
+            PackageInstaller.STATUS_FAILURE_CONFLICT ->
+                Toast.makeText(ctx, R.string.update_install_conflict, Toast.LENGTH_LONG).show()
+
             else -> {
                 val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
                 Toast.makeText(
