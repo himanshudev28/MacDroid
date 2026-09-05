@@ -8,6 +8,156 @@ to a generic body.
 
 ---
 
+## v2.3.0
+
+### Added
+
+- **Answer, decline and hang up calls from the Mac.** The incoming-call alert
+  used to be a caller-ID card you could do nothing with — in-call control was
+  ADB-only, so over Wi-Fi you got told who was ringing and had to reach for the
+  phone anyway. Answer, decline, hang up, mute and speaker now work over the
+  plain app link, and an answered call keeps a Mac overlay with a call timer
+  instead of the alert simply vanishing.
+
+  Three things are worth knowing. The buttons appear only once the phone
+  actually holds the Calls permission — a dead Answer button on a ringing phone
+  is worse than none, so it is hidden rather than greyed. Mute and speaker show
+  the state the phone **read back** after the change, not the state asked for,
+  because the dialer that owns the call can put the audio route back and
+  sometimes does. And the keypad stays ADB-only: playing DTMF into a live call
+  is reachable only from the device's default dialer, which a bridge app has no
+  business claiming.
+
+- **A setup check that says what is missing before you find out the hard way.**
+  Nearly everything DroidDock needs and hasn't got fails *silently*: the mirror
+  streams video while every tap is discarded, the Notifications tab looks
+  exactly like a quiet phone, remote control no-ops. **Settings → System →
+  Setup check** lists every grant on both devices, what breaks without each, and
+  a Fix button that opens the exact settings screen. Missing permissions also
+  raise a strip under the title bar when a phone connects.
+
+  Two honest notes. macOS gives no readable answer for whether it will let
+  DroidDock post banners — the API available to a desktop app returns "granted"
+  unconditionally — so notifications are an *informational* row that says so
+  rather than a green tick that means nothing. And because Android restricts
+  starting activities from the background, a Fix on a phone without "Display
+  over other apps" leaves you a tappable notification instead; the Mac says
+  which of the two happened rather than claiming success.
+
+- **Ring my phone**, from the phone card. It plays on the **alarm** stream,
+  which is the only route that survives silent mode, raises the alarm volume for
+  the duration and puts it back afterwards. It stops from the Mac, from a Stop
+  button on its own notification, or on its own after a minute — a remote
+  control that can start an unstoppable noise on a device in someone else's bag
+  is a worse thing to own than the feature is a good one.
+
+- **Save a still or a recording of the mirror.** Two buttons in the mirror
+  window; stills land in `~/Pictures/DroidDock`, recordings in
+  `~/Movies/DroidDock`, named the way macOS names screenshots. Recordings are
+  video-only and the button says so: phone audio is played by the main window so
+  it outlives the pop-out, which means the mirror's canvas has no audio track to
+  record.
+
+- **Images on the clipboard.** Copy a picture on the Mac and it is on the
+  phone's clipboard, ready to paste. The phone can send one back through the
+  Quick Settings tile, the widget or "Send to Mac".
+
+  That asymmetry is Android's, not a shortcut: it refuses background clipboard
+  reads outright, and the accessibility trick that rescues *text* works because
+  the accessibility event carries the copied string — there is no equivalent
+  carrying pixels. On the Mac, images that are only on the pasteboard as TIFF
+  (Preview and Safari copies) are re-encoded to PNG first, because Android
+  cannot decode TIFF at all. Text still wins whenever both are present: a Finder
+  file copy carries a filename *and* an icon, so an image being present is not
+  evidence you copied a picture.
+
+- **The Finder mount can now be writable.** **Settings → Mac files → Allow
+  writing to the phone** turns the phone volume read-write, so ⌘S in any Mac app
+  saves straight onto a file on the phone — the one thing a file browser inside
+  our own window can never do.
+
+  It is **off by default and stays that way**, for the reason it was read-only
+  to begin with: a bug on the write path damages files on your phone, where a
+  bug on the read path shows a wrong listing.
+
+  Two behaviours worth knowing. Finder's own droppings — `.DS_Store` in every
+  folder it merely *looks at*, `._name` sidecars beside files it saves — are
+  accepted and thrown away rather than written to the phone, so browsing a
+  writable volume no longer dirties it. And moving a file *between* folders is
+  refused rather than emulated: the emulation is copy-then-delete, which on a
+  failure halfway leaves you with two copies or none. Renaming in place works.
+
+### Changed
+
+- **Both apps now speak sixteen languages.** **Settings → Appearance →
+  Language** switches between them or follows the system: English, العربية,
+  বাংলা, Deutsch, Español, Français, हिन्दी, Bahasa Indonesia, Italiano, 日本語,
+  한국어, Português, Русский, Türkçe, Tiếng Việt, 简体中文 and 繁體中文.
+
+  Every user-facing string goes through a lookup rather than being baked into
+  the code — 438 on the Mac, 120 on the phone, 543 unique across both. Strings
+  are keyed on the **English text itself**, so a gap in a catalog shows correct
+  English rather than a resource id, and adding a language stays one file plus
+  one line with no code changes at all — see
+  `droiddock-tauri/app/src/locales/README.md` and `I18n.kt`.
+
+  `npm run i18n:check` guards the two things a coverage count cannot see: a
+  translation that dropped a `{n}` placeholder (which would print the braces on
+  screen), or one that rephrased `Mac → phone` into prose and lost the
+  direction. It also reports orphans — translations the UI no longer asks for,
+  which is what edited English copy leaves behind.
+
+  **Arabic mirrors the layout.** The Mac's directional styling was converted to
+  logical properties, so the whole interface flips from one `dir` attribute
+  rather than a second stylesheet; Android provides `LocalLayoutDirection` from
+  the app's own language, because DroidDock's language is its own setting and
+  Compose would otherwise only follow the system's.
+
+  These translations have not been reviewed by native speakers. They are
+  checked for completeness, placeholders and terminology, not for tone.
+
+  Strings are keyed on the English text itself, so a missing translation shows
+  correct English rather than a resource id. The cost of that choice is that
+  editing English copy orphans its translations — `npm run i18n:check` lists
+  orphans and gaps so it shows up as a diff instead of a silent gap.
+
+- **A Mac-placed call now resolves itself.** Dialling a contact from the Mac
+  left the overlay on "Calling…" until it was dismissed by hand, because the
+  phone only reported call state for calls it had announced itself. It now
+  reports the ones the Mac started too, so the overlay follows the call and
+  clears when it ends.
+
+### Fixed
+
+- **The phone's Home screen no longer has two dead buttons.** Mirror and Camera
+  sat under the Mac controls and did nothing when tapped: both asked for a
+  "mirror" tab that had been folded into Control when the bottom bar was
+  regrouped to five destinations, so a tap matched no screen and drew an empty
+  one. Rather than repair a shortcut to somewhere the nav bar already goes in
+  one tap, the pair is replaced by **Pair Mac**, which opens the same Connect
+  screen as Settings' "Pair or change Mac" — the one screen the nav bar
+  deliberately does not carry, and the one you want when the Mac you are paired
+  to is the wrong one.
+
+- **"App isn't compatible with your phone" on an in-app update now says what it
+  actually is.** Downloading the update and tapping Install could hand you that
+  system dialog on a phone that was plainly running the app already, which
+  sends you looking for an Android-version or CPU problem that does not exist.
+  The real cause is a signing key: a copy installed over USB from a computer
+  carries that machine's debug certificate, releases carry the CI keystore, and
+  Android will only let an APK replace one signed by the **same** key —
+  `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, rendered as "incompatible".
+
+  The update row now compares the downloaded APK's certificate against the
+  running app's as soon as the download lands, and where they differ it stops
+  offering an Install button that cannot work: it explains that this copy came
+  from a computer, that uninstalling and reinstalling by hand is the way
+  through, and that pairing will have to be set up again. Certificates are
+  compared rather than assumed against a hardcoded fingerprint, so rotating the
+  release keystore does not silently turn this into a false alarm.
+
+---
+
 ## v2.2.0
 
 ### Added

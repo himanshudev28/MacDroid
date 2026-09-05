@@ -116,6 +116,7 @@ It's two apps that talk to each other:
 | 🤖 | **Auto Mirror mode** | Grant "Display over other apps" once — after that the Mac can start screen/camera instantly with no per-session tap on the phone. |
 | 🔌 | **Smart pairing** | **Custom QR scan screen** (glowing amber corner brackets, animated status pill) or manual IP entry; auto-reconnect; "Forget this Mac"; **Pause** mode (1h / 8h / until resume). |
 | 🖥️ | **Your Mac, on your phone** | The phone's Home screen shows the Mac's **name, battery and charging state**, plus what it's playing — with working transport keys, **volume**, **brightness**, **screensaver** and **lock**. Off unless you enable remote control. |
+| 🌐 | **Sixteen languages** | English · العربية · বাংলা · Deutsch · Español · Français · हिन्दी · Bahasa Indonesia · Italiano · 日本語 · 한국어 · Português · Русский · Türkçe · Tiếng Việt · 简体中文 · 繁體中文. Follows your system language or pick one in Settings; the layout mirrors right-to-left for Arabic. |
 | 🌗 | **Light & dark themes** | Both apps follow the system theme or pin one, with a warm palette and adjustable glass on the Mac. The Android light palette is contrast-measured, not eyeballed. |
 | ⬆️ | **Self-updating** | The Mac app updates in place; the Android APK is signed with a stable release key so it can too. |
 | 📱 | **Device management** | Remembered Macs, Quick Connect, Disconnect, and switching between Macs — discovered over mDNS. |
@@ -359,6 +360,29 @@ DroidDock/
   Reset permission** in DroidDock, then tick DroidDock when macOS asks. Unticking
   and re-ticking the stale row often doesn't help — it's the row itself that's dead.
   A Developer ID signature is the only thing that removes this for good.
+- **Call control over Wi-Fi has three limits, all Android's.** The Answer and
+  hang-up buttons need the Calls permission and are hidden until it is granted,
+  rather than shown and dead. Mute and speaker are reported back from the phone
+  after the change, because the dialer that owns the call can override the audio
+  route. Keypad tones need ADB — `Call.playDtmfTone` is reachable only from the
+  device's default dialer, which DroidDock does not and should not claim to be.
+- **A "Fix" in the setup check may only leave a notification.** Android restricts
+  starting activities from the background; holding "Display over other apps" is
+  the exemption. Without it, the phone posts a tappable notification instead of
+  raising the settings screen, and the Mac says which of the two happened.
+- **The setup check cannot read macOS's notification permission.** The API a
+  desktop app can call returns "granted" unconditionally, so that row is marked
+  informational rather than shown as a green tick that proves nothing.
+- **The Finder mount is read-only until you say otherwise.** Turning on
+  *Settings → Mac files → Allow writing to the phone* makes it read-write; it is
+  off by default because a bug on that path damages files on the phone, where a
+  read bug only shows a wrong listing. Finder's `.DS_Store` and `._` sidecars
+  are discarded rather than written. Moving a file between folders is not
+  supported — renaming in place is.
+- **Clipboard images are automatic Mac → phone only.** Android refuses
+  background clipboard reads, and the accessibility event that rescues copied
+  *text* carries no pixels — so the phone can send a picture when you ask it to
+  (tile, widget, share sheet) and cannot notice one by itself.
 - **Only one copy of DroidDock can run at a time** — they compete for port `48484`,
   and the loser can never accept a phone. The app now says so instead of looking
   healthy and doing nothing.
@@ -413,8 +437,15 @@ DroidDock/
 - [x] **Quick Settings tiles** for connection + accessibility
 - [x] **Lock the phone from the Mac** (no unlock — Android exposes no such API)
 - [x] Window-wide drag & drop, configurable mirror quality, Android unit tests in CI
+- [x] **Call control over Wi-Fi** — answer, decline, hang up, mute, speaker without ADB
+- [x] **Setup check** — every permission on both devices, with a Fix button per row
+- [x] **Ring my phone**, **mirror stills and recordings**, **clipboard images**
+- [x] **Writable Finder mount** — opt-in, with Finder's `.DS_Store` litter filtered out
+- [x] **Sixteen languages** in both apps, with a **Language** setting — Arabic included,
+      and the layout mirrors for it. Adding another is one file plus one line
 - [ ] TLS on the LAN link
-- [ ] Audio streaming (Mac ↔ phone)
+- [ ] Audio streaming (Mac → phone; phone → Mac shipped in v2.2.0)
+- [ ] Second language shipped (the machinery is in place, no catalog yet)
 
 ---
 
