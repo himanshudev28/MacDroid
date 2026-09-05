@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import Icon from "./Icon";
+import { t, useT } from "../lib/i18n";
 import {
   mirrorAttach,
   mirrorInput,
+  mirrorSaveCapture,
   mirrorSetOnTop,
   onMirrorStarted,
   onMirrorStopped,
@@ -20,6 +22,10 @@ import {
 /// call also returns a `mirror-started` that beat this window's load.
 
 export default function MirrorWindow() {
+  // Its own window, so it needs its own subscription — a language change in the
+  // main window has to repaint this one too. See App.tsx.
+  useT();
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // The 2D context, cached against the canvas it came from. `getContext` only
   // honours its options on the *first* call for an element, so the options
@@ -41,6 +47,113 @@ export default function MirrorWindow() {
   const [facing, setFacing] = useState<"front" | "back">("back");
   const [onTop, setOnTop] = useState(false);
   const isCam = source === "camera";
+
+  // ── Saving what's on screen ───────────────────────────────────────────
+  // The canvas already holds decoded frames, so a PNG and an MP4 come off
+  // work WebKit is doing anyway — see capture.rs for why none of this is
+  // done in Rust.
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const [recording, setRecording] = useState(false);
+  const [recSeconds, setRecSeconds] = useState(0);
+  const [note, setNote] = useState<string | null>(null);
+
+  // This window has no toast system of its own, and a save that reports
+  // nothing is indistinguishable from a button that does nothing.
+  const say = (text: string) => {
+    setNote(text);
+    setTimeout(() => setNote((n) => (n === text ? null : n)), 4000);
+  };
+
+  const shoot = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        say(t("Nothing to capture yet"));
+        return;
+      }
+      mirrorSaveCapture(blob, "png")
+        .then((path) => say(`Saved ${path.split("/").pop()}`))
+        .catch((e) => say(String(e)));
+    }, "image/png");
+  };
+
+  /// MP4 first, because QuickTime and Finder previews can open it and a WebM
+  /// on a Mac is a file most apps refuse. WebKit's MediaRecorder does produce
+  /// MP4/H.264 — but this asks rather than assuming, and names the file after
+  /// whatever it actually got.
+  const pickMime = (): { mime: string; ext: string } | null => {
+    if (typeof MediaRecorder === "undefined") return null;
+    const candidates: [string, string][] = [
+      ["video/mp4;codecs=avc1", "mp4"],
+      ["video/mp4", "mp4"],
+      ["video/webm;codecs=vp9", "webm"],
+      ["video/webm", "webm"],
+    ];
+    for (const [mime, ext] of candidates) {
+      if (MediaRecorder.isTypeSupported?.(mime)) return { mime, ext };
+    }
+    return null;
+  };
+
+  const stopRecording = () => {
+    const rec = recorderRef.current;
+    // `stop()` fires `onstop`, which is where the file is written — so a
+    // recording that ends because the mirror died still gets saved rather
+    // than discarded along with the stream.
+    if (rec && rec.state !== "inactive") rec.stop();
+  };
+
+  const toggleRecording = () => {
+    if (recording) {
+      stopRecording();
+      return;
+    }
+    const canvas = canvasRef.current;
+    const picked = pickMime();
+    if (!canvas || !picked) {
+      say(t("This build of WebKit can't record video"));
+      return;
+    }
+    try {
+      const stream = canvas.captureStream(30);
+      const rec = new MediaRecorder(stream, { mimeType: picked.mime });
+      chunksRef.current = [];
+      rec.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      rec.onstop = () => {
+        setRecording(false);
+        recorderRef.current = null;
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunksRef.current, { type: picked.mime });
+        chunksRef.current = [];
+        mirrorSaveCapture(blob, picked.ext)
+          .then((path) => say(`Saved ${path.split("/").pop()}`))
+          .catch((e) => say(String(e)));
+      };
+      // A timeslice, so a crash mid-recording leaves buffered chunks rather
+      // than one unwritten blob held until stop.
+      rec.start(1000);
+      recorderRef.current = rec;
+      setRecording(true);
+      setRecSeconds(0);
+    } catch (e) {
+      say(String(e));
+    }
+  };
+
+  useEffect(() => {
+    if (!recording) return;
+    const id = setInterval(() => setRecSeconds((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [recording]);
+
+  // The stream ending is not a reason to lose the recording — finalise it.
+  useEffect(() => {
+    if (!live && recorderRef.current) stopRecording();
+  }, [live]);
 
   useEffect(() => {
     const setupDecoder = (codec: string) => {
@@ -229,13 +342,13 @@ export default function MirrorWindow() {
         <div className="flex items-center gap-1">
           {!isCam && live && (
             <>
-              <Btn title="Back" onClick={() => key("back")}>
+              <Btn title={t("Back")} onClick={() => key("back")}>
                 <Icon name="arrowLeft" size={13} />
               </Btn>
-              <Btn title="Home" onClick={() => key("home")}>
+              <Btn title={t("Home")} onClick={() => key("home")}>
                 <Icon name="circle" size={12} />
               </Btn>
-              <Btn title="Recents" onClick={() => key("recents")}>
+              <Btn title={t("Recents")} onClick={() => key("recents")}>
                 <Icon name="squareStack" size={12} />
               </Btn>
             </>
@@ -247,21 +360,50 @@ export default function MirrorWindow() {
           {isCam && live && (
             <button
               onClick={flipCamera}
-              title="Switch front/back camera"
+              title={t("Switch front/back camera")}
               className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-[11px] font-medium text-fg/85 transition-colors hover:bg-panel3"
             >
               <Icon name="switchCamera" size={13} />
               {facing === "front" ? "Front" : "Back"}
             </button>
           )}
-          <Btn title={onTop ? "Unpin (on top)" : "Keep on top"} onClick={toggleTop} active={onTop}>
+          {live && (
+            <>
+              <Btn title={t("Save a still to Pictures/DroidDock")} onClick={shoot}>
+                <Icon name="camera" size={12} />
+              </Btn>
+              <Btn
+                title={
+                  recording
+                    ? t("Stop recording and save to Movies/DroidDock")
+                    : t("Record to Movies/DroidDock (video only — phone audio isn't part of this window)")
+                }
+                onClick={toggleRecording}
+                active={recording}
+              >
+                <Icon name={recording ? "pause" : "circle"} size={12} />
+              </Btn>
+            </>
+          )}
+          {recording && (
+            <span className="data px-1 text-[11px] text-bad">
+              {Math.floor(recSeconds / 60)}:{String(recSeconds % 60).padStart(2, "0")}
+            </span>
+          )}
+          <Btn title={onTop ? t("Unpin (on top)") : t("Keep on top")} onClick={toggleTop} active={onTop}>
             <Icon name="pin" size={12} />
           </Btn>
-          <Btn title="Close" onClick={() => getCurrentWindow().close()} danger>
+          <Btn title={t("Close")} onClick={() => getCurrentWindow().close()} danger>
             <Icon name="x" size={13} />
           </Btn>
         </div>
       </div>
+
+      {note && (
+        <div className="shrink-0 border-b border-line bg-panel2 px-3 py-1.5 text-[11px] text-fg/80">
+          {note}
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1 items-center justify-center">
         {live ? (
@@ -284,8 +426,8 @@ export default function MirrorWindow() {
         ) : (
           <div className="flex flex-col items-center gap-2 px-6 text-center">
             <Icon name="reload" size={16} className="spinner text-dim" />
-            <p className="font-display text-[14px] font-semibold text-fg">Approve on your phone</p>
-            <p className="text-[11.5px] text-dim">Accept the capture request to start streaming.</p>
+            <p className="font-display text-[14px] font-semibold text-fg">{t("Approve on your phone")}</p>
+            <p className="text-[11.5px] text-dim">{t("Accept the capture request to start streaming.")}</p>
           </div>
         )}
       </div>
