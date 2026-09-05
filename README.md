@@ -51,6 +51,7 @@ It's two apps that talk to each other:
 | 🎵 | **Media remote** | Now-Playing card with transport + volume control. |
 | 🪞 | **Screen mirroring** | Mirror **and control** your phone over Wi-Fi (MediaProjection + H.264) — tap, swipe, scroll, type and use the nav bar from your Mac. Pops out into a phone-shaped, always-on-top window. **No ADB, no scrcpy, no Developer Options.** |
 | 📷 | **Phone camera** | Use your phone's back or front camera as a Mac webcam-style feed — live, switchable, no ADB. |
+| 📲 | **Apps grid** | Your phone's app drawer on the Mac, with real icons, prefix-ranked search and pinning. Click an app to launch it **on the phone** or **in its own Mac window** — a switch in the grid's header (and Settings → Mirroring) picks which, and holding **⌥ Option** always does the other one. |
 | 🤖 | **Auto Mirror mode** | Grant "Display over other apps" once — after that the Mac can start screen/camera instantly with no per-session tap on the phone. |
 | 🔌 | **Smart pairing** | **Custom QR scan screen** (glowing amber corner brackets, animated status pill) or manual IP entry; auto-reconnect; "Forget this Mac"; **Pause** mode (1h / 8h / until resume). |
 | 🖥️ | **Your Mac, on your phone** | The phone's Home screen shows the Mac's **name, battery and charging state**, plus what it's playing — with working transport keys, **volume**, **brightness**, **screensaver** and **lock**. Off unless you enable remote control. |
@@ -162,6 +163,29 @@ Tap **Screen** or **Camera** in the Mac's Mirror tab.
   app's settings. After that the capture dialog pops up directly with no notification
   tap, and camera starts instantly. Stopping from the Mac clears the phone's cast
   indicator completely.
+
+### 📲 Opening phone apps
+
+The **Apps** tab lists every launchable app on the phone. Click one and it opens
+in one of two places:
+
+- **On the phone** (the default) — the app launches on the handset, ready to be
+  watched from the Mirror tab.
+- **On this Mac** — the app opens in its own Mac window on a virtual Android
+  display, and the phone's own screen is left untouched. Needs ADB and scrcpy;
+  with no ADB device connected the click falls back to launching on the phone
+  rather than doing nothing.
+
+Pick the default with the **Phone / Mac** switch in the Apps header, or
+**Settings → Mirroring → Open apps on this Mac** — they are the same setting.
+Holding **⌥ Option** while clicking always does whichever one is *not* the
+default, so both are always one modifier away.
+
+How that Mac window looks is governed by the rest of **Settings → Mirroring**:
+*Window layout* decides whether Android serves a desktop or a magnified-phone
+layout, *Show Android bars* keeps or drops the launcher/status/nav bars, and
+*Keep apps running when the window closes* hands the app back to the phone
+instead of killing it.
 
 ### 🔔 Mac notifications
 

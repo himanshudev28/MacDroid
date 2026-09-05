@@ -38,11 +38,78 @@ to a generic body.
   the only mode available makes this Mac visible to everyone on the network for
   as long as it is on. That is your call to make, not a default to inherit.
 
+- **Clicking an app can now open it on the Mac instead of the phone.** The Apps
+  grid could always do both, but opening an app in its own Mac window was hidden
+  behind a double-click nothing announced. There is now a **Phone / Mac** switch
+  in the Apps header — mirrored by **Settings → Mirroring → Open apps on this
+  Mac** — that decides what a plain click does, and holding **⌥ Option** always
+  does the other one. With no ADB device connected the Mac route is unreachable,
+  so a click falls back to launching on the phone and says so, rather than
+  leaving the tile inert because a setting is on.
+
   Sending *from* the Mac is not included, and is not an oversight: Android only
   becomes discoverable after it hears a Bluetooth advertisement whose contents
   macOS provides no way to set.
 
+### Performance
+
+- **An unpaired Mac is now genuinely idle.** Four background loops — clipboard,
+  link quality, now-playing and Mac info — each woke on their own timer and
+  immediately did nothing whenever no phone was linked, together a couple of CPU
+  wake-ups a second, forever. They now sleep on the link itself and wake when a
+  phone actually arrives, which also means the first clipboard poll and status
+  push after connecting happen immediately instead of up to a tick later.
+
+- **The phone stops sweeping the radio when there is nothing to reach.** The
+  Android connect loop ran a full probe round — up to four TCP dials, a UDP
+  broadcast and a live mDNS browse — on a fixed backoff around the clock, with
+  no connectivity check at all: it did that in airplane mode and on cellular.
+  It now parks until Android reports a network.
+
+- **Reconnecting after the Mac comes back is close to immediate.** Two things
+  made it take up to ~35 seconds: the backoff could not be interrupted, so Wi-Fi
+  returning did nothing until it elapsed; and stored addresses were dialled one
+  at a time at four seconds each, most of them stale. The backoff now wakes on
+  the network becoming available, and all stored addresses are probed in
+  parallel so the whole round costs about one timeout.
+
+- **The mirror is lower-latency and much cheaper to encode.** The encoder was
+  forcing a full keyframe every second — even on a completely static screen —
+  which dominated both the bitrate and the encode cost and arrived as a visible
+  hitch once a second. Keyframes are now three seconds apart, safe because this
+  is a TCP link where frames are not lost and both cases that genuinely need a
+  fresh one ask for it explicitly. Added realtime encoder priority and
+  low-latency hints, and dropped several whole-frame memory copies per frame on
+  both sides.
+
+- **A weak Wi-Fi link no longer puts the mirror seconds behind.** Video was
+  queued for sending unconditionally, so a dip meant frames piling up in memory
+  with the picture falling further behind reality the whole time. Past a
+  backlog threshold, predicted frames are now dropped and one keyframe
+  requested, so the mirror catches up to the present instead of replaying the
+  past.
+
+- **Playing music with no Mac linked costs nothing again.** The phone was doing
+  a package-manager lookup, two audio-system calls and a JSON build on the main
+  thread every second to produce a message that was then discarded because
+  nothing was connected. Same for the battery broadcast handler, and for a
+  preference the accessibility service re-read on every cursor movement while
+  typing in any app.
+
+- **The Mac app's UI no longer redraws on every now-playing tick.** The phone
+  pushes now-playing once a second while music plays, and each push re-rendered
+  the whole window — rail, phone card and whichever list was open. It now
+  reaches only the two components that display it. File-transfer progress was
+  likewise emitted per 256 KiB chunk (~80 times a second, each redrawing the
+  entire file list) and is now rate-limited; opening the Apps tab fired one
+  simultaneous request per installed app and is now capped.
+
 ### Fixed
+
+- **Notifications no longer lose a reply you are part-way through typing.** Each
+  row was keyed by its position in the list, and new notifications arrive at the
+  top — so a single arrival changed every key and made the whole list unmount
+  and rebuild, taking any in-progress inline reply with it.
 
 - **A locally built APK no longer needs an uninstall.** Installing one was
   believed to mean losing pairing and every granted permission. It doesn't —
