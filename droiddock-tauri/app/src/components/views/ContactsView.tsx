@@ -4,6 +4,7 @@ import EmptyState from "../EmptyState";
 import { avatarColor } from "../../lib/ui";
 import { contactsList, actionCall, type Contact } from "../../lib/bridge";
 import type { MessageTarget } from "./MessagesView";
+import { t } from "../../lib/i18n";
 
 /// Phase 8 — contacts list with STARRED / ALL sections and client-side search
 /// (name OR number), matching ContactsView.jsx. The call button fires the Wi-Fi
@@ -54,8 +55,8 @@ export default function ContactsView({
     return (
       <EmptyState
         icon="star"
-        title="Phone not linked"
-        body="Contacts need the Wi-Fi link. Pair your phone from the Dashboard, then come back."
+        title={t("Phone not linked")}
+        body={t("Contacts need the Wi-Fi link. Pair your phone from the Dashboard, then come back.")}
       />
     );
   }
@@ -64,10 +65,9 @@ export default function ContactsView({
     return (
       <div className="flex h-full items-center justify-center p-8">
         <div className="rise card-raised w-full max-w-sm p-7 text-center">
-          <p className="font-display text-[15px] font-semibold text-fg">Can't read contacts</p>
+          <p className="font-display text-[15px] font-semibold text-fg">{t("Can't read contacts")}</p>
           <p className="mt-2 text-[12px] leading-relaxed text-dim">{err}</p>
-          <button onClick={load} className="btn btn-secondary mt-4">
-            Try again
+          <button onClick={load} className="btn btn-secondary mt-4">{t("Try again")}
           </button>
         </div>
       </div>
@@ -78,10 +78,10 @@ export default function ContactsView({
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-14 shrink-0 items-center justify-between gap-3 px-5">
         <div className="flex items-baseline gap-2">
-          <h1 className="font-display text-[17px] font-semibold text-fg">Contacts</h1>
+          <h1 className="font-display text-[17px] font-semibold text-fg">{t("Contacts")}</h1>
           <span className="text-[11px] text-faint">{contacts.length}</span>
         </div>
-        <button onClick={load} title="Refresh" className="btn-icon">
+        <button onClick={load} title={t("Refresh")} className="btn-icon">
           <Icon name="reload" size={14} className={loading ? "spinner" : ""} />
         </button>
       </div>
@@ -90,29 +90,29 @@ export default function ContactsView({
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Search contacts"
+          placeholder={t("Search contacts")}
           className="field w-full"
         />
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
         {loading && contacts.length === 0 && (
-          <p className="p-6 text-[12px] text-dim">Reading contacts…</p>
+          <p className="p-6 text-[12px] text-dim">{t("Reading contacts…")}</p>
         )}
         {starred.length > 0 && (
           <>
-            <Header label="Starred" count={starred.length} />
+            <Header label={t("Starred")} count={starred.length} />
             {starred.map((c, i) => (
               <Row key={"s" + i} c={c} onCall={onCall} onOpenSms={onOpenSms} onToast={onToast} />
             ))}
           </>
         )}
-        {rest.length > 0 && <Header label="All contacts" count={rest.length} />}
+        {rest.length > 0 && <Header label={t("All contacts")} count={rest.length} />}
         {rest.map((c, i) => (
           <Row key={i} c={c} onCall={onCall} onOpenSms={onOpenSms} onToast={onToast} />
         ))}
         {!loading && filtered.length === 0 && (
-          <p className="p-6 text-[12px] text-dim">No matches</p>
+          <p className="p-6 text-[12px] text-dim">{t("No matches")}</p>
         )}
       </div>
     </div>
@@ -168,12 +168,12 @@ function Row({
       </div>
       {c.number && (
         <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-          <button onClick={handleCall} title="Call via phone" className="btn-icon">
+          <button onClick={handleCall} title={t("Call via phone")} className="btn-icon">
             <Icon name="phone" size={14} />
           </button>
           <button
             onClick={() => onOpenSms({ number: c.number, name: c.name || c.number })}
-            title="Open messages"
+            title={t("Open messages")}
             className="btn-icon"
           >
             <Icon name="message" size={14} />

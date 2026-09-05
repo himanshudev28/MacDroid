@@ -66,6 +66,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.File
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 
 // The palette these names used to hold now lives in Theme.kt, one instance per
 // theme. Reading them through the CompositionLocal keeps every `color = Fg` in
@@ -99,6 +102,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Before any composition: `t` reads I18n.locale, and a composable that
+        // reads it at its default value and then sees it change would recompose
+        // for no reason on every cold start.
+        I18n.load(applicationContext)
         enableEdgeToEdge()
         CrashNotifier.install(this)
         themeFlow.value = Prefs.themeMode(this)
@@ -110,22 +117,33 @@ class MainActivity : ComponentActivity() {
             val pairUri by pairFlow.collectAsState()
             val theme by themeFlow.collectAsState()
             val pitchBlack by pitchBlackFlow.collectAsState()
-            DroidDockTheme(theme, pitchBlack) {
-                SystemBarsFollowTheme()
-                DroidDockScreen(
-                    pairUri = pairUri,
-                    clearPairUri = { pairFlow.value = null },
-                    themeMode = theme,
-                    onThemeMode = { mode ->
-                        Prefs.setThemeMode(this, mode)
-                        themeFlow.value = mode
-                    },
-                    pitchBlack = pitchBlack,
-                    onPitchBlack = { v ->
-                        Prefs.setPitchBlack(this, v)
-                        pitchBlackFlow.value = v
-                    },
-                )
+            // The app's language is its own setting, not the phone's, so Compose
+            // cannot get the layout direction from the configuration the way it
+            // normally would. Providing it here is what actually mirrors rows,
+            // start/end padding and text alignment for Arabic — reading
+            // I18n.isRtl() inside composition also means switching language
+            // flips the layout without recreating the activity.
+            CompositionLocalProvider(
+                LocalLayoutDirection provides
+                    if (I18n.isRtl()) LayoutDirection.Rtl else LayoutDirection.Ltr
+            ) {
+                DroidDockTheme(theme, pitchBlack) {
+                    SystemBarsFollowTheme()
+                    DroidDockScreen(
+                        pairUri = pairUri,
+                        clearPairUri = { pairFlow.value = null },
+                        themeMode = theme,
+                        onThemeMode = { mode ->
+                            Prefs.setThemeMode(this, mode)
+                            themeFlow.value = mode
+                        },
+                        pitchBlack = pitchBlack,
+                        onPitchBlack = { v ->
+                            Prefs.setPitchBlack(this, v)
+                            pitchBlackFlow.value = v
+                        },
+                    )
+                }
             }
         }
     }
@@ -313,7 +331,7 @@ private fun DroidDockScreen(
         }.onSuccess { pairing ->
             applyPairing(pairing)
         }.onFailure {
-            Toast.makeText(ctx, "Not a DroidDock QR code", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, t("Not a DroidDock QR code"), Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -335,7 +353,7 @@ private fun DroidDockScreen(
             setBeepEnabled(false)
             setOrientationLocked(false)
         })
-        else Toast.makeText(ctx, "Camera permission needed to scan QR", Toast.LENGTH_SHORT).show()
+        else Toast.makeText(ctx, t("Camera permission needed to scan QR"), Toast.LENGTH_SHORT).show()
     }
 
     val permLauncher = rememberLauncherForActivityResult(
@@ -525,7 +543,7 @@ private fun DroidDockScreen(
                         } else {
                             BridgeService.stop(ctx)
                         }
-                        Toast.makeText(ctx, "Forgot this Mac", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(ctx, t("Forgot this Mac"), Toast.LENGTH_SHORT).show()
                     },
                 )
                 "files" -> FilesScreen(
@@ -577,7 +595,7 @@ private fun DroidDockScreen(
                                     Uri.parse("package:${ctx.packageName}"))
                             )
                         }
-                        Toast.makeText(ctx, "Allow DroidDock to display over other apps", Toast.LENGTH_LONG).show()
+                        Toast.makeText(ctx, t("Allow DroidDock to display over other apps"), Toast.LENGTH_LONG).show()
                     },
                     onToggleAutoMirror = { v ->
                         autoMirror = v; Prefs.setAutoMirror(ctx, v)
@@ -602,9 +620,9 @@ private fun DroidDockScreen(
                         Prefs.setNotifyOnCrash(ctx, v)
                     },
                     defaultTab  = defaultTab,
-                    onDefaultTab = { t ->
-                        defaultTab = t
-                        Prefs.setDefaultTab(ctx, t)
+                    onDefaultTab = { tab ->
+                        defaultTab = tab
+                        Prefs.setDefaultTab(ctx, tab)
                     },
                     expandNet   = expandNet,
                     onExpandNet = { v ->
@@ -613,7 +631,7 @@ private fun DroidDockScreen(
                     },
                     onEnableClip = {
                         runCatching { ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-                        Toast.makeText(ctx, "Find DroidDock Clipboard and turn it on", Toast.LENGTH_LONG).show()
+                        Toast.makeText(ctx, t("Find DroidDock Clipboard and turn it on"), Toast.LENGTH_LONG).show()
                     },
                     onToggleClipAuto = { v -> clipAuto = v; Prefs.setClipboardAuto(ctx, v) },
                     onEnableNotif = {
@@ -749,27 +767,30 @@ private fun HomeTab(
 
         Spacer(Modifier.height(14.dp))
 
+        // Two actions, not three. Mirror and Camera used to sit here and had
+        // been dead since the nav bar was regrouped to five destinations: they
+        // still asked for a "mirror" tab that had been folded into "control",
+        // so a tap matched no branch and drew an empty screen. Both are one tap
+        // away on the Control tab, so they are gone rather than repaired.
+        //
+        // Pairing takes the space instead. Connect is the one screen the nav
+        // bar deliberately does not carry, and reaching it only through
+        // Settings buries the thing you need when the Mac is the wrong one.
+        // Same destination as Settings' "Pair or change Mac" row.
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             QuickActionBtn(
-                icon      = Icons.Outlined.ScreenShare,
-                label     = "Mirror",
-                tint      = Purple,
-                modifier  = Modifier.weight(1f),
-                onClick   = onGoToMirror,
-            )
-            QuickActionBtn(
                 icon      = Icons.Outlined.UploadFile,
-                label     = "Send File",
+                label     = t("Send File"),
                 tint      = Orange,
                 modifier  = Modifier.weight(1f),
                 onClick   = onGoToFiles,
             )
             QuickActionBtn(
-                icon      = Icons.Outlined.Videocam,
-                label     = "Camera",
-                tint      = Blue,
+                icon      = Icons.Outlined.WifiTethering,
+                label     = t("Pair Mac"),
+                tint      = Amber,
                 modifier  = Modifier.weight(1f),
-                onClick   = onGoToMirror,
+                onClick   = onGoToConnect,
             )
         }
 
@@ -871,7 +892,7 @@ private fun ConnectionHeroCard(
                                 shape          = RoundedCornerShape(10.dp),
                                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
                                 elevation      = ButtonDefaults.filledTonalButtonElevation(0.dp)
-                            ) { Text("Resume", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
+                            ) { Text(t("Resume"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
                         } else {
                             IconButton(onClick = onPause) {
                                 Icon(Icons.Default.PowerSettingsNew, "Pause",
@@ -891,7 +912,7 @@ private fun ConnectionHeroCard(
                     ) {
                         Icon(Icons.Default.QrCodeScanner, null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Pair with Mac", fontWeight = FontWeight.SemiBold, fontSize = 15.sp,
+                        Text(t("Pair with Mac"), fontWeight = FontWeight.SemiBold, fontSize = 15.sp,
                             color = OnAmber)
                     }
                 }
@@ -997,7 +1018,7 @@ private fun MacNowPlayingCard(media: ConnectionManager.MacMedia?) {
                 ) {
                     Icon(
                         if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
-                        contentDescription = "Play or pause",
+                        contentDescription = t("Play or pause"),
                         tint = OnAmber,
                         modifier = Modifier.size(24.dp)
                     )
@@ -1053,7 +1074,7 @@ private fun MacControlsCard(volume: Int?) {
     ) {
         Column(Modifier.padding(18.dp)) {
             Text(
-                "MAC CONTROLS",
+                t("MAC CONTROLS"),
                 color = Dim, fontSize = 10.sp, letterSpacing = 1.2.sp,
                 fontWeight = FontWeight.SemiBold
             )
@@ -1061,11 +1082,11 @@ private fun MacControlsCard(volume: Int?) {
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 MacActionChip(
-                    icon = Icons.Outlined.Lock, label = "Lock",
+                    icon = Icons.Outlined.Lock, label = t("Lock"),
                     tint = Blue, modifier = Modifier.weight(1f)
                 ) { ConnectionManager.sendRemote("lock") }
                 MacActionChip(
-                    icon = Icons.Outlined.DesktopWindows, label = "Screensaver",
+                    icon = Icons.Outlined.DesktopWindows, label = t("Screensaver"),
                     tint = Purple, modifier = Modifier.weight(1f)
                 ) { ConnectionManager.sendRemote("screensaver") }
             }
@@ -1076,7 +1097,7 @@ private fun MacControlsCard(volume: Int?) {
                 Icon(Icons.Outlined.BrightnessMedium, null, tint = Orange,
                     modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(10.dp))
-                Text("Brightness", color = Fg, fontSize = 13.sp,
+                Text(t("Brightness"), color = Fg, fontSize = 13.sp,
                     fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                 StepButton("−") {
                     ConnectionManager.sendRemote("brightness") { it.put("dir", "down") }
@@ -1093,7 +1114,7 @@ private fun MacControlsCard(volume: Int?) {
                     Icon(Icons.Outlined.VolumeUp, null, tint = Ok,
                         modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(10.dp))
-                    Text("Volume", color = Fg, fontSize = 13.sp,
+                    Text(t("Volume"), color = Fg, fontSize = 13.sp,
                         fontWeight = FontWeight.Medium)
                     Spacer(Modifier.width(10.dp))
                     Slider(
@@ -1206,7 +1227,7 @@ private fun DevicesCard(
     ) {
         Column(Modifier.padding(18.dp)) {
             Text(
-                "LAST CONNECTED DEVICE",
+                t("LAST CONNECTED DEVICE"),
                 color = Dim, fontSize = 10.sp, letterSpacing = 1.2.sp,
                 fontWeight = FontWeight.SemiBold
             )
@@ -1294,7 +1315,7 @@ private fun DevicesCard(
                 ) {
                     Icon(Icons.Outlined.LinkOff, null, modifier = Modifier.size(17.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Disconnect", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text(t("Disconnect"), fontSize = 14.sp, fontWeight = FontWeight.Medium)
                 }
             } else {
                 Button(
@@ -1307,13 +1328,13 @@ private fun DevicesCard(
                     Icon(Icons.Outlined.Cable, null, modifier = Modifier.size(17.dp),
                         tint = OnAmber)
                     Spacer(Modifier.width(8.dp))
-                    Text("Quick Connect", fontSize = 14.sp,
+                    Text(t("Quick Connect"), fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold, color = OnAmber)
                 }
                 if (disconnected) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Auto-reconnect is off until you connect again.",
+                        t("Auto-reconnect is off until you connect again."),
                         color = Dim, fontSize = 11.sp, lineHeight = 15.sp
                     )
                 }
@@ -1338,7 +1359,7 @@ private fun DevicesCard(
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(lastSeenLabel(device.lastSeenAt), color = Dim, fontSize = 11.sp)
                         }
-                        Text("Connect", color = Amber, fontSize = 12.sp,
+                        Text(t("Connect"), color = Amber, fontSize = 12.sp,
                             fontWeight = FontWeight.Medium)
                     }
                 }
@@ -1488,9 +1509,9 @@ private fun ConnectTab(
             }
             Spacer(Modifier.width(8.dp))
             Column {
-                Text("Connection", color = Fg, fontSize = 22.sp,
+                Text(t("Connection"), color = Fg, fontSize = 22.sp,
                     fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp)
-                Text("Pair or manage your Mac link", color = Dim, fontSize = 13.sp)
+                Text(t("Pair or manage your Mac link"), color = Dim, fontSize = 13.sp)
             }
         }
 
@@ -1538,11 +1559,11 @@ private fun ConnectTab(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     TextButton(onClick = onManual) {
-                        Text("Enter IP manually", color = Amber, fontSize = 13.sp)
+                        Text(t("Enter IP manually"), color = Amber, fontSize = 13.sp)
                     }
                     if (paired) {
                         TextButton(onClick = onForget) {
-                            Text("Forget this Mac", color = Dim, fontSize = 13.sp)
+                            Text(t("Forget this Mac"), color = Dim, fontSize = 13.sp)
                         }
                     }
                 }
@@ -1560,7 +1581,7 @@ private fun ConnectTab(
         Spacer(Modifier.height(16.dp))
 
         Text(
-            text          = "HOW TO PAIR",
+            text          = t("HOW TO PAIR"),
             color         = Dim,
             fontSize      = 10.sp,
             letterSpacing = 1.2.sp,
@@ -1629,11 +1650,11 @@ private fun AvailableDevicesCard(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            "AVAILABLE DEVICES",
+            t("AVAILABLE DEVICES"),
             color = Dim, fontSize = 10.sp, letterSpacing = 1.2.sp,
             fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f)
         )
-        if (scanning) Text("Scanning…", color = Dim, fontSize = 10.sp)
+        if (scanning) Text(t("Scanning…"), color = Dim, fontSize = 10.sp)
     }
 
     Surface(
@@ -1690,10 +1711,10 @@ private fun AvailableDevicesCard(
                             }
                         }
                         if (known != null) {
-                            Text("Connect", color = Amber, fontSize = 12.sp,
+                            Text(t("Connect"), color = Amber, fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium)
                         } else {
-                            Text("Scan QR to pair", color = Dim, fontSize = 11.sp)
+                            Text(t("Scan QR to pair"), color = Dim, fontSize = 11.sp)
                         }
                     }
                 }
@@ -1728,7 +1749,7 @@ private fun ClipboardTab(
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Clipboard", color = Fg, fontSize = 22.sp,
+                Text(t("Clipboard"), color = Fg, fontSize = 22.sp,
                     fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp)
                 Text(
                     if (connected) "Copy on either device" else "Not connected to Mac",
@@ -1756,9 +1777,9 @@ private fun ClipboardTab(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("History", color = Fg, fontSize = 14.sp,
+                    Text(t("History"), color = Fg, fontSize = 14.sp,
                         fontWeight = FontWeight.Medium)
-                    Text("Cleared when the app closes", color = Dim, fontSize = 11.sp)
+                    Text(t("Cleared when the app closes"), color = Dim, fontSize = 11.sp)
                 }
                 DroidSwitch(checked = keepHistory, onCheckedChange = onKeepHistory)
             }
@@ -1791,7 +1812,7 @@ private fun ClipboardTab(
             OutlinedTextField(
                 value = draft,
                 onValueChange = { draft = it },
-                placeholder = { Text("Type a message…", fontSize = 13.sp) },
+                placeholder = { Text(t("Type a message…"), fontSize = 13.sp) },
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(22.dp),
                 maxLines = 3,
@@ -1807,7 +1828,7 @@ private fun ClipboardTab(
                         if (ConnectionManager.sendClipboardText(draft.trim())) {
                             draft = ""
                         } else {
-                            Toast.makeText(ctx, "Not connected to Mac", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(ctx, t("Not connected to Mac"), Toast.LENGTH_SHORT).show()
                         }
                     },
                 contentAlignment = Alignment.Center
@@ -1858,7 +1879,7 @@ private fun ClipRow(entry: ConnectionManager.ClipEntry) {
                                     android.content.ClipData.newPlainText("DroidDock", entry.text)
                                 )
                             }
-                            Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(ctx, t("Copied"), Toast.LENGTH_SHORT).show()
                         }
                 )
             }
@@ -2079,7 +2100,7 @@ private fun FilesTab(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column {
-                    Text("Transferred today", color = Dim, fontSize = 11.sp, letterSpacing = 0.5.sp)
+                    Text(t("Transferred today"), color = Dim, fontSize = 11.sp, letterSpacing = 0.5.sp)
                     Spacer(Modifier.height(2.dp))
                     Text(
                         if (todayBytes == 0L) "—" else formatBytes(todayBytes),
@@ -2108,7 +2129,7 @@ private fun FilesTab(
         if (activeTransfers.isNotEmpty()) {
             Spacer(Modifier.height(20.dp))
             Text(
-                "UPLOAD QUEUE",
+                t("UPLOAD QUEUE"),
                 color = Dim, fontSize = 10.sp, letterSpacing = 1.2.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
@@ -2131,7 +2152,7 @@ private fun FilesTab(
         if (recentTransfers.isNotEmpty()) {
             Spacer(Modifier.height(20.dp))
             Text(
-                "RECENT TRANSFERS",
+                t("RECENT TRANSFERS"),
                 color = Dim, fontSize = 10.sp, letterSpacing = 1.2.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
@@ -2153,7 +2174,7 @@ private fun FilesTab(
         // Quick actions
         Spacer(Modifier.height(20.dp))
         Text(
-            "QUICK ACTIONS",
+            t("QUICK ACTIONS"),
             color = Dim, fontSize = 10.sp, letterSpacing = 1.2.sp,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
@@ -2167,8 +2188,8 @@ private fun FilesTab(
                 ServiceRow(
                     icon = Icons.Default.ContentCopy,
                     tint = Purple,
-                    title = "Send Clipboard to Mac",
-                    subtitle = "Push whatever you copied right now",
+                    title = t("Send Clipboard to Mac"),
+                    subtitle = t("Push whatever you copied right now"),
                     granted = null,
                     action = "Send"
                 ) { onSendClipboard() }
@@ -2177,7 +2198,7 @@ private fun FilesTab(
 
         Spacer(Modifier.height(20.dp))
         Text(
-            "TIPS",
+            t("TIPS"),
             color = Dim, fontSize = 10.sp, letterSpacing = 1.2.sp,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
@@ -2364,7 +2385,7 @@ private fun MacAppsTab(connected: Boolean) {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         if (!connected) {
-            Text("Not connected to your Mac.", color = Bad, fontSize = 12.sp)
+            Text(t("Not connected to your Mac."), color = Bad, fontSize = 12.sp)
             return@Column
         }
 
@@ -2372,12 +2393,12 @@ private fun MacAppsTab(connected: Boolean) {
             value = query,
             onValueChange = { query = it },
             singleLine = true,
-            label = { Text("Search apps") },
+            label = { Text(t("Search apps")) },
             modifier = Modifier.fillMaxWidth()
         )
 
         when {
-            apps == null -> Text("Reading your Mac's apps…", color = Dim, fontSize = 12.sp)
+            apps == null -> Text(t("Reading your Mac's apps…"), color = Dim, fontSize = 12.sp)
             error != null -> Text(error!!, color = Bad, fontSize = 12.sp)
             shown.isEmpty() -> Text(
                 if (query.isBlank()) "No apps found." else "Nothing matching \"$query\".",
@@ -2486,7 +2507,7 @@ private fun MacRemoteTab(connected: Boolean) {
                 Icon(Icons.Outlined.Mouse, null, tint = Dim.copy(alpha = 0.45f),
                     modifier = Modifier.size(30.dp))
                 Spacer(Modifier.height(8.dp))
-                Text("Trackpad", color = Dim.copy(alpha = 0.7f), fontSize = 12.sp)
+                Text(t("Trackpad"), color = Dim.copy(alpha = 0.7f), fontSize = 12.sp)
             }
         }
 
@@ -2546,7 +2567,7 @@ private fun MacRemoteTab(connected: Boolean) {
             OutlinedTextField(
                 value = typed,
                 onValueChange = { typed = it },
-                placeholder = { Text("Type on the Mac", fontSize = 13.sp) },
+                placeholder = { Text(t("Type on the Mac"), fontSize = 13.sp) },
                 singleLine = true,
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.weight(1f)
@@ -2677,7 +2698,7 @@ private fun MacFilesTab(connected: Boolean) {
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         Spacer(Modifier.height(12.dp))
-        Text("Mac Files", color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp)
+        Text(t("Mac Files"), color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp)
         Spacer(Modifier.height(12.dp))
 
         // Breadcrumb + up navigation
@@ -2718,7 +2739,7 @@ private fun MacFilesTab(connected: Boolean) {
             loading -> Box(
                 Modifier.fillMaxWidth().padding(vertical = 40.dp),
                 contentAlignment = Alignment.Center
-            ) { Text("Loading…", color = Dim, fontSize = 13.sp) }
+            ) { Text(t("Loading…"), color = Dim, fontSize = 13.sp) }
 
             error != null -> Box(
                 Modifier.fillMaxWidth().padding(vertical = 40.dp),
@@ -2728,7 +2749,7 @@ private fun MacFilesTab(connected: Boolean) {
             entries.isEmpty() -> Box(
                 Modifier.fillMaxWidth().padding(vertical = 40.dp),
                 contentAlignment = Alignment.Center
-            ) { Text("Empty folder", color = Dim, fontSize = 13.sp) }
+            ) { Text(t("Empty folder"), color = Dim, fontSize = 13.sp) }
 
             else -> Surface(
                 modifier = Modifier.fillMaxWidth(),
@@ -2846,15 +2867,15 @@ private fun MirrorTab(
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         Spacer(Modifier.height(12.dp))
-        Text("Mirror & Camera", color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+        Text(t("Mirror & Camera"), color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Bold,
             letterSpacing = (-0.3).sp)
         Spacer(Modifier.height(4.dp))
-        Text("Two ways to project your screen or camera", color = Dim, fontSize = 13.sp)
+        Text(t("Two ways to project your screen or camera"), color = Dim, fontSize = 13.sp)
 
         Spacer(Modifier.height(20.dp))
 
         Text(
-            text          = "SCREEN MIRROR",
+            text          = t("SCREEN MIRROR"),
             color         = Dim,
             fontSize      = 10.sp,
             letterSpacing = 1.2.sp,
@@ -2863,7 +2884,7 @@ private fun MirrorTab(
         )
 
         MirrorModeCard(
-            title       = "Mirror via Wi-Fi",
+            title       = t("Mirror via Wi-Fi"),
             badge       = "Wi-Fi",
             badgeColor  = Ok,
             icon        = Icons.Outlined.ScreenShare,
@@ -2877,9 +2898,9 @@ private fun MirrorTab(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column {
-                        Text("Auto-accept mirror", color = Fg, fontSize = 13.sp,
+                        Text(t("Auto-accept mirror"), color = Fg, fontSize = 13.sp,
                             fontWeight = FontWeight.Medium)
-                        Text("Start instantly, no per-session tap", color = Dim, fontSize = 11.sp)
+                        Text(t("Start instantly, no per-session tap"), color = Dim, fontSize = 11.sp)
                     }
                     if (!overlayOk) {
                         TonalChip("Enable", Blue, onEnableOverlay)
@@ -2893,7 +2914,7 @@ private fun MirrorTab(
         Spacer(Modifier.height(10.dp))
 
         MirrorModeCard(
-            title       = "Mirror via ADB",
+            title       = t("Mirror via ADB"),
             badge       = "ADB",
             badgeColor  = Amber,
             icon        = Icons.Outlined.Usb,
@@ -2911,7 +2932,7 @@ private fun MirrorTab(
                 ) {
                     Icon(Icons.Outlined.Info, null, tint = Dim, modifier = Modifier.size(16.dp))
                     Text(
-                        "Connect USB cable, then click 'Mirror via ADB' in the Mac app's Screen Mirror tab.",
+                        t("Connect USB cable, then click 'Mirror via ADB' in the Mac app's Screen Mirror tab."),
                         color = Dim, fontSize = 12.sp, lineHeight = 16.sp
                     )
                 }
@@ -2921,7 +2942,7 @@ private fun MirrorTab(
         Spacer(Modifier.height(20.dp))
 
         Text(
-            text          = "CAMERA STREAMING",
+            text          = t("CAMERA STREAMING"),
             color         = Dim,
             fontSize      = 10.sp,
             letterSpacing = 1.2.sp,
@@ -2930,7 +2951,7 @@ private fun MirrorTab(
         )
 
         MirrorModeCard(
-            title       = "Camera via Wi-Fi",
+            title       = t("Camera via Wi-Fi"),
             badge       = "Wi-Fi",
             badgeColor  = Ok,
             icon        = Icons.Outlined.Videocam,
@@ -2941,7 +2962,7 @@ private fun MirrorTab(
         Spacer(Modifier.height(10.dp))
 
         MirrorModeCard(
-            title       = "Camera via ADB",
+            title       = t("Camera via ADB"),
             badge       = "ADB",
             badgeColor  = Amber,
             icon        = Icons.Outlined.CameraAlt,
@@ -2959,7 +2980,7 @@ private fun MirrorTab(
                 ) {
                     Icon(Icons.Outlined.Info, null, tint = Dim, modifier = Modifier.size(16.dp))
                     Text(
-                        "Connect USB cable, then click 'Start Camera (ADB)' in the Mac app's Camera tab.",
+                        t("Connect USB cable, then click 'Start Camera (ADB)' in the Mac app's Camera tab."),
                         color = Dim, fontSize = 12.sp, lineHeight = 16.sp
                     )
                 }
@@ -3064,7 +3085,7 @@ private fun SettingsTab(
             Spacer(Modifier.height(12.dp))
         }
         item {
-            Text("Settings", color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+            Text(t("Settings"), color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Bold,
                 letterSpacing = (-0.3).sp)
         }
 
@@ -3073,8 +3094,13 @@ private fun SettingsTab(
         }
 
         item {
-            SectionCard("APPEARANCE") {
+            SectionCard(t("APPEARANCE")) {
                 ThemeRow(mode = themeMode, onMode = onThemeMode)
+                // Always shown, with the subtitle telling the truth about what
+                // is bundled. A row that appears only once a translation exists
+                // leaves "where is the language setting?" with no answer.
+                RowDivider()
+                LanguageRow()
                 RowDivider()
                 // Only meaningful on a dark surface, so it doesn't pretend to be
                 // available while the light theme is showing.
@@ -3086,7 +3112,7 @@ private fun SettingsTab(
                     IconBadge(Icons.Outlined.Contrast, Purple)
                     Spacer(Modifier.width(13.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Pitch black", color = Fg, fontSize = 14.sp,
+                        Text(t("Pitch black"), color = Fg, fontSize = 14.sp,
                             fontWeight = FontWeight.Medium)
                         Text(
                             if (darkNow) "True black backgrounds, for OLED screens"
@@ -3107,7 +3133,7 @@ private fun SettingsTab(
                     IconBadge(Icons.Outlined.BugReport, Bad)
                     Spacer(Modifier.width(13.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Notify on crash", color = Fg, fontSize = 14.sp,
+                        Text(t("Notify on crash"), color = Fg, fontSize = 14.sp,
                             fontWeight = FontWeight.Medium)
                         Text(
                             "Name the error in a notification if DroidDock stops. " +
@@ -3130,8 +3156,8 @@ private fun SettingsTab(
                 ServiceRow(
                     icon     = Icons.Outlined.WifiTethering,
                     tint     = Amber,
-                    title    = "Pair or change Mac",
-                    subtitle = "Scan a QR code, enter an IP, or forget this Mac",
+                    title    = t("Pair or change Mac"),
+                    subtitle = t("Scan a QR code, enter an IP, or forget this Mac"),
                     granted  = null,
                     action   = "Open"
                 ) { onOpenConnect() }
@@ -3171,7 +3197,7 @@ private fun SettingsTab(
                     IconBadge(Icons.Outlined.VpnKey, Ok)
                     Spacer(Modifier.width(13.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Expand networking", color = Fg, fontSize = 14.sp,
+                        Text(t("Expand networking"), color = Fg, fontSize = 14.sp,
                             fontWeight = FontWeight.Medium)
                         Text(
                             "Reach your Mac over a VPN such as Tailscale. Local " +
@@ -3205,8 +3231,8 @@ private fun SettingsTab(
                 ServiceRow(
                     icon     = Icons.Outlined.Notifications,
                     tint     = Blue,
-                    title    = "Notification Access",
-                    subtitle = "Show phone notifications on your Mac",
+                    title    = t("Notification Access"),
+                    subtitle = t("Show phone notifications on your Mac"),
                     granted  = notifAccess,
                     action   = "Enable"
                 ) { onEnableNotif() }
@@ -3214,8 +3240,8 @@ private fun SettingsTab(
                 ServiceRow(
                     icon     = Icons.Outlined.Message,
                     tint     = Ok,
-                    title    = "SMS · Contacts · Calls",
-                    subtitle = "Texts, contacts and call alerts on Mac",
+                    title    = t("SMS · Contacts · Calls"),
+                    subtitle = t("Texts, contacts and call alerts on Mac"),
                     granted  = phonePerms,
                     action   = "Grant"
                 ) { onGrantPhonePerms() }
@@ -3223,8 +3249,8 @@ private fun SettingsTab(
                 ServiceRow(
                     icon     = Icons.Outlined.FolderOpen,
                     tint     = Orange,
-                    title    = "All-files Access",
-                    subtitle = "Browse and transfer your phone's files",
+                    title    = t("All-files Access"),
+                    subtitle = t("Browse and transfer your phone's files"),
                     granted  = allFiles,
                     action   = "Grant"
                 ) { onGrantFiles() }
@@ -3232,8 +3258,8 @@ private fun SettingsTab(
                 ServiceRow(
                     icon     = Icons.Outlined.BatteryChargingFull,
                     tint     = Dim,
-                    title    = "Background (Battery)",
-                    subtitle = "Keep the link alive when screen is off",
+                    title    = t("Background (Battery)"),
+                    subtitle = t("Keep the link alive when screen is off"),
                     granted  = null,
                     action   = "Allow"
                 ) { onBattery() }
@@ -3249,8 +3275,8 @@ private fun SettingsTab(
                 ServiceRow(
                     icon     = Icons.Outlined.LibraryBooks,
                     tint     = Amber,
-                    title    = "Feature Guide",
-                    subtitle = "Step-by-step help for every feature",
+                    title    = t("Feature Guide"),
+                    subtitle = t("Step-by-step help for every feature"),
                     granted  = null,
                     action   = "Open"
                 ) { onOpenGuide() }
@@ -3336,7 +3362,7 @@ private fun AutoClipRow(
         IconBadge(Icons.Default.ContentCopy, Purple)
         Spacer(Modifier.width(13.dp))
         Column(Modifier.weight(1f)) {
-            Text("Auto clipboard", color = Fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(t("Auto clipboard"), color = Fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
             Text(
                 when {
                     !a11yOn -> "Needs the accessibility service below"
@@ -3425,7 +3451,7 @@ private fun ScreenControlRows(serviceOn: Boolean, adminOn: Boolean) {
             IconBadge(Icons.Outlined.TouchApp, Purple)
             Spacer(Modifier.width(13.dp))
             Column(Modifier.weight(1f)) {
-                Text("Mac screen control", color = Fg, fontSize = 14.sp,
+                Text(t("Mac screen control"), color = Fg, fontSize = 14.sp,
                     fontWeight = FontWeight.Medium)
                 Text(
                     if (screenControl)
@@ -3453,7 +3479,7 @@ private fun ScreenControlRows(serviceOn: Boolean, adminOn: Boolean) {
     ServiceRow(
         icon     = Icons.Outlined.Accessibility,
         tint     = if (a11yOn) Ok else Dim,
-        title    = "Accessibility service",
+        title    = t("Accessibility service"),
         subtitle = if (a11yOn)
             "Running. Powers auto clipboard and screen control."
         else
@@ -3480,7 +3506,7 @@ private fun ScreenControlRows(serviceOn: Boolean, adminOn: Boolean) {
     ServiceRow(
         icon     = Icons.Outlined.Lock,
         tint     = Blue,
-        title    = "Lock Without Accessibility",
+        title    = t("Lock Without Accessibility"),
         subtitle = if (adminOn)
             "Mac's Lock button works with Screen Control off"
         else
@@ -3492,7 +3518,7 @@ private fun ScreenControlRows(serviceOn: Boolean, adminOn: Boolean) {
             .onFailure {
                 Toast.makeText(
                     ctx,
-                    "Couldn't open the device-admin screen on this phone",
+                    t("Couldn't open the device-admin screen on this phone"),
                     Toast.LENGTH_LONG
                 ).show()
             }
@@ -3675,7 +3701,7 @@ private fun AutoUpdateRow() {
         IconBadge(Icons.Outlined.Schedule, Dim)
         Spacer(Modifier.width(13.dp))
         Column(Modifier.weight(1f)) {
-            Text("Check automatically", color = Fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(t("Check automatically"), color = Fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
             Text(
                 "Looks for a new version when you open the app, at most once a day. " +
                     "It only tells you — nothing downloads or installs on its own.",
@@ -3712,12 +3738,12 @@ private fun ThemeRow(mode: ThemeMode, onMode: (ThemeMode) -> Unit) {
             IconBadge(Icons.Outlined.DarkMode, Blue)
             Spacer(Modifier.width(13.dp))
             Column(Modifier.weight(1f)) {
-                Text("Theme", color = Fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Text(t("Theme"), color = Fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                 Text(
                     when (mode) {
-                        ThemeMode.LIGHT  -> "Always light"
-                        ThemeMode.DARK   -> "Always dark"
-                        ThemeMode.SYSTEM -> "Follows your phone's setting"
+                        ThemeMode.LIGHT  -> t("Always light")
+                        ThemeMode.DARK   -> t("Always dark")
+                        ThemeMode.SYSTEM -> t("Follows your phone's setting")
                     },
                     color = Dim, fontSize = 11.sp, lineHeight = 15.sp
                 )
@@ -3745,9 +3771,9 @@ private fun ThemeRow(mode: ThemeMode, onMode: (ThemeMode) -> Unit) {
                 ) {
                     Text(
                         text = when (option) {
-                            ThemeMode.LIGHT  -> "Light"
-                            ThemeMode.DARK   -> "Dark"
-                            ThemeMode.SYSTEM -> "System"
+                            ThemeMode.LIGHT  -> t("Light")
+                            ThemeMode.DARK   -> t("Dark")
+                            ThemeMode.SYSTEM -> t("System")
                         },
                         color = if (selected) OnAmber else Dim,
                         fontSize = 12.sp,
@@ -3790,7 +3816,7 @@ private fun DeviceIdentityRows() {
             IconBadge(Icons.Outlined.PhoneAndroid, Ok)
             Spacer(Modifier.width(13.dp))
             Column(Modifier.weight(1f)) {
-                Text("This phone", color = Fg, fontSize = 14.sp,
+                Text(t("This phone"), color = Fg, fontSize = 14.sp,
                     fontWeight = FontWeight.Medium)
                 Text(
                     when {
@@ -3806,7 +3832,7 @@ private fun DeviceIdentityRows() {
         OutlinedTextField(
             value = name,
             onValueChange = { name = it.take(60) },
-            label = { Text("Device name", fontSize = 12.sp) },
+            label = { Text(t("Device name"), fontSize = 12.sp) },
             placeholder = { Text(ConnectionManager.hardwareName(), fontSize = 13.sp) },
             singleLine = true,
             modifier = Modifier
@@ -3816,7 +3842,7 @@ private fun DeviceIdentityRows() {
                 },
         )
         Text(
-            "Shown on your Mac. Takes effect on the next reconnect.",
+            t("Shown on your Mac. Takes effect on the next reconnect."),
             color = Dim, fontSize = 10.sp,
             modifier = Modifier.padding(top = 4.dp, start = 4.dp)
         )
@@ -3856,15 +3882,15 @@ private fun TileRows() {
                 { /* result code — the system already told the user */ }
             )
         }.onFailure {
-            Toast.makeText(ctx, "Add it from the Quick Settings editor", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, t("Add it from the Quick Settings editor"), Toast.LENGTH_SHORT).show()
         }
     }
 
     ServiceRow(
         icon     = Icons.Outlined.LaptopMac,
         tint     = Blue,
-        title    = "Connection tile",
-        subtitle = "Connect or disconnect from Quick Settings",
+        title    = t("Connection tile"),
+        subtitle = t("Connect or disconnect from Quick Settings"),
         granted  = null,
         action   = "Add"
     ) { addTile(ConnectionTileService::class.java, "DroidDock") }
@@ -3872,8 +3898,8 @@ private fun TileRows() {
     ServiceRow(
         icon     = Icons.Outlined.ContentPaste,
         tint     = Purple,
-        title    = "Clipboard tile",
-        subtitle = "Send what you copied straight to the Mac",
+        title    = t("Clipboard tile"),
+        subtitle = t("Send what you copied straight to the Mac"),
         granted  = null,
         action   = "Add"
     ) { addTile(ClipTileService::class.java, "Send to Mac") }
@@ -3881,8 +3907,8 @@ private fun TileRows() {
     ServiceRow(
         icon     = Icons.Outlined.Accessibility,
         tint     = Amber,
-        title    = "Accessibility tile",
-        subtitle = "Switch screen control off in one tap — for banking apps",
+        title    = t("Accessibility tile"),
+        subtitle = t("Switch screen control off in one tap — for banking apps"),
         granted  = null,
         action   = "Add"
     ) { addTile(A11yTileService::class.java, "DroidDock Access") }
@@ -3905,7 +3931,7 @@ private fun DefaultTabRow(selected: String, onSelect: (String) -> Unit) {
             IconBadge(Icons.Outlined.Dashboard, Orange)
             Spacer(Modifier.width(13.dp))
             Column(Modifier.weight(1f)) {
-                Text("Opening tab", color = Fg, fontSize = 14.sp,
+                Text(t("Opening tab"), color = Fg, fontSize = 14.sp,
                     fontWeight = FontWeight.Medium)
                 Text(
                     if (selected == "dynamic") "Connect until paired, then Home"
@@ -4005,23 +4031,23 @@ private fun ManualPairDialog(onDismiss: () -> Unit, onPair: (Pairing) -> Unit) {
         onDismissRequest  = onDismiss,
         containerColor    = Surface2,
         shape             = RoundedCornerShape(20.dp),
-        title             = { Text("Pair manually", color = Fg, fontWeight = FontWeight.SemiBold) },
+        title             = { Text(t("Pair manually"), color = Fg, fontWeight = FontWeight.SemiBold) },
         text = {
             Column {
                 Text(
-                    "Open Pair Device on the Mac and read the IP, port and token it shows.",
+                    t("Open Pair Device on the Mac and read the IP, port and token it shows."),
                     color = Dim, fontSize = 13.sp, lineHeight = 18.sp
                 )
                 Spacer(Modifier.height(14.dp))
                 OutlinedTextField(value = ip, onValueChange = { ip = it }, singleLine = true,
-                    label = { Text("Mac IP (e.g. 192.168.0.108)") },
+                    label = { Text(t("Mac IP (e.g. 192.168.0.108)")) },
                     modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(value = port, onValueChange = { port = it }, singleLine = true,
-                    label = { Text("Port") }, modifier = Modifier.fillMaxWidth())
+                    label = { Text(t("Port")) }, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(value = token, onValueChange = { token = it }, singleLine = true,
-                    label = { Text("Token") }, modifier = Modifier.fillMaxWidth())
+                    label = { Text(t("Token")) }, modifier = Modifier.fillMaxWidth())
             }
         },
         confirmButton = {
@@ -4029,14 +4055,14 @@ private fun ManualPairDialog(onDismiss: () -> Unit, onPair: (Pairing) -> Unit) {
                 val ipt = ip.trim(); val tok = token.trim()
                 val p   = port.trim().toIntOrNull() ?: 48484
                 if (ipt.isEmpty() || tok.isEmpty()) {
-                    Toast.makeText(ctx, "Enter the IP and token shown on the Mac", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, t("Enter the IP and token shown on the Mac"), Toast.LENGTH_SHORT).show()
                 } else {
                     onPair(Pairing(listOf(ipt), p, tok, "Mac"))
                 }
-            }) { Text("Pair", color = Amber, fontWeight = FontWeight.SemiBold) }
+            }) { Text(t("Pair"), color = Amber, fontWeight = FontWeight.SemiBold) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel", color = Dim) }
+            TextButton(onClick = onDismiss) { Text(t("Cancel"), color = Dim) }
         }
     )
 }
@@ -4049,7 +4075,7 @@ private fun PauseDialog(onDismiss: () -> Unit, onPause: (Long?) -> Unit) {
         onDismissRequest = onDismiss,
         containerColor   = Surface2,
         shape            = RoundedCornerShape(20.dp),
-        title = { Text("Pause DroidDock", color = Fg, fontWeight = FontWeight.SemiBold) },
+        title = { Text(t("Pause DroidDock"), color = Fg, fontWeight = FontWeight.SemiBold) },
         text = {
             Column {
                 Text(
@@ -4067,7 +4093,7 @@ private fun PauseDialog(onDismiss: () -> Unit, onPause: (Long?) -> Unit) {
         },
         confirmButton = {},
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel", color = Dim) }
+            TextButton(onClick = onDismiss) { Text(t("Cancel"), color = Dim) }
         }
     )
 }
@@ -4100,9 +4126,9 @@ private fun FeatureGuideScreen(onBack: () -> Unit) {
                 Icon(Icons.Default.ArrowBack, "Back", tint = Fg)
             }
             Spacer(Modifier.height(4.dp))
-            Text("Feature Guide", color = Fg, fontSize = 22.sp,
+            Text(t("Feature Guide"), color = Fg, fontSize = 22.sp,
                 fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp)
-            Text("Tap any card for step-by-step help.", color = Dim, fontSize = 13.sp)
+            Text(t("Tap any card for step-by-step help."), color = Dim, fontSize = 13.sp)
             Spacer(Modifier.height(16.dp))
             GUIDE_SECTIONS.forEach { section ->
                 GuideCard(section)

@@ -119,7 +119,7 @@ export default function PhoneClock({ compact = false }: { compact?: boolean }) {
         >
           {hour}:{minute}
           {second && <span className="opacity-55">:{second}</span>}
-          {dayPeriod && <span className="ml-1.5 text-[0.5em] opacity-60">{dayPeriod}</span>}
+          {dayPeriod && <span className="ms-1.5 text-[0.5em] opacity-60">{dayPeriod}</span>}
         </div>
       ) : (
         // Everything else shares the one-line layout and differs only in how
@@ -145,7 +145,7 @@ export default function PhoneClock({ compact = false }: { compact?: boolean }) {
           <span>{minute}</span>
           {dayPeriod && (
             <span
-              className="ml-1 align-top font-medium opacity-60"
+              className="ms-1 align-top font-medium opacity-60"
               style={{ fontSize: compact ? 15 : 21 }}
             >
               {dayPeriod}

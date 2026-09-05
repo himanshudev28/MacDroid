@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { GROUPS, HOME, SETTINGS, type NavItem, type ViewId } from "../lib/nav";
+import { t } from "../lib/i18n";
 
 /// The navigation rail — fifteen destinations in two widths.
 ///
@@ -57,10 +58,10 @@ export default function Rail({
 
   return (
     <nav
-      className={`glass-chrome relative z-20 flex shrink-0 flex-col border-r border-line transition-[width] duration-200 ease-out ${
+      className={`glass-chrome relative z-20 flex shrink-0 flex-col border-e border-line transition-[width] duration-200 ease-out ${
         expanded ? "w-46 items-stretch" : "w-14 items-center"
       }`}
-      aria-label="Sections"
+      aria-label={t("Sections")}
     >
       <div data-tauri-drag-region className="h-7 w-full shrink-0" />
 
@@ -68,7 +69,7 @@ export default function Rail({
           there's a column wide enough to hold it. */}
       <div
         className={`mb-1 flex h-9 shrink-0 items-center gap-2 ${expanded ? "px-3" : "justify-center"}`}
-        title="DroidDock"
+        title={t("DroidDock")}
       >
         <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0" fill="none" aria-hidden="true">
           <rect x="3.5" y="6" width="6.5" height="12" rx="1.8" stroke="var(--color-link)" strokeWidth="1.7" />
@@ -77,7 +78,7 @@ export default function Rail({
           <path d="M10.5 12H13" stroke="var(--color-link)" strokeWidth="1.7" strokeLinecap="round" />
         </svg>
         {expanded && (
-          <span className="font-display truncate text-[13px] font-semibold text-fg/90">DroidDock</span>
+          <span className="font-display truncate text-[13px] font-semibold text-fg/90">{t("DroidDock")}</span>
         )}
       </div>
 
@@ -102,7 +103,7 @@ export default function Rail({
           {GROUPS.map(({ title, items }) => (
             <div key={title} className={`flex flex-col gap-0.5 ${expanded ? "" : "items-center"}`}>
               {expanded ? (
-                <h2 className="label mt-3 mb-0.5 px-2.5 text-faint">{title}</h2>
+                <h2 className="label mt-3 mb-0.5 px-2.5 text-faint">{t(title)}</h2>
               ) : (
                 <span className="my-1.5 h-px w-5 self-center bg-line" aria-hidden="true" />
               )}
@@ -140,8 +141,8 @@ export default function Rail({
       >
         <RailAction
           expanded={expanded}
-          label={expanded ? "Collapse sidebar" : "Expand sidebar"}
-          hint={expanded ? "Collapse sidebar" : "Expand sidebar"}
+          label={expanded ? t("Collapse sidebar") : t("Expand sidebar")}
+          hint={expanded ? t("Collapse sidebar") : t("Expand sidebar")}
           onClick={onToggleExpanded}
           icon={
             <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth={1.6} aria-hidden="true">
@@ -157,7 +158,7 @@ export default function Rail({
         />
         <RailAction
           expanded={expanded}
-          label={phoneOpen ? "Hide phone" : "Show phone"}
+          label={phoneOpen ? t("Hide phone") : t("Show phone")}
           hint={`${phoneOpen ? "Hide" : "Show"} phone panel  ⌘⌥S`}
           pressed={phoneOpen}
           onClick={onTogglePhone}
@@ -210,7 +211,8 @@ function RailButton({
   dot?: boolean;
   onClick: () => void;
 }) {
-  const hint = item.key ? `${item.label}  ⌘${item.key}` : item.label;
+  const label = t(item.label);
+  const hint = item.key ? `${label}  ⌘${item.key}` : label;
   const showDot = dot && !(badge != null && badge > 0);
   return (
     <button
@@ -218,7 +220,7 @@ function RailButton({
       // The tooltip stays useful when expanded: it's where the ⌘ accelerator
       // lives, and the label alone doesn't carry it.
       title={showDot ? `${hint} — update available` : hint}
-      aria-label={showDot ? `${item.label} (update available)` : item.label}
+      aria-label={showDot ? t("{name} (update available)", { name: label }) : label}
       aria-current={active ? "page" : undefined}
       className={shellClass(expanded, active)}
     >
@@ -234,7 +236,7 @@ function RailButton({
       </svg>
 
       {expanded && (
-        <span className="min-w-0 flex-1 truncate text-left text-[13px] font-medium">{item.label}</span>
+        <span className="min-w-0 flex-1 truncate text-start text-[13px] font-medium">{label}</span>
       )}
 
       {badge != null && badge > 0 && (
@@ -242,7 +244,7 @@ function RailButton({
           className={
             expanded
               ? "shrink-0 rounded-full bg-(--color-accent) px-1.5 text-[10px] font-semibold leading-4 text-(--color-accent-ink)"
-              : "absolute right-1 top-1 min-w-3.5 rounded-full bg-(--color-accent) px-1 text-[9px] font-semibold leading-3.5 text-(--color-accent-ink)"
+              : "absolute end-1 top-1 min-w-3.5 rounded-full bg-(--color-accent) px-1 text-[9px] font-semibold leading-3.5 text-(--color-accent-ink)"
           }
         >
           {badge > 99 ? "99+" : badge}
@@ -255,7 +257,7 @@ function RailButton({
           className={
             expanded
               ? "size-1.5 shrink-0 rounded-full bg-(--color-accent)"
-              : "absolute right-1.5 top-1.5 size-1.5 rounded-full bg-(--color-accent) ring-2 ring-panel"
+              : "absolute end-1.5 top-1.5 size-1.5 rounded-full bg-(--color-accent) ring-2 ring-panel"
           }
           aria-hidden="true"
         />
@@ -264,7 +266,7 @@ function RailButton({
       {/* Active marker on the rail edge — the "you are here" cue a collapsed
           rail has no label to carry. */}
       {active && !expanded && (
-        <span className="absolute -left-2 h-4 w-[2.5px] rounded-full bg-(--color-accent)" aria-hidden="true" />
+        <span className="absolute -start-2 h-4 w-[2.5px] rounded-full bg-(--color-accent)" aria-hidden="true" />
       )}
     </button>
   );
@@ -295,7 +297,7 @@ function RailAction({
     >
       <span className="shrink-0">{icon}</span>
       {expanded && (
-        <span className="min-w-0 flex-1 truncate text-left text-[13px] font-medium">{label}</span>
+        <span className="min-w-0 flex-1 truncate text-start text-[13px] font-medium">{label}</span>
       )}
     </button>
   );

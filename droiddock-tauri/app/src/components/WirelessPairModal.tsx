@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import Icon from "./Icon";
 import { adbPairWireless, adbQrPairStart, adbQrPairCancel, onQrPairStatus, type QrPairStatus } from "../lib/bridge";
+import { t } from "../lib/i18n";
 
 const HOST_RE = /^(\d{1,3}\.){3}\d{1,3}:\d{2,5}$/;
 const CODE_RE = /^\d{6}$/;
@@ -33,17 +34,17 @@ export default function WirelessPairModal({
       <div className="rise card-raised float-lg w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h2 className="font-display text-[17px] font-semibold text-fg">Pair wirelessly</h2>
-            <p className="mt-1 text-[12px] text-dim">Cable-free ADB over Wi-Fi — Android 11 or newer.</p>
+            <h2 className="font-display text-[17px] font-semibold text-fg">{t("Pair wirelessly")}</h2>
+            <p className="mt-1 text-[12px] text-dim">{t("Cable-free ADB over Wi-Fi — Android 11 or newer.")}</p>
           </div>
-          <button onClick={onClose} title="Close" className="btn-icon shrink-0">
+          <button onClick={onClose} title={t("Close")} className="btn-icon shrink-0">
             <Icon name="x" size={15} />
           </button>
         </div>
 
         <div className="mt-5 flex gap-1 border-b border-line">
-          <Tab id="qr" tab={tab} setTab={setTab} icon="qrcode" label="Pair via QR" />
-          <Tab id="code" tab={tab} setTab={setTab} icon="key" label="Enter code" />
+          <Tab id="qr" tab={tab} setTab={setTab} icon="qrcode" label={t("Pair via QR")} />
+          <Tab id="code" tab={tab} setTab={setTab} icon="key" label={t("Enter code")} />
         </div>
 
         {tab === "qr" ? <QrTab onPaired={onPaired} onClose={onClose} /> : <CodeTab onPaired={onPaired} onClose={onClose} onToast={onToast} />}
@@ -94,7 +95,7 @@ function QrTab({ onPaired, onClose }: { onPaired: () => void; onClose: () => voi
       (url) => alive && setQr(url)
     );
 
-    setStatus({ state: "waiting", text: "Waiting for scan…" });
+    setStatus({ state: "waiting", text: t("Waiting for scan…") });
     offRef.current = onQrPairStatus((s) => {
       setStatus(s);
       if (s.state === "connected") {
@@ -116,10 +117,10 @@ function QrTab({ onPaired, onClose }: { onPaired: () => void; onClose: () => voi
     <div className="pt-5">
       <ol className="space-y-1.5 text-[12px] leading-relaxed text-dim">
         <li>
-          1. On the phone, open <b className="font-medium text-fg">Settings → Developer options → Wireless debugging</b>
+          1. On the phone, open <b className="font-medium text-fg">{t("Settings → Developer options → Wireless debugging")}</b>
         </li>
         <li>
-          2. Tap <b className="font-medium text-fg">Pair device with QR code</b> and scan this code
+          2. Tap <b className="font-medium text-fg">{t("Pair device with QR code")}</b>{t("and scan this code")}
         </li>
         <li>
           3. Stay on the Wireless debugging screen until it connects
@@ -154,7 +155,7 @@ function StatusLine({ status }: { status: QrPairStatus }) {
       <Icon name={icon} size={13} className={`${cls} ${spin ? "spinner" : ""}`} />
       <span className={`text-[12px] font-medium ${cls}`}>
         {status.text}
-        {status.addr && <span className="data ml-1 text-[11px]">{status.addr}</span>}
+        {status.addr && <span className="data ms-1 text-[11px]">{status.addr}</span>}
       </span>
     </div>
   );
@@ -184,7 +185,7 @@ function CodeTab({
       const res = await adbPairWireless(hostPort.trim(), code.trim());
       setBusy(false);
       onPaired();
-      onToast("ok", res.addr ? `Paired & connected over Wi-Fi — ${res.addr}. Cable not needed.` : "Paired. Reconnecting over Wi-Fi…");
+      onToast("ok", res.addr ? `Paired & connected over Wi-Fi — ${res.addr}. Cable not needed.` : t("Paired. Reconnecting over Wi-Fi…"));
       onClose();
     } catch (e) {
       setBusy(false);
@@ -196,12 +197,12 @@ function CodeTab({
     <div className="pt-5">
       <ol className="space-y-1.5 text-[12px] leading-relaxed text-dim">
         <li>
-          1. On the phone, open <b className="font-medium text-fg">Wireless debugging → Pair device with pairing code</b>
+          1. On the phone, open <b className="font-medium text-fg">{t("Wireless debugging → Pair device with pairing code")}</b>
         </li>
         <li>2. Type the address and 6-digit code it shows</li>
       </ol>
 
-      <label className="label mt-4 block">Pairing address</label>
+      <label className="label mt-4 block">{t("Pairing address")}</label>
       <input
         value={hostPort}
         onChange={(e) => setHostPort(e.target.value)}
@@ -211,7 +212,7 @@ function CodeTab({
         style={hostPort && !hostOk ? { borderColor: "var(--color-bad)" } : undefined}
       />
 
-      <label className="label mt-4 block">Pairing code</label>
+      <label className="label mt-4 block">{t("Pairing code")}</label>
       <input
         value={code}
         onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
@@ -225,13 +226,13 @@ function CodeTab({
       <p className="mt-3 flex items-start gap-1.5 text-[11px] leading-relaxed text-dim">
         <Icon name="alert" size={12} className="mt-0.5 shrink-0 text-warn" />
         <span>
-          Use the port from the <b className="font-medium text-fg">pairing dialog</b> — it's different from the main
+          Use the port from the <b className="font-medium text-fg">{t("pairing dialog")}</b> — it's different from the main
           port on the Wireless debugging screen.
         </span>
       </p>
 
       <button onClick={submit} disabled={!valid || busy} className="btn btn-primary mt-5 w-full">
-        {busy ? "Pairing…" : "Pair and connect"}
+        {busy ? "Pairing…" : t("Pair and connect")}
       </button>
     </div>
   );

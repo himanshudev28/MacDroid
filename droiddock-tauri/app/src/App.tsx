@@ -40,7 +40,8 @@ import {
   type QuickShareRequest,
 } from "./lib/bridge";
 import { mirrorSetHevcSupported } from "./lib/bridge";
-import { onWifiStatus, wifiStatus, type WifiStatus } from "./lib/wifi";
+import { onWifiStatus, phoneSupports, wifiStatus, type WifiStatus } from "./lib/wifi";
+import { t, tn, useT } from "./lib/i18n";
 import {
   on,
   getConfig,
@@ -142,6 +143,12 @@ function useWindowWidth(): number {
 }
 
 export default function App() {
+  // Subscribes this tree to language changes. `t` itself is a plain module
+  // function — that is what let every string become a one-line change instead
+  // of a hook threaded through thirty components — so something has to hold the
+  // subscription, and the window root is the natural place.
+  useT();
+
   const [view, setView] = useState<ViewId>("dashboard");
   const [config, setConfig] = useState<DroidConfig | null>(null);
   const [status, setStatus] = useState<WifiStatus>({ connected: false, phoneName: null });
@@ -303,8 +310,21 @@ export default function App() {
     // Phase 17: edit-in-place writeback lands here regardless of which view
     // is open — the badge itself lives in FilesView's own subscription.
     const offEditSync = onEditSync((e) => {
-      if (e.status === "synced") toast("ok", "Synced back to phone");
+      if (e.status === "synced") toast("ok", t("Synced back to phone"));
       else if (e.status === "pending" && e.error) toast("bad", `Will retry sync — ${e.error}`);
+    });
+
+    // Carry the phone's per-push capability and audio read-back straight onto
+    // the overlay. These decide which buttons exist at all, so dropping them
+    // would silently turn call control back off.
+    const caps = (m: IncomingCall) => ({
+      number: m.number,
+      name: m.name,
+      canAnswer: m.canAnswer,
+      canEnd: m.canEnd,
+      canAudio: m.canAudio,
+      muted: m.muted,
+      speaker: m.speaker,
     });
 
     const offCall = on<IncomingCall>("call", (m) => {
@@ -314,15 +334,27 @@ export default function App() {
           type: "call",
           app: "Phone",
           title: m.name || m.number || "Unknown caller",
-          text: m.number && m.name ? m.number : "Incoming call on your phone",
+          text: m.number && m.name ? m.number : t("Incoming call on your phone"),
           replyable: false,
           time: Date.now(),
         };
         setNotifs((list) => [item, ...list.filter((x) => x.key !== item.key)].slice(0, 100));
-        setActiveCall({ state: "ringing", number: m.number, name: m.name });
+        setActiveCall({ state: "ringing", ...caps(m) });
+      } else if (m.state === "active") {
+        // The call was answered — on the phone or by our own Answer button. The
+        // overlay swaps to in-call controls; it is not a new call, so the
+        // notification list is left alone.
+        setActiveCall({ state: "active", ...caps(m) });
       } else {
-        // idle/ended — clear only a ringing overlay (leave an outbound dial alone)
-        setActiveCall((prev) => (prev?.state === "ringing" ? null : prev));
+        // idle/ended. This now clears an outbound dial too: the phone reports
+        // OFFHOOK/IDLE for a Mac-placed call since CallReceiver.armOutgoing, so
+        // "Calling…" no longer has to be dismissed by hand. Uppercase states are
+        // ADB's and are cleared by its own IDLE, not by this.
+        setActiveCall((prev) =>
+          prev && (prev.state === "ringing" || prev.state === "dialing" || prev.state === "active")
+            ? null
+            : prev,
+        );
       }
     });
 
@@ -504,7 +536,7 @@ export default function App() {
       }
       setDropping(false);
       if (!linkedRef.current) {
-        toast("bad", "Not linked — connect your phone first");
+        toast("bad", t("Not linked — connect your phone first"));
         return;
       }
       for (const p of ev.payload.paths) {
@@ -593,7 +625,7 @@ export default function App() {
       try {
         await adbUnpair();
         setPairedGuid(null);
-        toast("ok", "Forgot this phone.");
+        toast("ok", t("Forgot this phone."));
       } catch (e) {
         toast("bad", String(e));
       }
@@ -604,7 +636,7 @@ export default function App() {
       if (!serial) return;
       try {
         await adbScreenshot(serial);
-        toast("ok", "Screenshot saved to Downloads");
+        toast("ok", t("Screenshot saved to Downloads"));
       } catch (e) {
         toast("bad", String(e));
       }
@@ -620,7 +652,7 @@ export default function App() {
   };
 
   const mirrorAdb = async () => {
-    if (!tools?.scrcpy) return setSetup({ reason: "Screen mirroring needs scrcpy." });
+    if (!tools?.scrcpy) return setSetup({ reason: t("Screen mirroring needs scrcpy.") });
     if (!serial) return;
     try {
       await adbMirror(serial);
@@ -630,7 +662,7 @@ export default function App() {
   };
 
   const desktopAdb = async () => {
-    if (!tools?.scrcpy) return setSetup({ reason: "Desktop mode needs scrcpy." });
+    if (!tools?.scrcpy) return setSetup({ reason: t("Desktop mode needs scrcpy.") });
     if (!serial) return;
     try {
       await adbDesktop(serial, config?.desktopDisplaySize);
@@ -646,7 +678,7 @@ export default function App() {
   /// Open one Android app in its own Mac window, from wherever you meet it —
   /// currently a notification's app header. Same route the Apps grid uses.
   const openAppOnMac = async (pkg: string, label: string) => {
-    if (!serial) return toast("bad", "Needs an ADB device — connect one from the Devices tab.");
+    if (!serial) return toast("bad", t("Needs an ADB device — connect one from the Devices tab."));
     try {
       await adbMirrorApp(serial, pkg, true);
       toast("ok", `Opening ${label} in a Mac window…`);
@@ -682,7 +714,7 @@ export default function App() {
           break;
         case "clipboard-push":
           clipboardPushNow()
-            .then(() => toast("ok", "Clipboard sent to your phone"))
+            .then(() => toast("ok", t("Clipboard sent to your phone")))
             .catch((err) => toast("bad", String(err)));
           break;
       }
@@ -694,8 +726,8 @@ export default function App() {
   /// own window: this drives scrcpy's server directly and paints into our
   /// pop-out, so there is no consent tap and no second app in the Dock.
   const embeddedAdb = async () => {
-    if (!tools?.scrcpy) return setSetup({ reason: "The in-app mirror needs scrcpy." });
-    if (!serial) return toast("bad", "Needs an ADB device — connect one from the Devices tab.");
+    if (!tools?.scrcpy) return setSetup({ reason: t("The in-app mirror needs scrcpy.") });
+    if (!serial) return toast("bad", t("Needs an ADB device — connect one from the Devices tab."));
     try {
       await scrcpyEmbeddedStart(serial);
     } catch (e) {
@@ -704,7 +736,7 @@ export default function App() {
   };
 
   const cameraAdb = async () => {
-    if (!tools?.scrcpy) return setSetup({ reason: "Phone camera needs scrcpy." });
+    if (!tools?.scrcpy) return setSetup({ reason: t("Phone camera needs scrcpy.") });
     if (!serial) return;
     try {
       await adbCamera(serial);
@@ -748,12 +780,16 @@ export default function App() {
   // Every one of these is a second entry point to something that already
   // exists (Files' upload, the notifications toggle, clipboard sync) — none
   // introduces a new code path, so no existing flow changes behaviour.
+  // Hoisted out of the memo so the dependency is a boolean rather than the
+  // whole status object, which changes identity on every push.
+  const canRing = phoneSupports(status, "ring");
+
   const quickActions: QuickAction[] = useMemo(
     () => [
       {
         id: "send",
         icon: "upload",
-        label: "Send files to phone",
+        label: t("Send files to phone"),
         disabled: !linked,
         onClick: async () => {
           const sel = await openDialog({ multiple: true });
@@ -774,33 +810,51 @@ export default function App() {
       {
         id: "browse",
         icon: "folder",
-        label: "Browse phone files",
+        label: t("Browse phone files"),
         disabled: !linked,
         onClick: () => setView("files"),
       },
       {
+        id: "ring",
+        icon: "volume",
+        label: ringing ? t("Stop ringing") : t("Ring my phone"),
+        active: ringing,
+        // Hidden rather than disabled on a phone build that predates it: a
+        // greyed-out button invites a click that can never work.
+        disabled: !linked || !canRing,
+        onClick: async () => {
+          try {
+            const now = await ringPhone(!ringing);
+            setRinging(now);
+            if (now) toast("info", t("Ringing your phone — it stops itself after a minute"));
+          } catch (e) {
+            toast("bad", String(e));
+          }
+        },
+      },
+      {
         id: "notifs",
         icon: "bell",
-        label: config?.nativeNotifs ?? true ? "Mute Mac banners" : "Unmute Mac banners",
+        label: config?.nativeNotifs ?? true ? t("Mute Mac banners") : t("Unmute Mac banners"),
         active: !(config?.nativeNotifs ?? true),
         onClick: () => updateSetting("nativeNotifs", !(config?.nativeNotifs ?? true)),
       },
       {
         id: "clip",
         icon: "clipboard",
-        label: "Send clipboard to phone",
+        label: t("Send clipboard to phone"),
         disabled: !linked,
         onClick: async () => {
           try {
             await clipboardPushNow();
-            toast("ok", "Clipboard sent to phone");
+            toast("ok", t("Clipboard sent to phone"));
           } catch (e) {
             toast("bad", String(e));
           }
         },
       },
     ],
-    [linked, config?.nativeNotifs, updateSetting, toast]
+    [linked, canRing, ringing, config?.nativeNotifs, updateSetting, toast]
   );
 
   const renderView = () => {
@@ -963,7 +1017,7 @@ export default function App() {
           the column. */}
       {phoneVisible && (
         <aside
-          className={`glass-chrome flex shrink-0 flex-col border-r border-line ${
+          className={`glass-chrome flex shrink-0 flex-col border-e border-line ${
             // One step narrower before it disappears entirely. The wide step is
             // 288px because the card inside is phone-shaped: at 256 it was tall
             // and thin enough that the now-playing title had no room to breathe.
@@ -1004,7 +1058,7 @@ export default function App() {
           className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-5"
         >
           <h2 data-tauri-drag-region className="font-display text-[13px] font-semibold text-fg/85">
-            {itemFor(view).label}
+            {t(itemFor(view).label)}
           </h2>
           {linked && (
             <span className="flex items-center gap-1.5 text-[11.5px] text-(--color-link)">
@@ -1019,13 +1073,38 @@ export default function App() {
           {(phoneSquashed || railSquashed) && (
             <span
               data-tauri-drag-region
-              title="Widen the window to bring it back — your preference is remembered, not overwritten."
-              className="ml-auto shrink-0 text-[11px] text-faint"
+              title={t("Widen the window to bring it back — your preference is remembered, not overwritten.")}
+              className="ms-auto shrink-0 text-[11px] text-faint"
             >
-              {phoneSquashed ? "Phone panel hidden to fit" : "Sidebar labels hidden to fit"}
+              {phoneSquashed ? t("Phone panel hidden to fit") : t("Sidebar labels hidden to fit")}
             </span>
           )}
         </header>
+
+        {/* Missing grants, said out loud. Everything DroidDock needs that it
+            hasn't got fails silently — the mirror streams while taps are
+            discarded, the Notifications tab looks like a quiet phone — so the
+            only useful time to mention it is before you try the thing. */}
+        {healthIssues > 0 && !healthOpen && (
+          <button
+            onClick={() => setHealthOpen(true)}
+            className="flex shrink-0 items-center gap-2.5 border-b border-line bg-bad/10 px-4 py-2 text-start transition-colors hover:bg-bad/15"
+          >
+            <Icon name="alertTriangle" size={14} className="shrink-0 text-bad" />
+            {/* Two complete sentences rather than one with the number and the
+                verb spliced in. A fragment like "it is" cannot be translated
+                correctly without knowing where it lands in the sentence, and in
+                many languages that is not where English puts it. */}
+            <span className="text-[12.5px] text-fg/85">
+              {tn(
+                "1 permission is missing — some features will do nothing until it is granted.",
+                "{n} permissions are missing — some features will do nothing until they are granted.",
+                healthIssues,
+              )}
+            </span>
+            <span className="ms-auto shrink-0 text-[12px] font-medium text-bad">{t("Review")}</span>
+          </button>
+        )}
 
         <div className="min-h-0 flex-1 overflow-hidden">{renderView()}</div>
 
@@ -1037,10 +1116,10 @@ export default function App() {
               <Icon name="wifi" size={14} className="shrink-0 text-(--color-warn)" />
               <span className="text-[12.5px] text-fg/85">
                 {quality?.grade === "stalled"
-                  ? `${status.phoneName ?? "Your phone"} stopped responding — the connection is still open but idle.`
-                  : `Lost the link to ${status.phoneName ?? "your phone"} — waiting for it to come back.`}
+                  ? `${status.phoneName ?? t("Your phone")} stopped responding — the connection is still open but idle.`
+                  : `Lost the link to ${status.phoneName ?? t("your phone")} — waiting for it to come back.`}
               </span>
-              <button onClick={() => setLostLink(false)} className="btn-icon shrink-0" title="Dismiss">
+              <button onClick={() => setLostLink(false)} className="btn-icon shrink-0" title={t("Dismiss")}>
                 <Icon name="x" size={13} />
               </button>
             </div>
@@ -1088,8 +1167,8 @@ export default function App() {
         <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-black/45 p-8">
           <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-(--color-accent) px-10 py-8 text-center">
             <Icon name="upload" size={28} className="text-(--color-accent)" />
-            <div className="font-display text-[15px] font-semibold text-fg">Drop to send to your phone</div>
-            <div className="text-[12.5px] text-dim">Lands in Download · use the Files view to pick a folder</div>
+            <div className="font-display text-[15px] font-semibold text-fg">{t("Drop to send to your phone")}</div>
+            <div className="text-[12.5px] text-dim">{t("Lands in Download · use the Files view to pick a folder")}</div>
           </div>
         </div>
       )}

@@ -76,7 +76,7 @@ export default function LinkPulse({
           <svg
             viewBox="0 0 68 24"
             fill="none"
-            className="link-thread absolute left-0 top-0 h-full"
+            className="link-thread absolute start-0 top-0 h-full"
             style={{ width: `${(68 / 56) * 100}%` }}
           >
             <path

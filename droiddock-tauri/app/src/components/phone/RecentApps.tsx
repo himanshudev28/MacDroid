@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAppIcon, useRecentApps, launchApp, removeRecent } from "../../lib/appIcons";
+import { t } from "../../lib/i18n";
 
 /// Shortcuts to apps you've opened on the phone *from here*.
 ///
@@ -23,7 +24,7 @@ export default function RecentApps({ onError }: { onError: (msg: string) => void
   return (
     <div
       className="flex items-center justify-center gap-1.5"
-      title="Apps you've opened on your phone from DroidDock — hover to remove"
+      title={t("Apps you've opened on your phone from DroidDock — hover to remove")}
       onMouseEnter={() => setEditing(true)}
       onMouseLeave={() => setEditing(false)}
     >
@@ -76,7 +77,7 @@ function RecentIcon({
           }}
           title={`Remove ${short} from recents`}
           aria-label={`Remove ${short} from recents`}
-          className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border border-white/25 bg-black/80 text-white/90 shadow-sm transition-colors hover:bg-black hover:text-white"
+          className="absolute -top-1 -end-1 flex h-4 w-4 items-center justify-center rounded-full border border-white/25 bg-black/80 text-white/90 shadow-sm transition-colors hover:bg-black hover:text-white"
         >
           <svg viewBox="0 0 24 24" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth={3.2} aria-hidden="true">
             <path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" />

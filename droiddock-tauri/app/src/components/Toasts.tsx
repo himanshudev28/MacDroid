@@ -11,7 +11,7 @@ const COLORS: Record<string, string> = {
 
 export default function Toasts({ items }: { items: Toast[] }) {
   return (
-    <div className="pointer-events-none fixed bottom-5 right-5 z-50 flex w-80 flex-col-reverse gap-2">
+    <div className="pointer-events-none fixed bottom-5 end-5 z-50 flex w-80 flex-col-reverse gap-2">
       {items.map((t, i) => (
         <div
           key={t.id}

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import Icon from "../Icon";
 import type { ScrcpyCaps } from "../../lib/bridge";
 import { mirrorPopout, mirrorFocus, mirrorStop, onMirrorStarted, onMirrorStopped, onMirrorError } from "../../lib/bridge";
+import { t } from "../../lib/i18n";
 
 /// The three virtual-display densities, in the order they're offered.
 ///
@@ -10,9 +11,9 @@ import { mirrorPopout, mirrorFocus, mirrorStop, onMirrorStarted, onMirrorStopped
 /// is kept because it is what this app did before the setting existed, and
 /// because some apps genuinely behave better in their phone layout.
 const UI_MODES = [
-  ["desktop", "Desktop", "Large-screen layouts and freeform windows."],
-  ["tablet", "Tablet", "Large-screen layouts, bigger touch targets."],
-  ["phone", "Phone", "The phone's own layout, scaled up to the window."],
+  ["desktop", "Desktop", t("Large-screen layouts and freeform windows.")],
+  ["tablet", "Tablet", t("Large-screen layouts, bigger touch targets.")],
+  ["phone", "Phone", t("The phone's own layout, scaled up to the window.")],
 ] as const;
 
 /// Screen Mirror tab. Wi-Fi mirror is fully wired (Phase 11); ADB mirror
@@ -84,7 +85,7 @@ export default function MirrorView({
     setWifiBusy(true);
     try {
       await mirrorPopout("screen");
-      onToast("info", "Approve screen capture on your phone…");
+      onToast("info", t("Approve screen capture on your phone…"));
     } catch (e) {
       setWifiBusy(false);
       onToast("bad", String(e));
@@ -99,18 +100,14 @@ export default function MirrorView({
             <Icon name="monitor" size={20} strokeWidth={1.5} className="text-fg/80" />
           </div>
           <p className="flex items-center justify-center gap-2 font-display text-[15px] font-semibold text-fg">
-            <span className="led h-1.5 w-1.5 rounded-full bg-(--color-link)" />
-            Mirroring
+            <span className="led h-1.5 w-1.5 rounded-full bg-(--color-link)" />{t("Mirroring")}
           </p>
-          <p className="mt-2 text-[12px] leading-relaxed text-dim">
-            Your phone is streaming in its own window. Move it, resize it, or pin it on top.
+          <p className="mt-2 text-[12px] leading-relaxed text-dim">{t("Your phone is streaming in its own window. Move it, resize it, or pin it on top.")}
           </p>
           <div className="mt-5 flex items-center justify-center gap-2">
-            <button onClick={() => mirrorFocus()} className="btn btn-secondary">
-              Bring to front
+            <button onClick={() => mirrorFocus()} className="btn btn-secondary">{t("Bring to front")}
             </button>
-            <button onClick={() => mirrorStop()} className="btn btn-danger">
-              Stop
+            <button onClick={() => mirrorStop()} className="btn btn-danger">{t("Stop")}
             </button>
           </div>
         </div>
@@ -121,17 +118,17 @@ export default function MirrorView({
   return (
     <div className="h-full overflow-y-auto p-6">
       <div className="mx-auto max-w-xl">
-        <h1 className="font-display text-[17px] font-semibold text-fg">Mirror</h1>
-        <p className="mt-0.5 text-[12px] text-dim">Put your phone's screen in a window on this Mac.</p>
+        <h1 className="font-display text-[17px] font-semibold text-fg">{t("Mirror")}</h1>
+        <p className="mt-0.5 text-[12px] text-dim">{t("Put your phone's screen in a window on this Mac.")}</p>
 
         <div className="mt-4 space-y-3">
           <LaunchCard
-            title="Wi-Fi mirror"
-            subtitle="Opens a phone-shaped pop-out window over Wi-Fi. No ADB, scrcpy, or Developer Options needed."
+            title={t("Wi-Fi mirror")}
+            subtitle={t("Opens a phone-shaped pop-out window over Wi-Fi. No ADB, scrcpy, or Developer Options needed.")}
             tag="Wi-Fi"
             primary={defaultMode === "wifi"}
             live={linked}
-            requirement={linked ? null : "Phone app link required"}
+            requirement={linked ? null : t("Phone app link required")}
             requirementHint="Pair the DroidDock phone app from the Dashboard to mirror over Wi-Fi."
             buttonLabel="Start mirroring"
             buttonBusy={wifiBusy}
@@ -139,65 +136,65 @@ export default function MirrorView({
           />
 
           <LaunchCard
-            title="ADB mirror"
+            title={t("ADB mirror")}
             primary={defaultMode === "adb"}
-            subtitle="Full-quality, low-latency mirroring over USB or wireless ADB via scrcpy — opens in its own window."
+            subtitle={t("Full-quality, low-latency mirroring over USB or wireless ADB via scrcpy — opens in its own window.")}
             tag="ADB"
             live={!!adbSerial}
-            requirement={adbSerial ? null : "No ADB device connected"}
+            requirement={adbSerial ? null : t("No ADB device connected")}
             requirementHint={
               scrcpyReady
-                ? "Connect a phone via USB or wireless ADB from the Devices tab."
-                : "Install scrcpy first (Devices tab → Tools)."
+                ? t("Connect a phone via USB or wireless ADB from the Devices tab.")
+                : t("Install scrcpy first (Devices tab → Tools).")
             }
             buttonLabel="Mirror via ADB"
             onClick={onAdbMirror}
           />
 
           <LaunchCard
-            title="ADB mirror, in this app"
-            subtitle="Same scrcpy stream, but it plays in DroidDock's own pop-out instead of a separate scrcpy window — and needs no “Allow screen capture” tap on the phone."
+            title={t("ADB mirror, in this app")}
+            subtitle={t("Same scrcpy stream, but it plays in DroidDock's own pop-out instead of a separate scrcpy window — and needs no “Allow screen capture” tap on the phone.")}
             tag="ADB"
             live={!!adbSerial}
             requirement={
               !scrcpyReady
-                ? "scrcpy not installed"
+                ? t("scrcpy not installed")
                 : adbSerial
                   ? null
-                  : "No ADB device connected"
+                  : t("No ADB device connected")
             }
             requirementHint={
               !scrcpyReady
-                ? "Install scrcpy first (Devices tab → Tools)."
-                : "Connect a phone via USB or wireless ADB from the Devices tab."
+                ? t("Install scrcpy first (Devices tab → Tools).")
+                : t("Connect a phone via USB or wireless ADB from the Devices tab.")
             }
             buttonLabel="Mirror in this app"
             onClick={onAdbEmbedded}
           />
 
           <LaunchCard
-            title="Desktop mode"
+            title={t("Desktop mode")}
             primary={defaultMode === "desktop"}
-            subtitle="Mirrors a second, virtual Android display instead of the phone's own screen — the phone stays usable. Needs Android 11+ and scrcpy 3.0 or newer."
+            subtitle={t("Mirrors a second, virtual Android display instead of the phone's own screen — the phone stays usable. Needs Android 11+ and scrcpy 3.0 or newer.")}
             tag="ADB"
             live={!!adbSerial}
             requirement={
               // Version first: with an old scrcpy this fails at spawn no matter
               // what is plugged in, and "no device" would be a misleading reason.
               !scrcpyReady
-                ? "scrcpy not installed"
+                ? t("scrcpy not installed")
                 : caps && !caps.virtualDisplay
                   ? `scrcpy ${scrcpyVersion ?? "(unknown version)"} is too old`
                   : adbSerial
                     ? null
-                    : "No ADB device connected"
+                    : t("No ADB device connected")
             }
             requirementHint={
               !scrcpyReady
-                ? "Install scrcpy first (Devices tab → Tools)."
+                ? t("Install scrcpy first (Devices tab → Tools).")
                 : caps && !caps.virtualDisplay
                   ? "Virtual displays need scrcpy 3.0 or newer. Run `brew upgrade scrcpy`, then reopen DroidDock."
-                  : "Connect a phone via USB or wireless ADB from the Devices tab."
+                  : t("Connect a phone via USB or wireless ADB from the Devices tab.")
             }
             buttonLabel="Start desktop"
             onClick={onAdbDesktop}
@@ -236,7 +233,7 @@ function ModeCard({
           <Icon name="squareStack" size={17} className="text-fg/80" />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-semibold text-fg">Window layout</p>
+          <p className="text-[13px] font-semibold text-fg">{t("Window layout")}</p>
           <p className="mt-1 text-[12px] leading-relaxed text-dim">
             Which layout Android serves on the virtual display — used by Desktop mode and by
             opening a single app on this Mac.
@@ -252,7 +249,7 @@ function ModeCard({
             disabled={unsupported}
             aria-pressed={uiMode === value}
             title={hint}
-            className={`rounded-xl px-3 py-2.5 text-left transition-colors disabled:opacity-40 ${
+            className={`rounded-xl px-3 py-2.5 text-start transition-colors disabled:opacity-40 ${
               uiMode === value ? "bg-panel3 ring-1 ring-(--color-link)" : "bg-panel3/50 hover:bg-panel3"
             }`}
           >
@@ -265,7 +262,7 @@ function ModeCard({
       <p className="mt-3 text-[11px] leading-relaxed text-dim">
         {unsupported
           ? `scrcpy ${scrcpyVersion ?? "(unknown version)"} can't create virtual displays — this applies from 3.0 onward.`
-          : "Takes effect the next time you start desktop mode or open an app on this Mac."}
+          : t("Takes effect the next time you start desktop mode or open an app on this Mac.")}
       </p>
     </div>
   );
@@ -326,7 +323,7 @@ function LaunchCard({
           className={`btn ${primary ? "btn-primary" : "btn-secondary"} mt-4 w-full`}
         >
           {buttonBusy && <Icon name="reload" size={14} className="spinner" />}
-          {buttonBusy ? "Waiting for the phone…" : buttonLabel}
+          {buttonBusy ? t("Waiting for the phone…") : buttonLabel}
         </button>
       )}
     </div>

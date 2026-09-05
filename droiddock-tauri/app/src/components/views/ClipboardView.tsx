@@ -2,6 +2,7 @@ import { memo } from "react";
 import Icon from "../Icon";
 import EmptyState from "../EmptyState";
 import type { DroidConfig } from "../../lib/bridge";
+import { t, useT } from "../../lib/i18n";
 
 /// Clipboard status page. The sync itself runs entirely in Rust (a 1s
 /// NSPasteboard watcher + the inbound write path) — this view is just a status
@@ -16,12 +17,15 @@ function ClipboardView({
   config: DroidConfig | null;
   onToggle: (on: boolean) => void;
 }) {
+  // Memoised: its props do not change when only the language does, so without
+  // its own subscription it would keep rendering the old strings.
+  useT();
   if (!linked) {
     return (
       <EmptyState
         icon="wifi"
-        title="No phone linked"
-        body="Link your phone from the Dashboard to keep both clipboards in sync."
+        title={t("No phone linked")}
+        body={t("Link your phone from the Dashboard to keep both clipboards in sync.")}
       />
     );
   }
@@ -35,7 +39,7 @@ function ClipboardView({
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-panel3">
             <Icon name="clipboard" size={20} strokeWidth={1.5} className="text-dim" />
           </div>
-          <h1 className="mt-4 font-display text-[17px] font-semibold text-fg">Clipboard sync</h1>
+          <h1 className="mt-4 font-display text-[17px] font-semibold text-fg">{t("Clipboard sync")}</h1>
           <p className="mx-auto mt-1.5 max-w-60 text-[12.5px] leading-relaxed text-dim">
             Copy text on either device and it appears on the other automatically — checked once
             a second, both directions.
@@ -47,14 +51,14 @@ function ClipboardView({
             }`}
           >
             <span className={`h-1.5 w-1.5 rounded-full ${on ? "led bg-(--color-link)" : "bg-faint"}`} />
-            {on ? "Sync is on" : "Sync is off"}
+            {on ? t("Sync is on") : t("Sync is off")}
           </p>
 
           <button
             onClick={() => onToggle(!on)}
             className={`btn mt-5 w-full ${on ? "btn-secondary" : "btn-primary"}`}
           >
-            {on ? "Turn off sync" : "Turn on sync"}
+            {on ? t("Turn off sync") : t("Turn on sync")}
           </button>
         </div>
       </div>

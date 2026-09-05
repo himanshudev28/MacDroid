@@ -3,6 +3,7 @@ import Icon from "../Icon";
 import EmptyState from "../EmptyState";
 import { useAppIcon, launchApp } from "../../lib/appIcons";
 import { appsList, adbMirrorApp, type PhoneApp } from "../../lib/bridge";
+import { t, useT } from "../../lib/i18n";
 
 /// The phone's app drawer, on the Mac. Clicking an app either launches it on
 /// the phone or opens it in its own Mac window — `openOnMac` decides which, and
@@ -32,6 +33,9 @@ function AppsView({
   onOpenOnMacChange: (next: boolean) => void;
   onToast: (kind: "ok" | "bad" | "info", text: string) => void;
 }) {
+  // Memoised: its props do not change when only the language does, so without
+  // its own subscription it would keep rendering the old strings.
+  useT();
   const [apps, setApps] = useState<PhoneApp[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -127,8 +131,8 @@ function AppsView({
     return (
       <EmptyState
         icon="wifi"
-        title="No phone linked"
-        body="Link your phone from the Dashboard to browse and open its apps from here."
+        title={t("No phone linked")}
+        body={t("Link your phone from the Dashboard to browse and open its apps from here.")}
       />
     );
   }
@@ -140,7 +144,7 @@ function AppsView({
           <Icon
             name="search"
             size={13}
-            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-faint"
+            className="pointer-events-none absolute start-2.5 top-1/2 -translate-y-1/2 text-faint"
           />
           <input
             ref={searchRef}
@@ -151,8 +155,8 @@ function AppsView({
               // Enter opens the top hit — the whole point of ranking prefixes first.
               if (e.key === "Enter" && shown[0]) activate(shown[0], e.altKey);
             }}
-            placeholder="Search apps…"
-            className="field w-full pl-7.5"
+            placeholder={t("Search apps…")}
+            className="field w-full ps-7.5"
           />
         </div>
         <span className="shrink-0 text-[12px] text-dim">{apps ? `${shown.length}` : ""}</span>
@@ -164,23 +168,22 @@ function AppsView({
           onChange={onOpenOnMacChange}
           macAvailable={macAvailable}
         />
-        <button onClick={load} className="btn-icon shrink-0" title="Refresh app list">
+        <button onClick={load} className="btn-icon shrink-0" title={t("Refresh app list")}>
           <Icon name="reload" size={14} />
         </button>
       </div>
 
       {apps === null ? (
         <div className="flex flex-1 items-center justify-center gap-2 text-[12.5px] text-dim">
-          <Icon name="reload" size={14} className="spinner" />
-          Reading your phone's app list…
+          <Icon name="reload" size={14} className="spinner" />{t("Reading your phone's app list…")}
         </div>
       ) : error ? (
-        <EmptyState icon="alert" title="Couldn't list apps" body={error} />
+        <EmptyState icon="alert" title={t("Couldn't list apps")} body={error} />
       ) : shown.length === 0 ? (
         <EmptyState
           icon="search"
-          title={query ? "No matches" : "No apps found"}
-          body={query ? `Nothing matching “${query}”.` : "The phone reported no launchable apps."}
+          title={query ? t("No matches") : t("No apps found")}
+          body={query ? `Nothing matching “${query}”.` : t("The phone reported no launchable apps.")}
         />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
@@ -189,7 +192,7 @@ function AppsView({
               thing you just typed for off the top. */}
           {!query && pinnedApps.length > 0 && (
             <>
-              <p className="pb-2 text-[11px] font-medium text-faint">Pinned</p>
+              <p className="pb-2 text-[11px] font-medium text-faint">{t("Pinned")}</p>
               <div className="grid grid-cols-[repeat(auto-fill,minmax(88px,1fr))] gap-2">
                 {pinnedApps.map((app) => (
                   <AppTile
@@ -249,11 +252,11 @@ function OpenTargetSwitch({
   return (
     <div
       role="radiogroup"
-      aria-label="Where clicking an app opens it"
+      aria-label={t("Where clicking an app opens it")}
       title={
         macAvailable
-          ? "Where a click opens an app. Hold Option to do the other one."
-          : "Opening apps on this Mac needs an ADB device — connect one from the Devices tab."
+          ? t("Where a click opens an app. Hold Option to do the other one.")
+          : t("Opening apps on this Mac needs an ADB device — connect one from the Devices tab.")
       }
       className="flex shrink-0 gap-0.5 rounded-lg bg-panel3 p-0.5"
     >
@@ -307,9 +310,9 @@ function AppTile({
      pick one destination instead of running two. */
   const hint = macAvailable
     ? openOnMac
-      ? "Click: open in a Mac window · ⌥Click: open on phone"
-      : "Click: open on phone · ⌥Click: open in a Mac window"
-    : "Click: open on phone";
+      ? t("Click: open in a Mac window · ⌥Click: open on phone")
+      : t("Click: open on phone · ⌥Click: open in a Mac window")
+    : t("Click: open on phone");
 
   return (
     <div
@@ -349,7 +352,7 @@ function AppTile({
         title={pinned ? `Unpin ${app.label}` : `Pin ${app.label}`}
         aria-label={pinned ? `Unpin ${app.label}` : `Pin ${app.label}`}
         aria-pressed={pinned}
-        className={`absolute right-1 top-1 rounded-lg p-1 transition-opacity hover:bg-panel3 hover:text-fg focus-visible:opacity-100 ${
+        className={`absolute end-1 top-1 rounded-lg p-1 transition-opacity hover:bg-panel3 hover:text-fg focus-visible:opacity-100 ${
           pinned
             ? "text-(--color-accent) opacity-100"
             : "text-faint opacity-0 group-hover:opacity-100"

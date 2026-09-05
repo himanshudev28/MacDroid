@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import Icon from "../Icon";
 import { adbVolumeGet, adbVolumeSet, type AdbDevice, type AppDeviceInfo, type DeviceInfo, type ToolsStatus } from "../../lib/bridge";
 import type { WifiStatus } from "../../lib/wifi";
+import { t } from "../../lib/i18n";
 
 /// Phase 13 — port of DevicesView.jsx. Shows the live ADB device (if any),
 /// the Wi-Fi app-link status, tool availability, device volume, and the
@@ -49,7 +50,7 @@ export default function DevicesView({
       <div className="card flex items-center gap-3 px-4 py-3">
         <Icon name="terminal" size={14} className="shrink-0 text-dim" />
         <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-medium text-fg">ADB device</p>
+          <p className="text-[13px] font-medium text-fg">{t("ADB device")}</p>
           <p className="mt-0.5 text-[11px] text-dim">
             {devices.length} connected — pick which one the ADB actions target.
           </p>
@@ -57,7 +58,7 @@ export default function DevicesView({
         <select
           value={selected ?? ""}
           onChange={(e) => onSelect(e.target.value)}
-          aria-label="ADB device"
+          aria-label={t("ADB device")}
           className="field shrink-0 max-w-56"
         >
           {devices.map((d) => (
@@ -73,10 +74,9 @@ export default function DevicesView({
     <div className="h-full overflow-y-auto p-6">
       <div className="mx-auto max-w-xl space-y-3">
         <div className="flex items-center justify-between">
-          <h1 className="font-display text-[17px] font-semibold text-fg">Devices</h1>
+          <h1 className="font-display text-[17px] font-semibold text-fg">{t("Devices")}</h1>
           <button onClick={onReconnect} disabled={busy.reconnect} className="btn btn-ghost">
-            <Icon name="reload" size={14} className={busy.reconnect ? "spinner" : ""} />
-            Reconnect
+            <Icon name="reload" size={14} className={busy.reconnect ? "spinner" : ""} />{t("Reconnect")}
           </button>
         </div>
 
@@ -114,10 +114,10 @@ function AdbDeviceCard({ device, info, appInfo }: { device: AdbDevice; info: Dev
   return (
     <div className="card-raised p-5">
       <div className="mb-3 flex items-center justify-between">
-        <span className="label">ADB device</span>
+        <span className="label">{t("ADB device")}</span>
         <span className="flex items-center gap-1.5 rounded-md bg-panel3 px-1.5 py-0.5 text-[10px] font-medium text-dim">
           {isWifi && <span className="h-1.5 w-1.5 rounded-full bg-(--color-link)" />}
-          {isWifi ? "Wi-Fi ADB" : "USB"}
+          {isWifi ? t("Wi-Fi ADB") : "USB"}
         </span>
       </div>
       <div className="flex items-center gap-4">
@@ -125,7 +125,7 @@ function AdbDeviceCard({ device, info, appInfo }: { device: AdbDevice; info: Dev
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-panel3">
             <Icon name="phone" size={20} strokeWidth={1.5} className="text-fg/80" />
           </div>
-          <span className="led absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-panel2 bg-(--color-link)" />
+          <span className="led absolute -end-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-panel2 bg-(--color-link)" />
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate font-display text-[15px] font-semibold text-fg">{model}</p>
@@ -136,7 +136,7 @@ function AdbDeviceCard({ device, info, appInfo }: { device: AdbDevice; info: Dev
       {battery != null && (
         <div className="mt-4">
           <div className="mb-1.5 flex items-center justify-between">
-            <span className="label">Battery</span>
+            <span className="label">{t("Battery")}</span>
             <span className="data flex items-center gap-1 text-[11px] text-fg/80">
               {charging && <Icon name="reload" size={10} className="text-(--color-link)" />}
               {battery}%
@@ -158,15 +158,15 @@ function EmptyDeviceCard({ onPair }: { onPair: () => void }) {
   return (
     <button
       onClick={onPair}
-      className="card group w-full border-dashed p-5 text-left transition-colors hover:bg-panel2"
+      className="card group w-full border-dashed p-5 text-start transition-colors hover:bg-panel2"
     >
       <div className="flex items-center gap-4">
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-dashed border-line">
           <Icon name="phone" size={20} strokeWidth={1.5} className="text-faint" />
         </div>
         <div className="min-w-0">
-          <p className="text-[13px] font-medium text-fg/80">No ADB device</p>
-          <p className="mt-0.5 text-[11.5px] text-dim">Connect a USB cable, or pair wirelessly below.</p>
+          <p className="text-[13px] font-medium text-fg/80">{t("No ADB device")}</p>
+          <p className="mt-0.5 text-[11.5px] text-dim">{t("Connect a USB cable, or pair wirelessly below.")}</p>
         </div>
       </div>
     </button>
@@ -178,14 +178,13 @@ function AppLinkCard({ wifi, onPair }: { wifi: WifiStatus; onPair: () => void })
   return (
     <div className="card p-5">
       <div className="mb-3 flex items-center justify-between">
-        <span className="label">Phone app</span>
+        <span className="label">{t("Phone app")}</span>
         {linked ? (
           <span className="flex items-center gap-1.5 text-[11px] font-medium text-(--color-link)">
-            <span className="led h-1.5 w-1.5 rounded-full bg-(--color-link)" />
-            Linked over Wi-Fi
+            <span className="led h-1.5 w-1.5 rounded-full bg-(--color-link)" />{t("Linked over Wi-Fi")}
           </span>
         ) : (
-          <span className="text-[11px] text-faint">Not linked</span>
+          <span className="text-[11px] text-faint">{t("Not linked")}</span>
         )}
       </div>
       <div className="flex items-center gap-4">
@@ -197,14 +196,13 @@ function AppLinkCard({ wifi, onPair }: { wifi: WifiStatus; onPair: () => void })
             <p className="truncate text-[13px] font-medium text-fg">{wifi.phoneName || "Phone"}</p>
           ) : (
             <>
-              <p className="text-[13px] font-medium text-dim">Phone app not paired</p>
-              <p className="mt-0.5 text-[11px] text-faint">Install DroidDock on your phone, then pair.</p>
+              <p className="text-[13px] font-medium text-dim">{t("Phone app not paired")}</p>
+              <p className="mt-0.5 text-[11px] text-faint">{t("Install DroidDock on your phone, then pair.")}</p>
             </>
           )}
         </div>
         {!linked && (
-          <button onClick={onPair} className="btn btn-secondary shrink-0">
-            Pair
+          <button onClick={onPair} className="btn btn-secondary shrink-0">{t("Pair")}
           </button>
         )}
       </div>
@@ -217,17 +215,17 @@ function ToolsCard({ tools, onSetup }: { tools: ToolsStatus | null; onSetup: () 
   return (
     <div className="card p-5">
       <div className="mb-3">
-        <span className="label">Tools</span>
+        <span className="label">{t("Tools")}</span>
       </div>
       <div className="flex gap-2">
         {[
-          { label: "ADB", on: tools.adb, hint: "Android Debug Bridge" },
-          { label: "scrcpy", on: tools.scrcpy, hint: "Screen mirroring engine" },
+          { label: "ADB", on: tools.adb, hint: t("Android Debug Bridge") },
+          { label: "scrcpy", on: tools.scrcpy, hint: t("Screen mirroring engine") },
         ].map(({ label, on, hint }) => (
           <button
             key={label}
             onClick={onSetup}
-            className="flex flex-1 items-center gap-2.5 rounded-xl bg-panel2 px-3 py-2.5 text-left transition-colors hover:bg-panel3"
+            className="flex flex-1 items-center gap-2.5 rounded-xl bg-panel2 px-3 py-2.5 text-start transition-colors hover:bg-panel3"
           >
             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${on ? "bg-ok" : "bg-bad"}`} />
             <div className="min-w-0">
@@ -278,7 +276,7 @@ function VolumeCard({ deviceSerial }: { deviceSerial: string }) {
   return (
     <div className="card p-5">
       <div className="mb-3 flex items-center justify-between">
-        <span className="label">Volume</span>
+        <span className="label">{t("Volume")}</span>
         <span className="data text-[11px] text-dim">{pct}%</span>
       </div>
       <div className="flex items-center gap-3">
@@ -309,29 +307,29 @@ function ActionsCard({
   const actions = [
     connected &&
       connected.transport === "usb" && {
-        label: "Go wireless",
-        hint: "Switch to Wi-Fi ADB",
+        label: t("Go wireless"),
+        hint: t("Switch to Wi-Fi ADB"),
         spinning: busy.wireless,
         onClick: onWireless,
         icon: "wifi",
       },
     {
-      label: "Connect via QR",
-      hint: "Wireless pairing, Android 11+",
+      label: t("Connect via QR"),
+      hint: t("Wireless pairing, Android 11+"),
       spinning: false,
       onClick: onPairWireless,
       icon: "qrcode",
     },
     connected && {
-      label: "Take screenshot",
-      hint: "Saves to Downloads",
+      label: t("Take screenshot"),
+      hint: t("Saves to Downloads"),
       spinning: busy.shot,
       onClick: onScreenshot,
       icon: "camera",
     },
     paired && {
-      label: "Forget phone",
-      hint: "Unpair this device",
+      label: t("Forget phone"),
+      hint: t("Unpair this device"),
       spinning: busy.unpair,
       onClick: onUnpair,
       danger: true,
@@ -355,7 +353,7 @@ function ActionsCard({
           key={label}
           onClick={onClick}
           disabled={spinning}
-          className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-panel2 disabled:opacity-40"
+          className="flex w-full items-center gap-3 px-4 py-3 text-start transition-colors hover:bg-panel2 disabled:opacity-40"
         >
           <Icon
             name={icon}

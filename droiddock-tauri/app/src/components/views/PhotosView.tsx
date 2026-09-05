@@ -3,6 +3,7 @@ import Icon from "../Icon";
 import EmptyState from "../EmptyState";
 import { fmtDuration } from "../../lib/ui";
 import { photosList, photoThumb, photoOpen, fsPull, type MediaItem } from "../../lib/bridge";
+import { t, useT } from "../../lib/i18n";
 
 const CONCURRENCY = 3;
 const PAGE = 500; // matches the Electron client's single 500-item page
@@ -17,6 +18,9 @@ function PhotosView({
   linked: boolean;
   onToast: (kind: "ok" | "bad" | "info", text: string) => void;
 }) {
+  // Memoised: its props do not change when only the language does, so without
+  // its own subscription it would keep rendering the old strings.
+  useT();
   const [items, setItems] = useState<MediaItem[]>([]);
   const [thumbs, setThumbs] = useState<Record<string, string>>({}); // path -> dataURL | "err"
   const [loading, setLoading] = useState(false);
@@ -104,8 +108,8 @@ function PhotosView({
     return (
       <EmptyState
         icon="image"
-        title="No phone linked"
-        body="Link your phone from the Dashboard to browse its photos and videos."
+        title={t("No phone linked")}
+        body={t("Link your phone from the Dashboard to browse its photos and videos.")}
       />
     );
   }
@@ -114,9 +118,9 @@ function PhotosView({
     return (
       <EmptyState
         icon="image"
-        title="Can't read photos"
+        title={t("Can't read photos")}
         body={err}
-        action={{ label: "Try again", onClick: load }}
+        action={{ label: t("Try again"), onClick: load }}
       />
     );
   }
@@ -125,13 +129,13 @@ function PhotosView({
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center justify-between gap-3 px-6 pt-5 pb-4">
         <div className="flex items-baseline gap-2.5">
-          <h1 className="font-display text-[17px] font-semibold text-fg">Photos</h1>
+          <h1 className="font-display text-[17px] font-semibold text-fg">{t("Photos")}</h1>
           <span className="text-[12px] text-dim">
             {items.length} items
             {loading ? " · scanning…" : ""}
           </span>
         </div>
-        <button onClick={load} title="Refresh" className="btn-icon">
+        <button onClick={load} title={t("Refresh")} className="btn-icon">
           <Icon name="reload" size={14} className={loading ? "spinner" : ""} />
         </button>
       </div>
@@ -139,8 +143,8 @@ function PhotosView({
       {items.length === 0 && !loading ? (
         <EmptyState
           icon="image"
-          title="No photos yet"
-          body="Photos and videos you take on your phone will show up here."
+          title={t("No photos yet")}
+          body={t("Photos and videos you take on your phone will show up here.")}
         />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
@@ -199,7 +203,7 @@ function Tile({
     <div
       ref={ref}
       onClick={onOpen}
-      title={isVideo ? "Open video" : "Open photo"}
+      title={isVideo ? t("Open video") : t("Open photo")}
       className="group relative aspect-square cursor-pointer overflow-hidden rounded-lg border border-line bg-panel2"
     >
       {thumb && thumb !== "err" ? (
@@ -222,7 +226,7 @@ function Tile({
             </span>
           </div>
           {it.duration ? (
-            <span className="pointer-events-none absolute bottom-1.5 left-1.5 rounded-sm bg-ink/75 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-fg backdrop-blur-sm">
+            <span className="pointer-events-none absolute bottom-1.5 start-1.5 rounded-sm bg-ink/75 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-fg backdrop-blur-sm">
               {fmtDuration(it.duration)}
             </span>
           ) : null}
@@ -234,8 +238,8 @@ function Tile({
           e.stopPropagation();
           onDownload();
         }}
-        title={isVideo ? "Save video to Downloads" : "Save to Downloads"}
-        className="absolute bottom-1.5 right-1.5 flex h-7 w-7 items-center justify-center rounded-lg bg-ink/75 text-fg opacity-0 backdrop-blur-sm transition-opacity hover:bg-ink/90 group-hover:opacity-100"
+        title={isVideo ? t("Save video to Downloads") : t("Save to Downloads")}
+        className="absolute bottom-1.5 end-1.5 flex h-7 w-7 items-center justify-center rounded-lg bg-ink/75 text-fg opacity-0 backdrop-blur-sm transition-opacity hover:bg-ink/90 group-hover:opacity-100"
       >
         <Icon name="download" size={13} />
       </button>

@@ -4,6 +4,7 @@ import EmptyState from "../EmptyState";
 import { fmtTime } from "../../lib/ui";
 import { notifReply, notifAction, type Notif, type DroidConfig } from "../../lib/bridge";
 import { useAppIcon } from "../../lib/appIcons";
+import { t } from "../../lib/i18n";
 
 /// Phase 4 — the in-app notifications panel. The list itself is fed by App
 /// (off the `notification` / `call` Tauri events, populated regardless of the
@@ -73,8 +74,8 @@ export default function NotificationsView({
     return (
       <EmptyState
         icon="wifi"
-        title="No phone linked"
-        body="Link your phone from the Dashboard to see its notifications here."
+        title={t("No phone linked")}
+        body={t("Link your phone from the Dashboard to see its notifications here.")}
       />
     );
   }
@@ -83,14 +84,14 @@ export default function NotificationsView({
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center justify-between gap-3 px-6 pt-5 pb-4">
         <div className="flex items-baseline gap-2.5">
-          <h1 className="font-display text-[17px] font-semibold text-fg">Notifications</h1>
+          <h1 className="font-display text-[17px] font-semibold text-fg">{t("Notifications")}</h1>
           {items.length > 0 && <span className="text-[12px] text-dim">{items.length}</span>}
         </div>
         <div className="flex items-center gap-1.5">
           {items.length > 0 && (
             <button
               onClick={() => setStacked((s) => !s)}
-              title={stacked ? "Show as one list" : "Group by app"}
+              title={stacked ? t("Show as one list") : t("Group by app")}
               aria-pressed={stacked}
               className={`btn-icon ${stacked ? "text-(--color-accent)" : ""}`}
             >
@@ -99,18 +100,16 @@ export default function NotificationsView({
           )}
           <button
             onClick={() => onToggleNative(!nativeOn)}
-            title={nativeOn ? "Showing on Mac — click to disable" : "Click to show on Mac"}
+            title={nativeOn ? t("Showing on Mac — click to disable") : t("Click to show on Mac")}
             className={`flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12.5px] font-medium transition-colors ${
               nativeOn
                 ? "bg-[color-mix(in_srgb,var(--color-accent)_14%,transparent)] text-(--color-accent)"
                 : "text-dim hover:bg-panel2 hover:text-fg"
             }`}
           >
-            <Icon name="monitor" size={14} />
-            Show on Mac
+            <Icon name="monitor" size={14} />{t("Show on Mac")}
           </button>
-          <button onClick={onClear} className="btn btn-ghost">
-            Clear
+          <button onClick={onClear} className="btn btn-ghost">{t("Clear")}
           </button>
         </div>
       </div>
@@ -118,10 +117,10 @@ export default function NotificationsView({
       {items.length === 0 ? (
         <EmptyState
           icon="bell"
-          title="No notifications yet"
+          title={t("No notifications yet")}
           body={
             nativeOn
-              ? "Phone notifications appear here and as macOS banners with inline reply."
+              ? t("Phone notifications appear here and as macOS banners with inline reply.")
               : 'Phone notifications appear here. Turn on "Show on Mac" for macOS banners too.'
           }
         />
@@ -141,7 +140,7 @@ export default function NotificationsView({
                         <button
                           onClick={() => setOpenApps((o) => ({ ...o, [app]: !open }))}
                           disabled={list.length <= 1}
-                          className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-default"
+                          className="flex min-w-0 flex-1 items-center gap-2 text-start disabled:cursor-default"
                         >
                           <span className="label flex-1 truncate">{app}</span>
                           {muted && (
@@ -202,7 +201,7 @@ export default function NotificationsView({
                     {hidden > 0 && (
                       <button
                         onClick={() => setOpenApps((o) => ({ ...o, [app]: true }))}
-                        className="w-full px-4 py-1.5 text-left text-[11px] font-medium text-faint transition-colors hover:bg-panel2 hover:text-dim"
+                        className="w-full px-4 py-1.5 text-start text-[11px] font-medium text-faint transition-colors hover:bg-panel2 hover:text-dim"
                       >
                         {hidden} more from {app}
                       </button>
@@ -236,7 +235,7 @@ function CallRow({ n, onDismiss }: { n: Notif; onDismiss: (k: string) => void })
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
-          <span className="text-[11px] font-medium text-ok">Incoming call</span>
+          <span className="text-[11px] font-medium text-ok">{t("Incoming call")}</span>
           <span className="shrink-0 font-mono text-[10px] tabular-nums text-faint">{fmtTime(n.time)}</span>
         </div>
         <p className="mt-0.5 truncate text-[13px] font-semibold text-fg">{n.title}</p>
@@ -244,9 +243,9 @@ function CallRow({ n, onDismiss }: { n: Notif; onDismiss: (k: string) => void })
         <div className="mt-1.5 flex items-center opacity-0 transition-opacity group-hover:opacity-100">
           <button
             onClick={() => onDismiss(n.key)}
-            className="-ml-1.5 flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-dim transition-colors hover:bg-panel3 hover:text-bad"
+            className="-ms-1.5 flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-dim transition-colors hover:bg-panel3 hover:text-bad"
           >
-            <Icon name="x" size={11} /> Dismiss
+            <Icon name="x" size={11} />{t("Dismiss")}
           </button>
         </div>
       </div>
@@ -315,7 +314,7 @@ function NotifRow({
               never reflows on hover and the affordance is always findable. */}
           <button
             onClick={() => onDismiss(n.key)}
-            title="Dismiss this notification"
+            title={t("Dismiss this notification")}
             aria-label={`Dismiss ${n.app || "notification"}`}
             className="btn-icon -my-1 h-5 w-5 shrink-0 opacity-45 transition-opacity hover:opacity-100 hover:text-bad"
           >
@@ -348,13 +347,13 @@ function NotifRow({
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && send()}
               autoFocus
-              placeholder="Reply…"
+              placeholder={t("Reply…")}
               className="field min-w-0 flex-1"
             />
             <button
               onClick={send}
               disabled={sending || !draft.trim()}
-              title="Send reply"
+              title={t("Send reply")}
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-(--color-accent) text-(--color-accent-ink) transition-opacity hover:opacity-90 disabled:opacity-40"
             >
               <Icon name="send" size={13} className={sending ? "spinner" : ""} />
@@ -383,18 +382,18 @@ function NotifRow({
             {n.replyable && (
               <button
                 onClick={() => setReplying(true)}
-                className="-ml-1.5 flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-dim transition-colors hover:bg-panel3 hover:text-fg"
+                className="-ms-1.5 flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-dim transition-colors hover:bg-panel3 hover:text-fg"
               >
-                <Icon name="cornerUpLeft" size={11} /> Reply
+                <Icon name="cornerUpLeft" size={11} />{t("Reply")}
               </button>
             )}
             <button
               onClick={() => onDismiss(n.key)}
               className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-dim transition-colors hover:bg-panel3 hover:text-bad ${
-                n.replyable ? "" : "-ml-1.5"
+                n.replyable ? "" : "-ms-1.5"
               }`}
             >
-              <Icon name="x" size={11} /> Dismiss
+              <Icon name="x" size={11} />{t("Dismiss")}
             </button>
           </div>
         )}

@@ -8,6 +8,10 @@ import ErrorBoundary from "./ErrorBoundary";
 import { initAppearance } from "./lib/appearance";
 import { watchWindowVisibility } from "./lib/idle";
 import "./index.css";
+import { applyDocumentLocale } from "./lib/i18n";
+
+// Language and text direction, before the first paint.
+applyDocumentLocale();
 
 // Before React mounts, not inside an effect. Theme and glass are read from
 // localStorage synchronously, so doing this here means the very first painted

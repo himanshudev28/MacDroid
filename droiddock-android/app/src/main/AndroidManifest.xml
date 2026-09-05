@@ -60,8 +60,13 @@
         </intent>
     </queries>
 
+    <!-- supportsRtl is what allows Compose to lay out right-to-left at all. The
+         in-app language picker then sets the direction itself (see I18n and
+         MainActivity) rather than waiting on the system locale, because
+         DroidDock's language is its own setting rather than the phone's. -->
     <application
         android:allowBackup="true"
+        android:supportsRtl="true"
         android:icon="@drawable/ic_launcher"
         android:label="@string/app_name"
         android:usesCleartextTraffic="true"

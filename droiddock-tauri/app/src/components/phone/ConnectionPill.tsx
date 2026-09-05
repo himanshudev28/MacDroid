@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import Icon from "../Icon";
 import type { WifiStatus } from "../../lib/wifi";
 import type { AdbDevice, DroidConfig, LinkQuality } from "../../lib/bridge";
+import { t } from "../../lib/i18n";
 
 /// Live transport summary, sitting at the top of the phone card. Each glyph is
 /// one *fact*: the Wi-Fi link, the ADB link (and whether it's cable or
@@ -58,7 +59,7 @@ export default function ConnectionPill({
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
-        title="Connection detail"
+        title={t("Connection detail")}
         className="on-glass flex items-center gap-2 rounded-full px-2.5 py-1 text-white/85 transition-colors"
       >
         <span className="flex items-center gap-1">
@@ -72,7 +73,7 @@ export default function ConnectionPill({
         )}
 
         {config?.clipboardSync && (
-          <Icon name="clipboard" size={12} strokeWidth={2} className="text-white/55" title="Clipboard sync on" />
+          <Icon name="clipboard" size={12} strokeWidth={2} className="text-white/55" title={t("Clipboard sync on")} />
         )}
 
         {config?.pausedUntil != null && (
@@ -81,33 +82,33 @@ export default function ConnectionPill({
       </button>
 
       {open && (
-        <div className="rise-fast glass-heavy absolute left-1/2 top-[calc(100%+8px)] z-30 w-63 -translate-x-1/2 rounded-xl border border-line p-3 text-left float-md">
-          <Row label="Device" value={status.phoneName ?? "Not linked"} />
+        <div className="rise-fast glass-heavy absolute left-1/2 top-[calc(100%+8px)] z-30 w-63 -translate-x-1/2 rounded-xl border border-line p-3 text-start float-md">
+          <Row label={t("Device")} value={status.phoneName ?? t("Not linked")} />
           <Row
-            label="Wi-Fi link"
+            label={t("Wi-Fi link")}
             value={
               !status.connected
                 ? "Waiting"
                 : quality?.grade === "stalled"
-                  ? "Not responding"
+                  ? t("Not responding")
                   : quality?.rttMs != null
                     ? `${GRADE_LABEL[quality.grade]} · ${Math.round(quality.rttMs)} ms`
                     : "Connected"
             }
             accent={status.connected && quality?.grade !== "stalled"}
           />
-          {ip && <Row label="Mac address" value={`${ip}${port ? `:${port}` : ""}`} mono />}
+          {ip && <Row label={t("Mac address")} value={`${ip}${port ? `:${port}` : ""}`} mono />}
           {adb ? (
             <>
               <Row label="ADB" value={wired ? "Cable" : "Wireless"} accent />
-              <Row label="Serial" value={adb.serial} mono />
+              <Row label={t("Serial")} value={adb.serial} mono />
             </>
           ) : (
             <Row label="ADB" value="Not connected" />
           )}
           {config?.pausedUntil != null && (
             <Row
-              label="Paused until"
+              label={t("Paused until")}
               value={new Date(config.pausedUntil).toLocaleString()}
             />
           )}
@@ -121,7 +122,7 @@ const GRADE_LABEL: Record<LinkQuality["grade"], string> = {
   good: "Good",
   fair: "Fair",
   weak: "Weak",
-  stalled: "Not responding",
+  stalled: t("Not responding"),
 };
 
 function Row({
@@ -139,7 +140,7 @@ function Row({
     <div className="flex items-baseline justify-between gap-3 py-1">
       <span className="label shrink-0">{label}</span>
       <span
-        className={`min-w-0 truncate text-right text-[12px] ${mono ? "data" : ""} ${
+        className={`min-w-0 truncate text-end text-[12px] ${mono ? "data" : ""} ${
           accent ? "text-(--color-link)" : "text-fg"
         }`}
         title={value}

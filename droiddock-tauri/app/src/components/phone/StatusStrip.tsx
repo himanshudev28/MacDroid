@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import Icon from "../Icon";
 import { mediaCmd, mirrorInput, type AppDeviceInfo, type MediaState } from "../../lib/bridge";
 import { phoneSupports, type WifiStatus } from "../../lib/wifi";
+import { t } from "../../lib/i18n";
 
 /// Lock the phone's screen, the same global action its power button triggers.
 ///
@@ -94,8 +95,8 @@ export default function StatusStrip({
         <div ref={ref} className="relative">
           <button
             onClick={() => setVolOpen((o) => !o)}
-            title={volPct !== null ? `Phone volume — ${volPct}%` : "Phone volume"}
-            aria-label="Phone volume"
+            title={volPct !== null ? `Phone volume — ${volPct}%` : t("Phone volume")}
+            aria-label={t("Phone volume")}
             className="on-glass flex h-[26px] w-[26px] items-center justify-center rounded-full text-white/80 transition-colors hover:text-white"
           >
             <Icon name="volume" size={12} strokeWidth={2} />
@@ -120,10 +121,10 @@ export default function StatusStrip({
                     mediaCmd("setvol", Number(e.target.value));
                     setTouched((t) => t + 1);
                   }}
-                  aria-label="Phone volume"
+                  aria-label={t("Phone volume")}
                   className="vol-slider min-w-0 flex-1"
                 />
-                <span className="data w-8 shrink-0 text-right text-faint">{volPct}%</span>
+                <span className="data w-8 shrink-0 text-end text-faint">{volPct}%</span>
               </div>
             </div>
           )}
@@ -142,8 +143,8 @@ export default function StatusStrip({
       {phoneSupports(status, "lock") && (
         <button
           onClick={lockPhone}
-          title="Lock phone screen"
-          aria-label="Lock phone screen"
+          title={t("Lock phone screen")}
+          aria-label={t("Lock phone screen")}
           className="on-glass flex h-[26px] w-[26px] items-center justify-center rounded-full text-white/80 transition-colors hover:text-white"
         >
           <Icon name="lock" size={12} strokeWidth={2} />
@@ -153,8 +154,8 @@ export default function StatusStrip({
       {hasTrack && (
         <button
           onClick={onTogglePlayer}
-          title={playerOpen ? "Hide player" : "Show player"}
-          aria-label={playerOpen ? "Hide player" : "Show player"}
+          title={playerOpen ? t("Hide player") : t("Show player")}
+          aria-label={playerOpen ? t("Hide player") : t("Show player")}
           aria-expanded={playerOpen}
           className={`flex h-[26px] w-[26px] items-center justify-center rounded-full transition-colors ${
             playerOpen ? "on-glass-active text-white" : "on-glass text-white/80 hover:text-white"

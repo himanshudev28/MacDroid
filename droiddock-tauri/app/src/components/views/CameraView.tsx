@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import Icon from "../Icon";
 import { mirrorPopout, mirrorFocus, mirrorStop, onMirrorStarted, onMirrorStopped, onMirrorError } from "../../lib/bridge";
+import { t } from "../../lib/i18n";
 
 /// Camera tab (Phase 12/13). Reuses Phase 11's mirror pipeline end-to-end —
 /// `mirror.rs`'s `mirror_popout("camera")` already sends `camera-start{facing:
@@ -47,7 +48,7 @@ export default function CameraView({
     setWifiBusy(true);
     try {
       await mirrorPopout("camera");
-      onToast("info", "Approve the camera on your phone…");
+      onToast("info", t("Approve the camera on your phone…"));
     } catch (e) {
       setWifiBusy(false);
       onToast("bad", String(e));
@@ -62,18 +63,14 @@ export default function CameraView({
             <Icon name="camera" size={20} strokeWidth={1.5} className="text-fg/80" />
           </div>
           <p className="flex items-center justify-center gap-2 font-display text-[15px] font-semibold text-fg">
-            <span className="led h-1.5 w-1.5 rounded-full bg-(--color-link)" />
-            Camera live
+            <span className="led h-1.5 w-1.5 rounded-full bg-(--color-link)" />{t("Camera live")}
           </p>
-          <p className="mt-2 text-[12px] leading-relaxed text-dim">
-            Your phone's camera is streaming in its own window. Flip front/back from there.
+          <p className="mt-2 text-[12px] leading-relaxed text-dim">{t("Your phone's camera is streaming in its own window. Flip front/back from there.")}
           </p>
           <div className="mt-5 flex items-center justify-center gap-2">
-            <button onClick={() => mirrorFocus()} className="btn btn-secondary">
-              Bring to front
+            <button onClick={() => mirrorFocus()} className="btn btn-secondary">{t("Bring to front")}
             </button>
-            <button onClick={() => mirrorStop()} className="btn btn-danger">
-              Stop
+            <button onClick={() => mirrorStop()} className="btn btn-danger">{t("Stop")}
             </button>
           </div>
         </div>
@@ -84,17 +81,17 @@ export default function CameraView({
   return (
     <div className="h-full overflow-y-auto p-6">
       <div className="mx-auto max-w-xl">
-        <h1 className="font-display text-[17px] font-semibold text-fg">Camera</h1>
-        <p className="mt-0.5 text-[12px] text-dim">Use your phone's camera as a live feed on this Mac.</p>
+        <h1 className="font-display text-[17px] font-semibold text-fg">{t("Camera")}</h1>
+        <p className="mt-0.5 text-[12px] text-dim">{t("Use your phone's camera as a live feed on this Mac.")}</p>
 
         <div className="mt-4 space-y-3">
           <LaunchCard
             primary
-            title="Wi-Fi camera"
-            subtitle="Streams the phone's back camera into a pop-out window over Wi-Fi. Flip to the front camera once it's running."
+            title={t("Wi-Fi camera")}
+            subtitle={t("Streams the phone's back camera into a pop-out window over Wi-Fi. Flip to the front camera once it's running.")}
             tag="Wi-Fi"
             live={linked}
-            requirement={linked ? null : "Phone app link required"}
+            requirement={linked ? null : t("Phone app link required")}
             requirementHint="Pair the DroidDock phone app from the Dashboard to stream over Wi-Fi."
             buttonLabel="Start camera"
             buttonBusy={wifiBusy}
@@ -102,15 +99,15 @@ export default function CameraView({
           />
 
           <LaunchCard
-            title="ADB camera"
-            subtitle="Full-quality camera preview over USB or wireless ADB via scrcpy — opens in its own window."
+            title={t("ADB camera")}
+            subtitle={t("Full-quality camera preview over USB or wireless ADB via scrcpy — opens in its own window.")}
             tag="ADB"
             live={!!adbSerial}
-            requirement={adbSerial ? null : "No ADB device connected"}
+            requirement={adbSerial ? null : t("No ADB device connected")}
             requirementHint={
               scrcpyReady
-                ? "Connect a phone via USB or wireless ADB from the Devices tab."
-                : "Install scrcpy first (Devices tab → Tools)."
+                ? t("Connect a phone via USB or wireless ADB from the Devices tab.")
+                : t("Install scrcpy first (Devices tab → Tools).")
             }
             buttonLabel="Stream via ADB"
             onClick={onAdbCamera}
@@ -174,7 +171,7 @@ function LaunchCard({
           className={`btn ${primary ? "btn-primary" : "btn-secondary"} mt-4 w-full`}
         >
           {buttonBusy && <Icon name="reload" size={14} className="spinner" />}
-          {buttonBusy ? "Waiting for the phone…" : buttonLabel}
+          {buttonBusy ? t("Waiting for the phone…") : buttonLabel}
         </button>
       )}
     </div>

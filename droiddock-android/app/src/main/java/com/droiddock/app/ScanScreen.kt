@@ -115,7 +115,7 @@ fun ScanScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = ScanFg)
+                Icon(Icons.Default.ArrowBack, contentDescription = t("Back"), tint = ScanFg)
             }
             Spacer(Modifier.weight(1f))
             Row(
@@ -130,7 +130,7 @@ fun ScanScreen(
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    "DroidDock",
+                    t("DroidDock"),
                     color      = ScanFg,
                     fontSize   = 17.sp,
                     fontWeight = FontWeight.Bold,
@@ -139,7 +139,7 @@ fun ScanScreen(
             }
             Spacer(Modifier.weight(1f))
             IconButton(onClick = onHelp) {
-                Icon(Icons.Default.HelpOutline, contentDescription = "Help",
+                Icon(Icons.Default.HelpOutline, contentDescription = t("Help"),
                     tint = ScanFg.copy(alpha = 0.55f), modifier = Modifier.size(22.dp))
             }
         }
@@ -154,7 +154,7 @@ fun ScanScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                "Scan to Connect",
+                t("Scan to Connect"),
                 color      = ScanFg,
                 fontSize   = 26.sp,
                 fontWeight = FontWeight.Bold,
@@ -182,7 +182,7 @@ fun ScanScreen(
                         PulsingDot()
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            "Looking for QR code",
+                            t("Looking for QR code"),
                             color      = ScanFg,
                             fontSize   = 14.sp,
                             fontWeight = FontWeight.Medium
@@ -200,7 +200,7 @@ fun ScanScreen(
                             modifier           = Modifier.size(14.dp)
                         )
                         Spacer(Modifier.width(6.dp))
-                        Text("Pair manually", color = ScanDim, fontSize = 13.sp)
+                        Text(t("Pair manually"), color = ScanDim, fontSize = 13.sp)
                     }
                 }
             }

@@ -269,6 +269,15 @@ object Prefs {
      * Connect while unpaired or disconnected, Home once linked — so the first
      * screen is always the one with something to do on it.
      */
+    /** Chosen UI language as a BCP-47 tag, or "" to follow the system. See [I18n]. */
+    fun locale(ctx: Context): String =
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString("locale", "") ?: ""
+
+    fun setLocale(ctx: Context, tag: String) {
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
+            .putString("locale", tag).apply()
+    }
+
     fun defaultTab(ctx: Context): String =
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
             .getString("defaultTab", "dynamic") ?: "dynamic"

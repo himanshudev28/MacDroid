@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import Icon from "./Icon";
 import { applySystemAccent } from "../lib/appearance";
 import { onWifiStatus, wifiStatus, type WifiStatus } from "../lib/wifi";
+import { t, useT } from "../lib/i18n";
 import {
   on,
   getAppearance,
@@ -22,6 +23,10 @@ import {
 /// The whole surface is a drag region except the controls, so it moves like a
 /// native floating panel rather than needing a title bar it has no room for.
 export default function StatusWidget() {
+  // Its own window, so it needs its own subscription — a language change in the
+  // main window has to repaint this one too. See App.tsx.
+  useT();
+
   const [status, setStatus] = useState<WifiStatus>({ connected: false, phoneName: null });
   const [info, setInfo] = useState<AppDeviceInfo | null>(null);
   const [media, setMedia] = useState<MediaState | null>(null);
@@ -74,7 +79,7 @@ export default function StatusWidget() {
           }`}
         />
         <span data-tauri-drag-region className="min-w-0 flex-1 truncate text-[12px] font-semibold text-fg">
-          {status.connected ? status.phoneName ?? "Phone" : "Not linked"}
+          {status.connected ? status.phoneName ?? "Phone" : t("Not linked")}
         </span>
         {battery !== null && (
           <span className="shrink-0 text-[12px] font-medium tabular-nums text-fg/85">
@@ -84,7 +89,7 @@ export default function StatusWidget() {
         )}
         <button
           onClick={() => openMainWindow()}
-          title="Open DroidDock"
+          title={t("Open DroidDock")}
           className="btn-icon shrink-0"
         >
           <Icon name="monitor" size={12} />
@@ -115,7 +120,7 @@ export default function StatusWidget() {
             <p className="truncate text-[11.5px] font-medium text-fg">{media.title || "Unknown"}</p>
             <p className="truncate text-[10.5px] text-dim">{media.artist || media.app || ""}</p>
           </div>
-          <button onClick={() => mediaCmd("prev")} className="btn-icon shrink-0" title="Previous">
+          <button onClick={() => mediaCmd("prev")} className="btn-icon shrink-0" title={t("Previous")}>
             <Icon name="skipBack" size={12} fill="currentColor" strokeWidth={0} />
           </button>
           <button
@@ -125,13 +130,13 @@ export default function StatusWidget() {
           >
             <Icon name={media.playing ? "pause" : "play"} size={11} fill="currentColor" strokeWidth={0} />
           </button>
-          <button onClick={() => mediaCmd("next")} className="btn-icon shrink-0" title="Next">
+          <button onClick={() => mediaCmd("next")} className="btn-icon shrink-0" title={t("Next")}>
             <Icon name="skipForward" size={12} fill="currentColor" strokeWidth={0} />
           </button>
         </div>
       ) : (
         <p className="text-[11px] text-faint">
-          {status.connected ? "Nothing playing" : "Open DroidDock to pair"}
+          {status.connected ? t("Nothing playing") : t("Open DroidDock to pair")}
         </p>
       )}
     </div>

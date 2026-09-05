@@ -1,6 +1,7 @@
 import Icon from "../Icon";
 import { fmtDuration } from "../../lib/ui";
 import { mediaCmd, type MediaState } from "../../lib/bridge";
+import { t } from "../../lib/i18n";
 
 /// Now-playing, inline on the phone card. Same `media` push and `media-cmd`
 /// wire calls the full Media tab uses — this is a second surface on the same
@@ -30,7 +31,7 @@ export default function MiniPlayer({ media }: { media: MediaState }) {
             max={media.dur}
             value={pos}
             onChange={(e) => cmd("seek", Number(e.target.value))}
-            aria-label="Seek"
+            aria-label={t("Seek")}
             className="seek-slider seek-on-glass w-full"
           />
           <div className="mt-0.5 flex justify-between text-[9.5px] tabular-nums text-white/45">
@@ -41,7 +42,7 @@ export default function MiniPlayer({ media }: { media: MediaState }) {
       )}
 
       <div className="mt-1.5 flex items-center justify-center gap-4">
-        <GlassCtl label="Previous" onClick={() => cmd("prev")}>
+        <GlassCtl label={t("Previous")} onClick={() => cmd("prev")}>
           <Icon name="skipBack" size={13} fill="currentColor" strokeWidth={0} />
         </GlassCtl>
         <GlassCtl
@@ -51,7 +52,7 @@ export default function MiniPlayer({ media }: { media: MediaState }) {
         >
           <Icon name={media.playing ? "pause" : "play"} size={13} fill="currentColor" strokeWidth={0} />
         </GlassCtl>
-        <GlassCtl label="Next" onClick={() => cmd("next")}>
+        <GlassCtl label={t("Next")} onClick={() => cmd("next")}>
           <Icon name="skipForward" size={13} fill="currentColor" strokeWidth={0} />
         </GlassCtl>
       </div>

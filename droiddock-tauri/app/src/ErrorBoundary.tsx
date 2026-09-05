@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { t } from "./lib/i18n";
 
 interface Props {
   children: ReactNode;
@@ -29,7 +30,7 @@ export default class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
-      const msg = this.state.error?.message ?? "Unknown error";
+      const msg = this.state.error?.message ?? t("Unknown error");
       return (
         <div
           style={{
@@ -58,8 +59,7 @@ export default class ErrorBoundary extends Component<Props, State> {
           >
             <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
           </svg>
-          <h1 style={{ fontSize: "18px", fontWeight: 600, margin: 0 }}>
-            Something went wrong
+          <h1 style={{ fontSize: "18px", fontWeight: 600, margin: 0 }}>{t("Something went wrong")}
           </h1>
           <p
             style={{
@@ -84,8 +84,7 @@ export default class ErrorBoundary extends Component<Props, State> {
               fontSize: "12.5px",
               cursor: "pointer",
             }}
-          >
-            Try again
+          >{t("Try again")}
           </button>
         </div>
       );

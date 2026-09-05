@@ -1,5 +1,6 @@
 import type { QuickShareRequest } from "../lib/bridge";
 import Icon from "./Icon";
+import { t } from "../lib/i18n";
 
 /// Prompt for an incoming Quick Share transfer.
 ///
@@ -30,8 +31,7 @@ export default function QuickShareModal({
               {request.peer} wants to send you {request.files.length}{" "}
               {request.files.length === 1 ? "file" : "files"}
             </h2>
-            <p className="mt-1 text-[12px] leading-relaxed text-dim">
-              Accept only if this code matches the one on the sending device.
+            <p className="mt-1 text-[12px] leading-relaxed text-dim">{t("Accept only if this code matches the one on the sending device.")}
             </p>
           </div>
         </div>
@@ -51,15 +51,13 @@ export default function QuickShareModal({
           ))}
         </ul>
         {request.files.length > 1 && (
-          <p className="mt-2 text-right text-[11px] text-dim">{formatSize(total)} total</p>
+          <p className="mt-2 text-end text-[11px] text-dim">{formatSize(total)} total</p>
         )}
 
         <div className="mt-5 flex justify-end gap-2">
-          <button className="btn-ghost" onClick={() => onRespond(false)}>
-            Decline
+          <button className="btn-ghost" onClick={() => onRespond(false)}>{t("Decline")}
           </button>
-          <button className="btn-primary" onClick={() => onRespond(true)}>
-            Accept
+          <button className="btn-primary" onClick={() => onRespond(true)}>{t("Accept")}
           </button>
         </div>
       </div>

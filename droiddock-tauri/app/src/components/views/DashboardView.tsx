@@ -6,6 +6,7 @@ import { onAppDeviceInfo, type AppDeviceInfo } from "../../lib/bridge";
 import type { ViewId } from "../../lib/nav";
 import LinkPulse from "../LinkPulse";
 import Icon from "../Icon";
+import { t } from "../../lib/i18n";
 
 /// Home. Two states, one motif: the Link. Unpaired, the broken Link frames
 /// the pairing card; linked, the flowing Link crowns the phone's live card.
@@ -60,11 +61,10 @@ export default function DashboardView({ onNavigate }: { onNavigate?: (v: ViewId)
           <div className="card-raised p-7">
             <div className="flex flex-col items-center text-center">
               <LinkPulse linked={false} width={120} />
-              <h1 className="mt-4 font-display text-[19px] font-semibold text-fg">
-                Dock your phone
+              <h1 className="mt-4 font-display text-[19px] font-semibold text-fg">{t("Dock your phone")}
               </h1>
               <p className="mt-1.5 max-w-68 text-[12.5px] leading-relaxed text-dim">
-                Open DroidDock on your Android, tap <span className="font-medium text-fg/80">Pair with Mac</span>,
+                Open DroidDock on your Android, tap <span className="font-medium text-fg/80">{t("Pair with Mac")}</span>,
                 and scan this code. Both devices need the same Wi-Fi network.
               </p>
             </div>
@@ -80,15 +80,14 @@ export default function DashboardView({ onNavigate }: { onNavigate?: (v: ViewId)
                     <div className="h-55 w-55 animate-pulse rounded-2xl bg-panel3" />
                   )}
                 </div>
-                <button onClick={() => setManual(true)} className="btn btn-ghost mt-5 w-full">
-                  Pair with IP address instead
+                <button onClick={() => setManual(true)} className="btn btn-ghost mt-5 w-full">{t("Pair with IP address instead")}
                 </button>
               </>
             ) : (
               <div className="mt-6">
-                <Field label="Address" value={address} copied={copied === "addr"} onCopy={() => copy("addr", address)} />
+                <Field label={t("Address")} value={address} copied={copied === "addr"} onCopy={() => copy("addr", address)} />
                 <Field
-                  label="Token"
+                  label={t("Token")}
                   value={info?.token ?? "—"}
                   copied={copied === "token"}
                   onCopy={() => copy("token", info?.token ?? "")}
@@ -98,8 +97,7 @@ export default function DashboardView({ onNavigate }: { onNavigate?: (v: ViewId)
                     Other IPs: {info.ips.slice(1).join("  ·  ")}
                   </p>
                 )}
-                <button onClick={() => setManual(false)} className="btn btn-ghost mt-4 w-full">
-                  Back to QR code
+                <button onClick={() => setManual(false)} className="btn btn-ghost mt-4 w-full">{t("Back to QR code")}
                 </button>
               </div>
             )}
@@ -130,8 +128,7 @@ function LinkedCard({
             {status.phoneName ?? "Phone"}
           </h1>
           <p className="mt-1 flex items-center gap-1.5 text-[12.5px] font-medium text-(--color-link)">
-            <span className="led h-1.5 w-1.5 rounded-full bg-(--color-link)" />
-            Linked over Wi-Fi
+            <span className="led h-1.5 w-1.5 rounded-full bg-(--color-link)" />{t("Linked over Wi-Fi")}
           </p>
         </div>
 
@@ -139,16 +136,16 @@ function LinkedCard({
           <div className="mt-5 grid grid-cols-2 gap-2">
             {battery !== null && (
               <div className="card px-3.5 py-2.5">
-                <p className="label">Battery</p>
+                <p className="label">{t("Battery")}</p>
                 <p className="mt-0.5 font-display text-[17px] font-semibold text-fg">
                   {battery}%
-                  {device?.charging && <span className="ml-1.5 text-[11px] font-medium text-(--color-link)">charging</span>}
+                  {device?.charging && <span className="ms-1.5 text-[11px] font-medium text-(--color-link)">charging</span>}
                 </p>
               </div>
             )}
             {device?.android && (
               <div className="card px-3.5 py-2.5">
-                <p className="label">Android</p>
+                <p className="label">{t("Android")}</p>
                 <p className="mt-0.5 font-display text-[17px] font-semibold text-fg">{device.android}</p>
               </div>
             )}
@@ -156,9 +153,9 @@ function LinkedCard({
         )}
 
         <div className="mt-5 grid grid-cols-3 gap-2">
-          <QuickAction icon="folder" label="Files" onClick={() => onNavigate?.("files")} />
-          <QuickAction icon="message" label="Messages" onClick={() => onNavigate?.("messages")} />
-          <QuickAction icon="monitor" label="Mirror" onClick={() => onNavigate?.("mirror")} />
+          <QuickAction icon="folder" label={t("Files")} onClick={() => onNavigate?.("files")} />
+          <QuickAction icon="message" label={t("Messages")} onClick={() => onNavigate?.("messages")} />
+          <QuickAction icon="monitor" label={t("Mirror")} onClick={() => onNavigate?.("mirror")} />
         </div>
       </div>
     </div>

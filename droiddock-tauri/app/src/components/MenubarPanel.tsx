@@ -4,6 +4,7 @@ import { applySystemAccent } from "../lib/appearance";
 import { useAppIcon } from "../lib/appIcons";
 import { fmtTime } from "../lib/ui";
 import { onWifiStatus, wifiStatus, type WifiStatus } from "../lib/wifi";
+import { t, useT } from "../lib/i18n";
 import {
   on,
   getConfig,
@@ -36,6 +37,10 @@ import {
 /// Every action here is a second entry point to something that already exists —
 /// nothing is only reachable from the panel.
 export default function MenubarPanel() {
+  // Its own window, so it needs its own subscription — a language change in the
+  // main window has to repaint this one too. See App.tsx.
+  useT();
+
   const [status, setStatus] = useState<WifiStatus>({ connected: false, phoneName: null });
   const [info, setInfo] = useState<AppDeviceInfo | null>(null);
   const [media, setMedia] = useState<MediaState | null>(null);
@@ -141,17 +146,17 @@ export default function MenubarPanel() {
         />
         <div className="min-w-0 flex-1">
           <p className="truncate text-[13px] font-semibold text-fg">
-            {status.connected ? status.phoneName ?? "Phone" : "No phone linked"}
+            {status.connected ? status.phoneName ?? "Phone" : t("No phone linked")}
           </p>
           <p className="truncate text-[11px] text-dim">
             {status.connected
-              ? [battery !== null ? `${battery}%${info?.charging ? " charging" : ""}` : null, "Linked over Wi-Fi"]
+              ? [battery !== null ? `${battery}%${info?.charging ? " charging" : ""}` : null, t("Linked over Wi-Fi")]
                   .filter(Boolean)
                   .join(" · ")
-              : "Open DroidDock to pair"}
+              : t("Open DroidDock to pair")}
           </p>
         </div>
-        <button onClick={() => openMainWindow()} className="btn-icon shrink-0" title="Open DroidDock">
+        <button onClick={() => openMainWindow()} className="btn-icon shrink-0" title={t("Open DroidDock")}>
           <Icon name="monitor" size={14} />
         </button>
       </div>
@@ -164,21 +169,21 @@ export default function MenubarPanel() {
             <div className="min-w-0 flex-1">
               <p className="truncate text-[12px] font-medium text-fg">{call.who}</p>
               <p className="text-[10.5px] text-dim">
-                {call.state === "ringing" ? "Incoming call" : "In call"}
+                {call.state === "ringing" ? t("Incoming call") : t("In call")}
               </p>
             </div>
             {/* ADB-only, same as the main window's overlay: there is no Wi-Fi
                 control message for these, and inventing one would need an
                 Android receive path that doesn't exist. */}
-            <button onClick={() => adbCallMute().catch(() => say("Needs ADB"))} className="btn-icon shrink-0" title="Mute">
+            <button onClick={() => adbCallMute().catch(() => say(t("Needs ADB")))} className="btn-icon shrink-0" title={t("Mute")}>
               <Icon name="micOff" size={13} />
             </button>
-            <button onClick={() => adbCallSpeaker().catch(() => say("Needs ADB"))} className="btn-icon shrink-0" title="Speaker">
+            <button onClick={() => adbCallSpeaker().catch(() => say(t("Needs ADB")))} className="btn-icon shrink-0" title={t("Speaker")}>
               <Icon name="volume" size={13} />
             </button>
             <button
-              onClick={() => adbCallEnd().catch(() => say("Needs ADB"))}
-              title="Hang up"
+              onClick={() => adbCallEnd().catch(() => say(t("Needs ADB")))}
+              title={t("Hang up")}
               className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-(--color-bad) text-white"
             >
               <Icon name="phoneOff" size={12} />
@@ -191,12 +196,12 @@ export default function MenubarPanel() {
       <div className="grid shrink-0 grid-cols-3 gap-1.5 px-3 py-3">
         <PanelAction
           icon="clipboard"
-          label="Clipboard"
+          label={t("Clipboard")}
           disabled={!status.connected}
           onClick={async () => {
             try {
               await clipboardPushNow();
-              say("Clipboard sent");
+              say(t("Clipboard sent"));
             } catch (e) {
               say(String(e));
             }
@@ -209,7 +214,7 @@ export default function MenubarPanel() {
           onClick={async () => {
             try {
               setConfig(await setSetting("nativeNotifs", !bannersOn));
-              say(bannersOn ? "Banners muted" : "Banners on");
+              say(bannersOn ? t("Banners muted") : t("Banners on"));
             } catch (e) {
               say(String(e));
             }
@@ -217,7 +222,7 @@ export default function MenubarPanel() {
         />
         <PanelAction
           icon="folder"
-          label="Files"
+          label={t("Files")}
           onClick={() => openMainWindow()}
         />
       </div>
@@ -244,7 +249,7 @@ export default function MenubarPanel() {
               </div>
             </div>
             <div className="relative mt-2 flex items-center justify-center gap-4">
-              <button onClick={() => mediaCmd("prev")} className="btn-icon" title="Previous">
+              <button onClick={() => mediaCmd("prev")} className="btn-icon" title={t("Previous")}>
                 <Icon name="skipBack" size={14} fill="currentColor" strokeWidth={0} />
               </button>
               <button
@@ -254,7 +259,7 @@ export default function MenubarPanel() {
               >
                 <Icon name={media.playing ? "pause" : "play"} size={13} fill="currentColor" strokeWidth={0} />
               </button>
-              <button onClick={() => mediaCmd("next")} className="btn-icon" title="Next">
+              <button onClick={() => mediaCmd("next")} className="btn-icon" title={t("Next")}>
                 <Icon name="skipForward" size={14} fill="currentColor" strokeWidth={0} />
               </button>
             </div>
@@ -265,16 +270,15 @@ export default function MenubarPanel() {
       {/* Notifications */}
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
         <div className="mb-1.5 flex items-center justify-between px-1">
-          <span className="label">Notifications</span>
+          <span className="label">{t("Notifications")}</span>
           {notifs.length > 0 && (
-            <button onClick={() => setNotifs([])} className="text-[11px] text-dim transition-colors hover:text-fg">
-              Clear
+            <button onClick={() => setNotifs([])} className="text-[11px] text-dim transition-colors hover:text-fg">{t("Clear")}
             </button>
           )}
         </div>
 
         {notifs.length === 0 ? (
-          <p className="px-1 py-6 text-center text-[11.5px] text-faint">Nothing new.</p>
+          <p className="px-1 py-6 text-center text-[11.5px] text-faint">{t("Nothing new.")}</p>
         ) : (
           <div className="card divide-y divide-line overflow-hidden">
             {notifs.map((n) => (
@@ -293,7 +297,7 @@ export default function MenubarPanel() {
                     notifDismiss(n.key);
                     setNotifs((l) => l.filter((x) => x.key !== n.key));
                   }}
-                  title="Dismiss"
+                  title={t("Dismiss")}
                   className="btn-icon shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
                 >
                   <Icon name="x" size={11} />
@@ -307,8 +311,7 @@ export default function MenubarPanel() {
       {/* Footer */}
       <div className="flex shrink-0 items-center gap-2 border-t border-line px-3 py-2">
         <span className="min-w-0 flex-1 truncate text-[11px] text-dim">{flash ?? ""}</span>
-        <button onClick={() => menubarHide()} className="text-[11px] text-dim transition-colors hover:text-fg">
-          Close
+        <button onClick={() => menubarHide()} className="text-[11px] text-dim transition-colors hover:text-fg">{t("Close")}
         </button>
       </div>
     </div>

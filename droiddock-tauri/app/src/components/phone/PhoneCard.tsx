@@ -10,6 +10,7 @@ import LinkPulse from "../LinkPulse";
 import type { WifiStatus } from "../../lib/wifi";
 import { useNowPlaying } from "../../lib/mediaStore";
 import type { AdbDevice, AppDeviceInfo, DroidConfig, LinkQuality } from "../../lib/bridge";
+import { t } from "../../lib/i18n";
 
 /// The phone, as a persistent object you glance at — the app's centre of
 /// gravity, always on screen regardless of which view is open.
@@ -170,17 +171,15 @@ function Unlinked({ onPair }: { onPair: () => void }) {
     <div className="flex h-full flex-col items-center justify-center gap-4 px-5 text-center">
       <LinkPulse linked={false} width={104} />
       <div>
-        <p className="font-display text-[14px] font-semibold text-white/90">No phone linked</p>
-        <p className="mx-auto mt-1 max-w-45 text-[11.5px] leading-relaxed text-white/55">
-          Scan the pairing code from the DroidDock app on your Android.
+        <p className="font-display text-[14px] font-semibold text-white/90">{t("No phone linked")}</p>
+        <p className="mx-auto mt-1 max-w-45 text-[11.5px] leading-relaxed text-white/55">{t("Scan the pairing code from the DroidDock app on your Android.")}
         </p>
       </div>
       <button
         onClick={onPair}
         className="on-glass-active flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium text-white transition-colors"
       >
-        <Icon name="qrcode" size={13} strokeWidth={1.9} />
-        Pair a phone
+        <Icon name="qrcode" size={13} strokeWidth={1.9} />{t("Pair a phone")}
       </button>
     </div>
   );

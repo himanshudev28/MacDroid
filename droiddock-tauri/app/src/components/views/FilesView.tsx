@@ -4,6 +4,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import Icon from "../Icon";
 import EmptyState from "../EmptyState";
 import { fmtBytes } from "../../lib/ui";
+import { t, useT } from "../../lib/i18n";
 import {
   fsList,
   fsPull,
@@ -28,6 +29,9 @@ function FilesView({
   linked: boolean;
   onToast: (kind: "ok" | "bad" | "info", text: string) => void;
 }) {
+  // Memoised: its props do not change when only the language does, so without
+  // its own subscription it would keep rendering the old strings.
+  useT();
   const [path, setPath] = useState(ROOT);
   const [entries, setEntries] = useState<FsEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -229,8 +233,8 @@ function FilesView({
     return (
       <EmptyState
         icon="folder"
-        title="No phone linked"
-        body="Link your phone from the Dashboard to browse and transfer its files."
+        title={t("No phone linked")}
+        body={t("Link your phone from the Dashboard to browse and transfer its files.")}
       />
     );
   }
@@ -243,14 +247,13 @@ function FilesView({
     <div className="flex h-full flex-col">
       {/* header */}
       <div className="flex shrink-0 items-center justify-between gap-3 px-6 pt-5 pb-4">
-        <h1 className="font-display text-[17px] font-semibold text-fg">Files</h1>
+        <h1 className="font-display text-[17px] font-semibold text-fg">{t("Files")}</h1>
         <div className="flex items-center gap-2">
-          <button onClick={() => load(path)} title="Refresh" className="btn-icon">
+          <button onClick={() => load(path)} title={t("Refresh")} className="btn-icon">
             <Icon name="reload" size={14} className={loading ? "spinner" : ""} />
           </button>
           <button onClick={pickAndUpload} className="btn btn-primary">
-            <Icon name="upload" size={14} />
-            Send to phone
+            <Icon name="upload" size={14} />{t("Send to phone")}
           </button>
         </div>
       </div>
@@ -260,7 +263,7 @@ function FilesView({
         <button
           onClick={() => setPath((p) => p.split("/").slice(0, -1).join("/") || "/")}
           disabled={crumbs.length <= 1}
-          title="Up one level"
+          title={t("Up one level")}
           className="btn-icon shrink-0 disabled:opacity-30"
         >
           <Icon name="chevronUp" size={14} />
@@ -275,7 +278,7 @@ function FilesView({
                   i === crumbs.length - 1 ? "font-medium text-fg" : "text-dim hover:text-fg"
                 }`}
               >
-                {i === 0 && c === "sdcard" ? "Internal storage" : c}
+                {i === 0 && c === "sdcard" ? t("Internal storage") : c}
               </button>
             </span>
           ))}
@@ -284,14 +287,14 @@ function FilesView({
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Filter this folder…"
+            placeholder={t("Filter this folder…")}
             className="field w-56"
           />
           {query && (
             <button
               onClick={() => setQuery("")}
-              title="Clear filter"
-              className="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-faint transition-colors hover:text-fg"
+              title={t("Clear filter")}
+              className="absolute end-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-faint transition-colors hover:text-fg"
             >
               <Icon name="x" size={12} />
             </button>
@@ -315,7 +318,7 @@ function FilesView({
                 style={{ width: `${prog.total ? Math.round((prog.sent / prog.total) * 100) : 0}%` }}
               />
             </div>
-            <button onClick={() => fsCancel(prog.transferId)} title="Cancel transfer" className="btn-icon shrink-0">
+            <button onClick={() => fsCancel(prog.transferId)} title={t("Cancel transfer")} className="btn-icon shrink-0">
               <Icon name="x" size={13} />
             </button>
           </div>
@@ -339,7 +342,7 @@ function FilesView({
           </div>
         ) : entries.length === 0 && !loading ? (
           <div className="card rise-fast px-6 py-10 text-center">
-            <p className="text-[12.5px] text-dim">This folder is empty.</p>
+            <p className="text-[12.5px] text-dim">{t("This folder is empty.")}</p>
           </div>
         ) : shown.length === 0 ? (
           <div className="card rise-fast px-6 py-10 text-center">
@@ -450,7 +453,7 @@ const Row = memo(function Row({
       <div className="flex shrink-0 items-center gap-0.5">
         {pendingSync && !editing && (
           <span
-            title="Edited on Mac — waiting to sync back to phone"
+            title={t("Edited on Mac — waiting to sync back to phone")}
             className="flex h-7 w-7 shrink-0 items-center justify-center text-(--color-accent)"
           >
             <Icon name="reload" size={13} className="spinner" />
@@ -459,7 +462,7 @@ const Row = memo(function Row({
         {editing ? (
           <button
             onClick={commit}
-            title="Rename"
+            title={t("Rename")}
             className="flex h-7 w-7 items-center justify-center rounded-lg text-ok transition-colors hover:bg-panel3"
           >
             <Icon name="check" size={14} />
@@ -473,7 +476,7 @@ const Row = memo(function Row({
                   onDownload(entry);
                 }}
                 disabled={busy}
-                title="Save to Mac Downloads"
+                title={t("Save to Mac Downloads")}
                 className="btn-icon opacity-0 transition-opacity group-hover:opacity-100 disabled:opacity-100"
               >
                 <Icon name="download" size={14} className={busy ? "spinner text-(--color-accent)" : ""} />
@@ -481,7 +484,7 @@ const Row = memo(function Row({
             )}
             <button
               onClick={startEdit}
-              title="Rename"
+              title={t("Rename")}
               className="btn-icon opacity-0 transition-opacity group-hover:opacity-100"
             >
               <Icon name="edit" size={14} />
@@ -491,7 +494,7 @@ const Row = memo(function Row({
                 ev.stopPropagation();
                 onDelete(entry);
               }}
-              title="Delete from phone"
+              title={t("Delete from phone")}
               className="flex h-7 w-7 items-center justify-center rounded-lg text-dim opacity-0 transition-all hover:bg-[color-mix(in_srgb,var(--color-bad)_12%,transparent)] hover:text-bad group-hover:opacity-100"
             >
               <Icon name="trash" size={14} />

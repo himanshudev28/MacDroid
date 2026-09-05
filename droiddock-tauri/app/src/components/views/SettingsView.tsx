@@ -1,6 +1,7 @@
 import { useEffect, useState, memo } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import Icon from "../Icon";
+import { LOCALES, localeChoice, setLocale, t, useT } from "../../lib/i18n";
 import {
   getAccentSource,
   getClockStyle,
@@ -63,9 +64,9 @@ type CategoryId = "connection" | "mirroring" | "menubar" | "photos" | "macfiles"
 const CATEGORIES: { id: CategoryId; label: string; icon: string }[] = [
   { id: "connection", label: "Connection", icon: "wifi" },
   { id: "mirroring", label: "Mirroring", icon: "monitor" },
-  { id: "menubar", label: "Menu bar", icon: "squareStack" },
-  { id: "photos", label: "Photo sync", icon: "image" },
-  { id: "macfiles", label: "Mac files", icon: "folder" },
+  { id: "menubar", label: t("Menu bar"), icon: "squareStack" },
+  { id: "photos", label: t("Photo sync"), icon: "image" },
+  { id: "macfiles", label: t("Mac files"), icon: "folder" },
   { id: "system", label: "System", icon: "terminal" },
   { id: "appearance", label: "Appearance", icon: "monitor" },
   { id: "about", label: "About", icon: "info" },
@@ -103,7 +104,14 @@ function SettingsView({
   /// a user who follows the rail badge here sees the result immediately, rather
   /// than having to press Check to be told what the badge already told them.
   updateAvailable: UpdateInfo | null;
+  /// Opens the setup check. It lives in `App` rather than here because the same
+  /// panel is reached from the strip under the header, and two copies of it
+  /// polling the phone independently would double the traffic for nothing.
+  onOpenHealth: () => void;
 }) {
+  // Memoised: its props do not change when only the language does, so without
+  // its own subscription it would keep rendering the old strings.
+  useT();
   const [name, setName] = useState(config?.deviceName ?? "");
   const [autostart, setAutostart] = useState(false);
   const [axTrusted, setAxTrusted] = useState(true);
@@ -299,7 +307,7 @@ function SettingsView({
       await updateInstall();
       // Reached only if the relaunch didn't happen. Say so rather than sitting
       // on a full progress bar forever.
-      setUpdate({ kind: "error", message: "The update installed but the app didn't relaunch. Quit and reopen DroidDock." });
+      setUpdate({ kind: "error", message: t("The update installed but the app didn't relaunch. Quit and reopen DroidDock.") });
     } catch (e) {
       setUpdate({ kind: "error", message: String(e) });
       onToast("bad", `Update failed — ${String(e)}`);
@@ -321,21 +329,21 @@ function SettingsView({
   };
 
   if (!config) {
-    return <div className="p-8 text-[12px] text-dim">Loading settings…</div>;
+    return <div className="p-8 text-[12px] text-dim">{t("Loading settings…")}</div>;
   }
 
   return (
     <div className="flex h-full min-h-0">
       {/* Category list — the AirSync settings shape, replacing one long
           scrolling page. */}
-      <div className="w-36 shrink-0 overflow-y-auto border-r border-line px-2 py-4" role="tablist">
+      <div className="w-36 shrink-0 overflow-y-auto border-e border-line px-2 py-4" role="tablist">
         {CATEGORIES.map((c) => (
           <button
             key={c.id}
             onClick={() => setTab(c.id)}
             role="tab"
             aria-selected={tab === c.id}
-            className={`flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-1.5 text-left transition-colors ${
+            className={`flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-1.5 text-start transition-colors ${
               tab === c.id
                 ? "bg-[color-mix(in_srgb,var(--color-accent)_14%,transparent)] text-fg"
                 : "text-dim hover:bg-[color-mix(in_srgb,var(--color-fg)_6%,transparent)] hover:text-fg"
@@ -353,42 +361,42 @@ function SettingsView({
         </h1>
 
         {tab === "connection" && (
-          <Section icon="wifi" title="Connection">
-            <Field label="Device name" hint="Shown on your phone as the Mac's name">
+          <Section icon="wifi" title={t("Connection")}>
+            <Field label={t("Device name")} hint={t("Shown on your phone as the Mac's name")}>
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 onBlur={() => name.trim() !== (config.deviceName ?? "") && set("deviceName", name.trim())}
                 onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
-                placeholder={config.deviceName ?? "This Mac"}
-                className="field w-48 text-right"
+                placeholder={config.deviceName ?? t("This Mac")}
+                className="field w-48 text-end"
               />
             </Field>
             <Toggle
-              label="Clipboard sync"
-              hint="Share copied text both ways. Off stops all clipboard traffic."
+              label={t("Clipboard sync")}
+              hint={t("Share what you copy both ways. Text syncs in both directions on its own; images sync Mac → phone automatically, but the phone can only send one when you ask it to — Android refuses background clipboard reads, and unlike text there is no accessibility event carrying the picture. Off stops all clipboard traffic.")}
               on={config.clipboardSync}
               onChange={(v) => set("clipboardSync", v)}
             />
             <Toggle
-              label="Phone notifications"
-              hint="Show your phone's notifications on the Mac"
+              label={t("Phone notifications")}
+              hint={t("Show your phone's notifications on the Mac")}
               on={config.notifications}
               onChange={(v) => set("notifications", v)}
             />
             <Toggle
-              label="Show on Mac (native banners)"
-              hint="Also raise a macOS pop-up for each notification"
+              label={t("Show on Mac (native banners)")}
+              hint={t("Also raise a macOS pop-up for each notification")}
               on={config.nativeNotifs}
               onChange={(v) => set("nativeNotifs", v)}
             />
             <Toggle
-              label="Low battery alerts"
+              label={t("Low battery alerts")}
               hint={`Raise a banner when the phone drops below ${config.lowBatteryPct}% while off the charger. Fires once per discharge, not once per update.`}
               on={config.lowBatteryAlert}
               onChange={(v) => set("lowBatteryAlert", v)}
             />
-            <Field label="Alert threshold" hint="Percentage the phone has to fall below.">
+            <Field label={t("Alert threshold")} hint={t("Percentage the phone has to fall below.")}>
               <div className="flex items-center gap-3">
                 <input
                   type="range"
@@ -397,15 +405,15 @@ function SettingsView({
                   step={5}
                   value={config.lowBatteryPct}
                   onChange={(e) => set("lowBatteryPct", Number(e.target.value))}
-                  aria-label="Low battery threshold"
+                  aria-label={t("Low battery threshold")}
                   className="vol-slider w-32"
                 />
-                <span className="data w-9 shrink-0 text-right text-dim">{config.lowBatteryPct}%</span>
+                <span className="data w-9 shrink-0 text-end text-dim">{config.lowBatteryPct}%</span>
               </div>
             </Field>
             <Toggle
-              label="Encrypt the link"
-              hint="AES-256-GCM on everything after pairing — clipboard, notifications, messages, contacts, calls, and now file transfers, thumbnails and screen mirroring too. Keyed off your pairing code. Each half needs a phone app new enough to support it; whatever isn't supported quietly stays as it was rather than failing."
+              label={t("Encrypt the link")}
+              hint={t("AES-256-GCM on everything after pairing — clipboard, notifications, messages, contacts, calls, and now file transfers, thumbnails and screen mirroring too. Keyed off your pairing code. Each half needs a phone app new enough to support it; whatever isn't supported quietly stays as it was rather than failing.")}
               on={config.encryptLink}
               onChange={(v) => set("encryptLink", v)}
             />
@@ -413,10 +421,10 @@ function SettingsView({
         )}
 
         {tab === "mirroring" && (
-          <Section icon="monitor" title="Mirroring">
+          <Section icon="monitor" title={t("Mirroring")}>
             <Field
-              label="Start with"
-              hint="Which mirror the Mirror tab's primary button launches. Wi-Fi needs no ADB; the others need scrcpy."
+              label={t("Start with")}
+              hint={t("Which mirror the Mirror tab's primary button launches. Wi-Fi needs no ADB; the others need scrcpy.")}
             >
               <Choice
                 value={config.defaultMirrorMode}
@@ -429,8 +437,8 @@ function SettingsView({
               />
             </Field>
             <Field
-              label="Desktop display size"
-              hint="Virtual display for desktop mode. “Auto” derives a landscape size from this Mac's screen — a phone left to choose picks its own portrait shape."
+              label={t("Desktop display size")}
+              hint={t("Virtual display for desktop mode. “Auto” derives a landscape size from this Mac's screen — a phone left to choose picks its own portrait shape.")}
             >
               <Choice
                 value={config.desktopDisplaySize}
@@ -449,8 +457,8 @@ function SettingsView({
                 magnified phone. Also surfaced on the Mirror tab, because it is
                 the one people flip per-app. */}
             <Field
-              label="Window layout"
-              hint="Which layout Android serves on a virtual display. “Phone” keeps the device's own density, which is how this behaved before the setting existed."
+              label={t("Window layout")}
+              hint={t("Which layout Android serves on a virtual display. “Phone” keeps the device's own density, which is how this behaved before the setting existed.")}
             >
               <Choice
                 value={config.desktopUiMode}
@@ -463,8 +471,8 @@ function SettingsView({
               />
             </Field>
             <Toggle
-              label="Resize display with the window"
-              hint="scrcpy's flex display — dragging the window edge resizes the Android display itself instead of scaling a fixed one. Needs scrcpy 4.0 or newer; ignored on older builds."
+              label={t("Resize display with the window")}
+              hint={t("scrcpy's flex display — dragging the window edge resizes the Android display itself instead of scaling a fixed one. Needs scrcpy 4.0 or newer; ignored on older builds.")}
               on={config.desktopFlex}
               onChange={(v) => set("desktopFlex", v)}
             />
@@ -473,20 +481,20 @@ function SettingsView({
                 phone" and "open a virtual-display window", and every knob that
                 shapes that window is the next three rows down. */}
             <Toggle
-              label="Open apps on this Mac"
-              hint="Clicking an app in the Apps tab opens it in its own Mac window instead of launching it on the phone. Needs ADB and scrcpy; without a connected device the click falls back to the phone. Hold Option to do the other one."
+              label={t("Open apps on this Mac")}
+              hint={t("Clicking an app in the Apps tab opens it in its own Mac window instead of launching it on the phone. Needs ADB and scrcpy; without a connected device the click falls back to the phone. Hold Option to do the other one.")}
               on={config.openAppsOnMac}
               onChange={(v) => set("openAppsOnMac", v)}
             />
             <Toggle
-              label="Show Android bars in app windows"
-              hint="Keeps the virtual display's launcher, status and nav bars around a single app opened on this Mac. Off makes the window read as that app rather than a phone screen."
+              label={t("Show Android bars in app windows")}
+              hint={t("Keeps the virtual display's launcher, status and nav bars around a single app opened on this Mac. Off makes the window read as that app rather than a phone screen.")}
               on={config.appWindowChrome}
               onChange={(v) => set("appWindowChrome", v)}
             />
             <Toggle
-              label="Keep apps running when the window closes"
-              hint="Hands the app back to the phone's own screen instead of killing it. Needs scrcpy 3.1 or newer."
+              label={t("Keep apps running when the window closes")}
+              hint={t("Hands the app back to the phone's own screen instead of killing it. Needs scrcpy 3.1 or newer.")}
               on={config.appWindowKeepAlive}
               onChange={(v) => set("appWindowKeepAlive", v)}
             />
@@ -497,8 +505,8 @@ function SettingsView({
                 phone, scrcpy's own 8 Mbps default — neither of which anyone
                 chose for a LAN. */}
             <Field
-              label="Quality"
-              hint="Video bit rate for both Wi-Fi and ADB mirroring. Higher is sharper and uses more Wi-Fi; drop it if the mirror stutters on a busy network."
+              label={t("Quality")}
+              hint={t("Video bit rate for both Wi-Fi and ADB mirroring. Higher is sharper and uses more Wi-Fi; drop it if the mirror stutters on a busy network.")}
             >
               <div className="flex items-center gap-3">
                 <input
@@ -508,17 +516,17 @@ function SettingsView({
                   step={1}
                   value={config.mirrorBitrateMbps}
                   onChange={(e) => set("mirrorBitrateMbps", Number(e.target.value))}
-                  aria-label="Mirror bit rate"
+                  aria-label={t("Mirror bit rate")}
                   className="vol-slider w-32"
                 />
-                <span className="data w-12 shrink-0 text-right text-dim">
+                <span className="data w-12 shrink-0 text-end text-dim">
                   {config.mirrorBitrateMbps} Mb
                 </span>
               </div>
             </Field>
             <Field
-              label="Frame rate"
-              hint="60 feels smooth; 30 halves the bandwidth and is fine for reading."
+              label={t("Frame rate")}
+              hint={t("60 feels smooth; 30 halves the bandwidth and is fine for reading.")}
             >
               <Choice
                 value={String(config.mirrorFps)}
@@ -532,8 +540,8 @@ function SettingsView({
               />
             </Field>
             <Field
-              label="Resolution cap"
-              hint="Longest edge of the streamed image. The single biggest bandwidth lever — “Phone” sends the device's own resolution."
+              label={t("Resolution cap")}
+              hint={t("Longest edge of the streamed image. The single biggest bandwidth lever — “Phone” sends the device's own resolution.")}
             >
               <Choice
                 value={String(config.mirrorMaxSize)}
@@ -551,8 +559,8 @@ function SettingsView({
                 encoder, this Mac by never asking when its decoder says no — so
                 neither setting can produce a stream that fails to play. */}
             <Field
-              label="Video codec"
-              hint="H.265 roughly halves the bandwidth at the same quality. Used on both the Wi-Fi and ADB paths, and falls back to H.264 on its own if either the phone can't encode it or this Mac can't decode it."
+              label={t("Video codec")}
+              hint={t("H.265 roughly halves the bandwidth at the same quality. Used on both the Wi-Fi and ADB paths, and falls back to H.264 on its own if either the phone can't encode it or this Mac can't decode it.")}
             >
               <Choice
                 value={config.mirrorCodec}
@@ -564,8 +572,8 @@ function SettingsView({
               />
             </Field>
             <Toggle
-              label="Phone audio"
-              hint="Play the phone's audio through this Mac while mirroring. Over Wi-Fi it needs Android 10+ and the microphone permission, because Android routes captured playback through the same API. Apps that opt out of capture — most paid music and video apps — come through silent."
+              label={t("Phone audio")}
+              hint={t("Play the phone's audio through this Mac while mirroring. Over Wi-Fi it needs Android 10+ and the microphone permission, because Android routes captured playback through the same API. Apps that opt out of capture — most paid music and video apps — come through silent.")}
               on={config.mirrorAudio}
               onChange={(v) => set("mirrorAudio", v)}
             />
@@ -573,26 +581,26 @@ function SettingsView({
                 unless switched on, so a config that predates them behaves
                 exactly as it did. */}
             <Toggle
-              label="Low-level keyboard"
-              hint="Sends keystrokes as a virtual USB keyboard, which fixes non-Latin layouts and games. Changes how every key reaches the phone, so it's off by default. Needs scrcpy 2.4 or newer."
+              label={t("Low-level keyboard")}
+              hint={t("Sends keystrokes as a virtual USB keyboard, which fixes non-Latin layouts and games. Changes how every key reaches the phone, so it's off by default. Needs scrcpy 2.4 or newer.")}
               on={config.scrcpyUhid}
               onChange={(v) => set("scrcpyUhid", v)}
             />
             <Toggle
-              label="Keep the phone awake"
-              hint="Stops the phone's screen timing out while it's mirroring."
+              label={t("Keep the phone awake")}
+              hint={t("Stops the phone's screen timing out while it's mirroring.")}
               on={config.scrcpyStayAwake}
               onChange={(v) => set("scrcpyStayAwake", v)}
             />
             <Toggle
-              label="Blank the phone screen"
-              hint="Turns the phone's own display off while mirroring — the phone still responds, it just isn't showing anything."
+              label={t("Blank the phone screen")}
+              hint={t("Turns the phone's own display off while mirroring — the phone still responds, it just isn't showing anything.")}
               on={config.scrcpyTurnScreenOff}
               onChange={(v) => set("scrcpyTurnScreenOff", v)}
             />
             <Toggle
-              label="Float mirror windows on top"
-              hint="Keeps scrcpy windows above other Mac windows."
+              label={t("Float mirror windows on top")}
+              hint={t("Keeps scrcpy windows above other Mac windows.")}
               on={config.scrcpyAlwaysOnTop}
               onChange={(v) => set("scrcpyAlwaysOnTop", v)}
             />
@@ -600,40 +608,39 @@ function SettingsView({
             <FreeformCard />
 
             <Field
-              label="Reset quality"
-              hint="Back to 12 Mb · 60 fps · phone resolution — the defaults these ship with."
+              label={t("Reset quality")}
+              hint={t("Back to 12 Mb · 60 fps · phone resolution — the defaults these ship with.")}
             >
               <button
                 onClick={async () => {
                   await set("mirrorBitrateMbps", 12);
                   await set("mirrorFps", 60);
                   await set("mirrorMaxSize", 0);
-                  onToast("ok", "Mirror quality reset to defaults");
+                  onToast("ok", t("Mirror quality reset to defaults"));
                 }}
                 className="btn btn-secondary"
-              >
-                Reset
+              >{t("Reset")}
               </button>
             </Field>
           </Section>
         )}
 
         {tab === "menubar" && (
-          <Section icon="squareStack" title="Menu bar">
-            <Field label="Show beside the icon" hint="What the menu bar displays while a phone is linked.">
+          <Section icon="squareStack" title={t("Menu bar")}>
+            <Field label={t("Show beside the icon")} hint={t("What the menu bar displays while a phone is linked.")}>
               <Choice
                 value={config.menubarText}
                 onChange={(v) => set("menubarText", v)}
                 options={[
                   ["none", "Nothing"],
                   ["battery", "Battery"],
-                  ["media", "Now playing"],
-                  ["device", "Phone name"],
+                  ["media", t("Now playing")],
+                  ["device", t("Phone name")],
                 ]}
               />
             </Field>
             {config.menubarText === "battery" && (
-              <Field label="Battery style" hint="How the reading is drawn.">
+              <Field label={t("Battery style")} hint={t("How the reading is drawn.")}>
                 <Choice
                   value={config.menubarBatteryStyle}
                   onChange={(v) => set("menubarBatteryStyle", v)}
@@ -647,8 +654,8 @@ function SettingsView({
             )}
             {config.menubarText === "media" && (
               <Field
-                label="Maximum width"
-                hint="macOS gives no way to set the menu-bar font size from here, so this caps the text length instead — which is what controls how much menu bar DroidDock takes up."
+                label={t("Maximum width")}
+                hint={t("macOS gives no way to set the menu-bar font size from here, so this caps the text length instead — which is what controls how much menu bar DroidDock takes up.")}
               >
                 <div className="flex items-center gap-3">
                   <input
@@ -658,16 +665,16 @@ function SettingsView({
                     step={2}
                     value={config.menubarMaxLen}
                     onChange={(e) => set("menubarMaxLen", Number(e.target.value))}
-                    aria-label="Menu bar text length"
+                    aria-label={t("Menu bar text length")}
                     className="vol-slider w-32"
                   />
-                  <span className="data w-16 shrink-0 text-right text-dim">
+                  <span className="data w-16 shrink-0 text-end text-dim">
                     {config.menubarMaxLen} chars
                   </span>
                 </div>
               </Field>
             )}
-            <Field label="Album art in the panel" hint="How cover art appears in the menu-bar panel's now-playing card.">
+            <Field label={t("Album art in the panel")} hint={t("How cover art appears in the menu-bar panel's now-playing card.")}>
               <Choice
                 value={config.menubarAlbumArt}
                 onChange={(v) => set("menubarAlbumArt", v)}
@@ -679,8 +686,8 @@ function SettingsView({
               />
             </Field>
             <Toggle
-              label="Floating status widget"
-              hint="A small always-on-top panel with battery and now-playing that you can park anywhere. Not a macOS Widget — those need a Swift extension a Tauri app can't ship — but it's the same glanceable readout."
+              label={t("Floating status widget")}
+              hint={t("A small always-on-top panel with battery and now-playing that you can park anywhere. Not a macOS Widget — those need a Swift extension a Tauri app can't ship — but it's the same glanceable readout.")}
               on={config.widgetEnabled}
               onChange={async (v) => {
                 try {
@@ -695,26 +702,25 @@ function SettingsView({
         )}
 
         {tab === "photos" && (
-          <Section icon="image" title="Photo sync">
+          <Section icon="image" title={t("Photo sync")}>
             <Toggle
-              label="Auto-sync new photos & videos"
-              hint="New shots on the phone land in the destination folder below, automatically"
+              label={t("Auto-sync new photos & videos")}
+              hint={t("New shots on the phone land in the destination folder below, automatically")}
               on={config.photoSyncEnabled}
               onChange={(v) => set("photoSyncEnabled", v)}
             />
-            <Field label="Destination" hint={config.photoSyncDest ?? "~/Pictures/DroidDock (default)"}>
-              <button onClick={pickDest} className="btn btn-secondary">
-                Choose…
+            <Field label={t("Destination")} hint={config.photoSyncDest ?? "~/Pictures/DroidDock (default)"}>
+              <button onClick={pickDest} className="btn btn-secondary">{t("Choose…")}
               </button>
             </Field>
             <Field
-              label="Back-fill existing library"
+              label={t("Back-fill existing library")}
               hint={
                 syncProg
                   ? syncProg.total > 0
                     ? `Syncing ${syncProg.done}/${syncProg.total}${syncProg.name ? ` — ${syncProg.name}` : ""}`
-                    : "Checking phone library…"
-                  : "Pull everything already on the phone, not just new items going forward"
+                    : t("Checking phone library…")
+                  : t("Pull everything already on the phone, not just new items going forward")
               }
             >
               <button onClick={backfill} disabled={backfilling} className="btn btn-secondary">
@@ -726,37 +732,39 @@ function SettingsView({
         )}
 
         {tab === "macfiles" && (
-          <Section icon="folder" title="Mac files">
+          <Section icon="folder" title={t("Mac files")}>
             <Toggle
-              label="Let the phone browse these folders"
-              hint="Adds a “Mac Files” tab to the phone app for the folders listed below. Off by default; while off, the phone doesn't show the tab at all. Also muted while DroidDock is paused."
+              label={t("Let the phone browse these folders")}
+              hint={t("Adds a “Mac Files” tab to the phone app for the folders listed below. Off by default; while off, the phone doesn't show the tab at all. Also muted while DroidDock is paused.")}
               on={config.macFsEnabled}
               onChange={(v) => set("macFsEnabled", v)}
             />
             {(config.macFsRoots ?? []).map((root) => (
               <Field key={root} label={root} mono>
-                <button onClick={() => removeMacFsRoot(root)} className="btn btn-danger">
-                  Remove
+                <button onClick={() => removeMacFsRoot(root)} className="btn btn-danger">{t("Remove")}
                 </button>
               </Field>
             ))}
             <Field
-              label="Add folder"
-              hint="Folders the phone's Mac Files tab may browse and pull from. Nothing outside this list is ever reachable."
+              label={t("Add folder")}
+              hint={t("Folders the phone's Mac Files tab may browse and pull from. Nothing outside this list is ever reachable.")}
             >
-              <button onClick={addMacFsRoot} className="btn btn-secondary">
-                Choose…
+              <button onClick={addMacFsRoot} className="btn btn-secondary">{t("Choose…")}
               </button>
             </Field>
-            <PhoneVolumeCard linked={linked} />
+            <PhoneVolumeCard
+              linked={linked}
+              writable={config.webdavWritable ?? false}
+              onWritable={(v) => set("webdavWritable", v)}
+            />
           </Section>
         )}
 
         {tab === "macfiles" && (
-          <Section icon="download" title="Quick Share">
+          <Section icon="download" title={t("Quick Share")}>
             <Toggle
-              label="Receive files from nearby devices"
-              hint="Makes this Mac appear in the Quick Share sheet on any nearby Android, ChromeOS or Windows device — no DroidDock needed on the sender. Every transfer still has to be accepted here, and the code shown must match the sender's. Off by default: Quick Share's “contacts only” mode needs Google account access this app doesn't have, so while it's on, this Mac is visible to everyone on the network."
+              label={t("Receive files from nearby devices")}
+              hint={t("Makes this Mac appear in the Quick Share sheet on any nearby Android, ChromeOS or Windows device — no DroidDock needed on the sender. Every transfer still has to be accepted here, and the code shown must match the sender's. Off by default: Quick Share's “contacts only” mode needs Google account access this app doesn't have, so while it's on, this Mac is visible to everyone on the network.")}
               on={config.quickShareEnabled}
               onChange={(v) => set("quickShareEnabled", v)}
             />
@@ -764,16 +772,26 @@ function SettingsView({
         )}
 
         {tab === "system" && (
-          <Section icon="terminal" title="System">
+          <Section icon="terminal" title={t("System")}>
+            {/* Deliberately the first row in System. Everything below it is a
+                switch that assumes the permissions underneath it are in place,
+                and when they aren't, each one fails without saying so. */}
+            <Field
+              label={t("Setup check")}
+              hint={t("Every permission both devices need, what breaks without each, and a button that opens the screen to grant it.")}
+            >
+              <button onClick={onOpenHealth} className="btn btn-secondary">{t("Check now")}
+              </button>
+            </Field>
             <Toggle
-              label="Launch at login"
-              hint="Start DroidDock automatically when you log in"
+              label={t("Launch at login")}
+              hint={t("Start DroidDock automatically when you log in")}
               on={autostart}
               onChange={toggleAutostart}
             />
             <Toggle
-              label="Let the phone control this Mac"
-              hint="Adds a trackpad, keyboard, media controls, lock, screensaver, brightness and volume to the phone app. Needs macOS Accessibility permission — see below. Anyone holding your paired phone gets this, so leave it off unless you want it."
+              label={t("Let the phone control this Mac")}
+              hint={t("Adds a trackpad, keyboard, media controls, lock, screensaver, brightness and volume to the phone app. Needs macOS Accessibility permission — see below. Anyone holding your paired phone gets this, so leave it off unless you want it.")}
               on={config.remoteControl}
               onChange={(v) => set("remoteControl", v)}
             />
@@ -781,19 +799,19 @@ function SettingsView({
               <div className="ax-warn">
                 <Icon name="alert-triangle" />
                 <div>
-                  <strong>macOS is ignoring DroidDock's input</strong>
+                  <strong>{t("macOS is ignoring DroidDock's input")}</strong>
                   <p>
                     Until DroidDock holds Accessibility permission, macOS
                     discards every synthesised click and keystroke without an
                     error, so remote control just appears to do nothing.
                   </p>
                   <p>
-                    <strong>If DroidDock already looks ticked</strong> in Privacy
+                    <strong>{t("If DroidDock already looks ticked")}</strong> in Privacy
                     &amp; Security → Accessibility, the tick is stale. macOS
                     stores the permission against a signature of the exact app
                     binary, and every DroidDock update replaces that binary — the
                     row survives the update, the permission doesn't.{" "}
-                    <em>Reset permission</em> deletes the stale row and asks
+                    <em>{t("Reset permission")}</em> deletes the stale row and asks
                     again for the copy you're running; tick DroidDock when macOS
                     prompts.
                   </p>
@@ -803,10 +821,9 @@ function SettingsView({
                     onClick={() => {
                       accessibilityReset().catch(() => {});
                     }}
-                  >
-                    Reset permission
+                  >{t("Reset permission")}
                   </button>
-                  <button onClick={() => openAccessibilitySettings()}>Open Settings</button>
+                  <button onClick={() => openAccessibilitySettings()}>{t("Open Settings")}</button>
                 </div>
               </div>
             )}
@@ -814,7 +831,7 @@ function SettingsView({
               <div className="ax-warn">
                 <Icon name="alert-triangle" />
                 <div>
-                  <strong>DroidDock is assigned to every desktop</strong>
+                  <strong>{t("DroidDock is assigned to every desktop")}</strong>
                   <p>
                     The window server has this window on more than one desktop,
                     which is why it shows up on whichever one you switch to. It
@@ -825,7 +842,7 @@ function SettingsView({
                     outlives reinstalls and updates.
                   </p>
                   <p>
-                    <strong>If the button below doesn't help,</strong> set it by
+                    <strong>{t("If the button below doesn't help,")}</strong> set it by
                     hand: right-click DroidDock in the Dock → Options → Assign To
                     → None. The Dock doesn't always write this choice somewhere
                     DroidDock can read or change, so the menu is the reliable fix.
@@ -847,45 +864,43 @@ function SettingsView({
                         })
                         .catch(() => setSpacesFixFailed(true));
                     }}
-                  >
-                    Keep on one desktop
+                  >{t("Keep on one desktop")}
                   </button>
                 </div>
               </div>
             )}
             <Toggle
-              label="Send what's playing to the phone"
-              hint="Shows the current track on the phone's home screen. Play/pause/skip already work for every app; this only supplies the title, and only for Music, Spotify and media websites."
+              label={t("Send what's playing to the phone")}
+              hint={t("Shows the current track on the phone's home screen. Play/pause/skip already work for every app; this only supplies the title, and only for Music, Spotify and media websites.")}
               on={config.macMediaSync}
               onChange={(v) => set("macMediaSync", v)}
             />
             {config.macMediaSync && (
               <Toggle
-                label="Include media websites"
-                hint="Reads the active browser tab's title so YouTube and similar show a track name. Only tabs on known media sites are ever read — a bank or mail tab is ignored entirely."
+                label={t("Include media websites")}
+                hint={t("Reads the active browser tab's title so YouTube and similar show a track name. Only tabs on known media sites are ever read — a bank or mail tab is ignored entirely.")}
                 on={config.macMediaBrowser}
                 onChange={(v) => set("macMediaBrowser", v)}
               />
             )}
             <Toggle
-              label="Share this Mac's status with the phone"
-              hint="Sends this Mac's name and battery level so the phone's home screen can show both devices. Read-only — it grants the phone nothing."
+              label={t("Share this Mac's status with the phone")}
+              hint={t("Sends this Mac's name and battery level so the phone's home screen can show both devices. Read-only — it grants the phone nothing.")}
               on={config.macInfoSync}
               onChange={(v) => set("macInfoSync", v)}
             />
             <Field
-              label="Pause DroidDock"
+              label={t("Pause DroidDock")}
               hint={
                 config.pausedUntil
                   ? config.pausedUntil - Date.now() > TEN_YEARS_MS
-                    ? "Paused indefinitely — notifications & clipboard muted"
+                    ? t("Paused indefinitely — notifications & clipboard muted")
                     : `Paused until ${new Date(config.pausedUntil).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-                  : "Mutes notification banners & clipboard sync (same tray menu control)"
+                  : t("Mutes notification banners & clipboard sync (same tray menu control)")
               }
             >
               {config.pausedUntil ? (
-                <button onClick={() => pause(null)} className="btn btn-secondary">
-                  Resume
+                <button onClick={() => pause(null)} className="btn btn-secondary">{t("Resume")}
                 </button>
               ) : (
                 <div className="flex gap-1.5">
@@ -905,16 +920,43 @@ function SettingsView({
         )}
 
         {tab === "appearance" && (
-          <Section icon="monitor" title="Appearance">
+          <Section icon="monitor" title={t("Appearance")}>
+            {/* Always shown. The hint tells the truth about what is bundled
+                rather than the control hiding itself — a picker that appears
+                only once a translation exists means "where is the language
+                setting?" has no answer at all. Adding `src/locales/<tag>.ts`
+                and one line to LOCALES fills it — see locales/README.md. */}
             <Field
-              label="Theme"
-              hint="Dark is espresso; light is warm cream. System follows macOS and switches with it."
+              label={t("Language")}
+              hint={
+                LOCALES.length > 1
+                  ? t("System follows your Mac's language. Anything DroidDock hasn't been translated into shows in English.")
+                  : t("Only English is bundled with this build, so this has nothing else to switch to yet. System follows your Mac's language when a translation for it exists.")
+              }
+            >
+              <select
+                aria-label={t("Language")}
+                className="select"
+                value={localeChoice()}
+                onChange={(e) => setLocale(e.target.value)}
+              >
+                <option value="system">{t("System")}</option>
+                {LOCALES.map((l) => (
+                  <option key={l.tag} value={l.tag}>
+                    {l.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field
+              label={t("Theme")}
+              hint={t("Dark is espresso; light is warm cream. System follows macOS and switches with it.")}
             >
               <SegmentedControl<Theme>
                 value={theme}
-                onChange={(t) => {
-                  setTheme(t);
-                  setThemeState(t);
+                onChange={(next) => {
+                  setTheme(next);
+                  setThemeState(next);
                 }}
                 options={[
                   { value: "dark", label: "Dark" },
@@ -926,8 +968,8 @@ function SettingsView({
             </Field>
 
             <Field
-              label="Glass"
-              hint="How translucent the sidebar, panels and popovers are, and how much they blur what's behind them. At 0 they're solid — turn it down if the desktop showing through is distracting, or if translucency costs you battery."
+              label={t("Glass")}
+              hint={t("How translucent the sidebar, panels and popovers are, and how much they blur what's behind them. At 0 they're solid — turn it down if the desktop showing through is distracting, or if translucency costs you battery.")}
             >
               <div className="flex items-center gap-3">
                 <input
@@ -941,16 +983,16 @@ function SettingsView({
                     setGlass(v);
                     setGlassState(v);
                   }}
-                  aria-label="Glass strength"
+                  aria-label={t("Glass strength")}
                   className="vol-slider w-36"
                 />
-                <span className="data w-9 shrink-0 text-right text-dim">{glass}%</span>
+                <span className="data w-9 shrink-0 text-end text-dim">{glass}%</span>
               </div>
             </Field>
 
             <Field
-              label="Phone clock"
-              hint="How the clock on the phone card is drawn. Neon, Outline, Bubble and Gradient are tinted with your accent colour; Stacked and Bubble put the hour above the minute. Mono is the only one that shows seconds; Minimal drops the date."
+              label={t("Phone clock")}
+              hint={t("How the clock on the phone card is drawn. Neon, Outline, Bubble and Gradient are tinted with your accent colour; Stacked and Bubble put the hour above the minute. Mono is the only one that shows seconds; Minimal drops the date.")}
             >
               <SegmentedControl<ClockStyle>
                 value={clock}
@@ -973,8 +1015,8 @@ function SettingsView({
             </Field>
 
             <Field
-              label="Accent colour"
-              hint="Amber is the app's own. System follows macOS (System Settings › Appearance) — useful if you want DroidDock to match everything else, at the cost of one cool colour in a warm palette."
+              label={t("Accent colour")}
+              hint={t("Amber is the app's own. System follows macOS (System Settings › Appearance) — useful if you want DroidDock to match everything else, at the cost of one cool colour in a warm palette.")}
             >
               <div className="flex items-center gap-2.5">
                 <SegmentedControl<AccentSource>
@@ -999,21 +1041,21 @@ function SettingsView({
         )}
 
         {tab === "about" && (
-          <Section icon="info" title="About">
-            <Field label="App" hint="">
-              <span className="text-[13px] text-dim">DroidDock</span>
+          <Section icon="info" title={t("About")}>
+            <Field label={t("App")} hint="">
+              <span className="text-[13px] text-dim">{t("DroidDock")}</span>
             </Field>
-            <Field label="Version" hint="">
+            <Field label={t("Version")} hint="">
               <span className="data text-dim">{version ?? "…"}</span>
             </Field>
             <UpdateRow state={update} onCheck={checkForUpdate} onInstall={installUpdate} />
             <Toggle
-              label="Check for updates automatically"
-              hint="Looks for a new release shortly after launch, at most once a day. It only tells you — nothing downloads or installs without the button above."
+              label={t("Check for updates automatically")}
+              hint={t("Looks for a new release shortly after launch, at most once a day. It only tells you — nothing downloads or installs without the button above.")}
               on={config.autoCheckUpdates}
               onChange={(v) => set("autoCheckUpdates", v)}
             />
-            <Field label="Port" hint="Wi-Fi link + UDP discovery (port + 1)">
+            <Field label={t("Port")} hint={t("Wi-Fi link + UDP discovery (port + 1)")}>
               <span className="data text-dim">{config.port}</span>
             </Field>
             <CrashLogsRow />
@@ -1061,15 +1103,14 @@ function UpdateRow({
   })();
 
   return (
-    <Field label={state.kind === "available" ? `Update to ${state.info.version}` : "Software update"} hint={hint}>
+    <Field label={state.kind === "available" ? `Update to ${state.info.version}` : t("Software update")} hint={hint}>
       {state.kind === "available" ? (
-        <button onClick={() => onInstall(state.info)} className="btn btn-primary">
-          Install and restart
+        <button onClick={() => onInstall(state.info)} className="btn btn-primary">{t("Install and restart")}
         </button>
       ) : (
         <button onClick={onCheck} disabled={busy} className="btn btn-secondary">
           {busy && <Icon name="reload" size={12} className="spinner" />}
-          {state.kind === "downloading" ? "Installing…" : "Check for updates"}
+          {state.kind === "downloading" ? "Installing…" : t("Check for updates")}
         </button>
       )}
     </Field>
@@ -1236,29 +1277,48 @@ function PhoneVolumeCard({
 
   return (
     <div className="mt-1 rounded-xl bg-panel3/60 p-4">
-      <p className="text-[12px] font-semibold text-fg">Phone in Finder</p>
+      <p className="text-[12px] font-semibold text-fg">{t("Phone in Finder")}</p>
       <p className="mt-1 text-[11px] leading-relaxed text-dim">
         Mounts your phone's storage as a volume, so any Mac app can open a file from it —
         not just the Files tab here.
       </p>
-      <p className="mt-2 text-[11px] leading-relaxed text-dim">
-        <span className="text-fg/80">Read-only.</span> Finder writes <code>.DS_Store</code> into
-        every folder it opens, and mounting read-write would scatter those across your phone.
-        Use the Files tab to upload, rename or delete.
-      </p>
+      {writable ? (
+        <p className="mt-2 text-[11px] leading-relaxed text-dim">
+          <span className="text-fg/80">{t("Writable.")}</span>{" "}
+          {t("Saving from any Mac app writes straight to the phone. Finder's own droppings (.DS_Store and ._ sidecars) are discarded rather than stored. Moving a file between folders isn't supported — rename in place, or use the Files tab.")}
+        </p>
+      ) : (
+        <p className="mt-2 text-[11px] leading-relaxed text-dim">
+          <span className="text-fg/80">{t("Read-only.")}</span>{" "}
+          {t("Use the Files tab to upload, rename or delete — it confirms first.")}
+        </p>
+      )}
+
+      <label className="mt-3 flex cursor-pointer items-start gap-2.5">
+        <input
+          type="checkbox"
+          checked={writable}
+          onChange={(e) => onWritable(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span className="text-[11px] leading-relaxed text-dim">
+          <span className="text-fg/80">{t("Allow writing to the phone")}</span>
+          <br />
+          {t("Off by default on purpose: a bug on this path damages files on your phone, where a bug on the read path only shows a wrong listing. Takes effect the next time you mount.")}
+        </span>
+      </label>
 
       {status?.running && status.mountPoint && (
         <p className="mt-2 font-mono text-[10.5px] text-dim">{status.mountPoint}</p>
       )}
       {err && <p className="mt-2 text-[11px] leading-relaxed text-dim">{err}</p>}
       {!linked && (
-        <p className="mt-2 text-[11px] text-dim">Needs a linked phone.</p>
+        <p className="mt-2 text-[11px] text-dim">{t("Needs a linked phone.")}</p>
       )}
 
       <div className="mt-3 flex items-center gap-2">
         {status?.running ? (
-          <button onClick={() => act(webdavStop)} disabled={busy} className="btn btn-secondary">
-            Unmount
+          <button onClick={() => act(webdavStop)} disabled={busy} className="btn btn-secondary">{t("Unmount")}
           </button>
         ) : (
           <button
@@ -1266,7 +1326,7 @@ function PhoneVolumeCard({
             disabled={busy || !linked}
             className="btn btn-secondary"
           >
-            {busy ? "Mounting…" : "Mount in Finder"}
+            {busy ? "Mounting…" : t("Mount in Finder")}
           </button>
         )}
       </div>
@@ -1290,12 +1350,11 @@ function CrashLogsRow() {
 
   return (
     <Field
-      label="Crash logs"
+      label={t("Crash logs")}
       hint={`${count} ${count === 1 ? "log" : "logs"} in ~/Library/Logs/DroidDock. Written on this Mac only — DroidDock never sends them anywhere.`}
     >
       <div className="flex items-center gap-2">
-        <button onClick={() => crashLogsReveal()} className="btn btn-secondary">
-          Reveal
+        <button onClick={() => crashLogsReveal()} className="btn btn-secondary">{t("Reveal")}
         </button>
         <button
           onClick={async () => {
@@ -1303,8 +1362,7 @@ function CrashLogsRow() {
             setCount(0);
           }}
           className="btn btn-secondary"
-        >
-          Clear
+        >{t("Clear")}
         </button>
       </div>
     </Field>
@@ -1353,14 +1411,14 @@ function FreeformCard() {
 
   return (
     <div className="mt-1 rounded-xl bg-panel3/60 p-4">
-      <p className="text-[12px] font-semibold text-fg">Freeform windows on the phone</p>
+      <p className="text-[12px] font-semibold text-fg">{t("Freeform windows on the phone")}</p>
       <p className="mt-1 text-[11px] leading-relaxed text-dim">
         Desktop mode gives you large-screen layouts on its own. Draggable, resizable app
         windows additionally need three Android developer settings switched on. DroidDock can
         set them for you over ADB.
       </p>
       <p className="mt-2 text-[11px] leading-relaxed text-dim">
-        These are settings on <span className="text-fg/80">your phone</span>, not in DroidDock —
+        These are settings on <span className="text-fg/80">{t("your phone")}</span>, not in DroidDock —
         they stay on if you uninstall this app. Revert puts back exactly what was there before.
       </p>
 
@@ -1386,13 +1444,11 @@ function FreeformCard() {
           disabled={busy || !status?.supported || status?.enabled}
           className="btn btn-secondary"
         >
-          {status?.enabled ? "Already on" : "Enable on phone"}
+          {status?.enabled ? t("Already on") : t("Enable on phone")}
         </button>
-        <button onClick={() => act(adbFreeformRevert)} disabled={busy} className="btn btn-secondary">
-          Revert
+        <button onClick={() => act(adbFreeformRevert)} disabled={busy} className="btn btn-secondary">{t("Revert")}
         </button>
-        <button onClick={() => void refresh()} disabled={busy} className="btn btn-secondary">
-          Refresh
+        <button onClick={() => void refresh()} disabled={busy} className="btn btn-secondary">{t("Refresh")}
         </button>
       </div>
     </div>
@@ -1426,7 +1482,7 @@ function Toggle({
             gives it an edge without darkening the control. */}
         <span
           className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm ring-1 ring-black/10 transition-all ${
-            on ? "left-4.5" : "left-0.5"
+            on ? "start-4.5" : "start-0.5"
           }`}
         />
       </button>

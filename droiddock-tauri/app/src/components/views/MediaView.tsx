@@ -3,6 +3,7 @@ import EmptyState from "../EmptyState";
 import { fmtDuration } from "../../lib/ui";
 import { mediaCmd } from "../../lib/bridge";
 import { useMedia } from "../../lib/mediaStore";
+import { t } from "../../lib/i18n";
 
 /// Phase 10 — now-playing card. Fields come from the phone's `media` push
 /// (title/artist/app/playing/vol/volMax/pos/dur — no album art in the wire
@@ -18,8 +19,8 @@ export default function MediaView() {
     return (
       <EmptyState
         icon="volume"
-        title="Nothing playing"
-        body="Play music or a video on your phone and control it from here."
+        title={t("Nothing playing")}
+        body={t("Play music or a video on your phone and control it from here.")}
       />
     );
   }
@@ -77,7 +78,7 @@ export default function MediaView() {
           )}
 
           <div className="mt-5 flex items-center justify-center gap-6">
-            <button onClick={() => cmd("prev")} className="btn-icon" title="Previous">
+            <button onClick={() => cmd("prev")} className="btn-icon" title={t("Previous")}>
               <Icon name="skipBack" size={20} fill="currentColor" strokeWidth={0} />
             </button>
             <button
@@ -87,7 +88,7 @@ export default function MediaView() {
             >
               <Icon name={media.playing ? "pause" : "play"} size={20} fill="currentColor" strokeWidth={0} />
             </button>
-            <button onClick={() => cmd("next")} className="btn-icon" title="Next">
+            <button onClick={() => cmd("next")} className="btn-icon" title={t("Next")}>
               <Icon name="skipForward" size={20} fill="currentColor" strokeWidth={0} />
             </button>
           </div>
@@ -103,7 +104,7 @@ export default function MediaView() {
                 onChange={(e) => cmd("setvol", Number(e.target.value))}
                 className="vol-slider min-w-0 flex-1"
               />
-              <span className="data w-9 shrink-0 text-right text-faint">
+              <span className="data w-9 shrink-0 text-end text-faint">
                 {Math.round(((media.vol ?? 0) / (media.volMax || 1)) * 100)}%
               </span>
             </div>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Icon from "../Icon";
 import EmptyState from "../EmptyState";
 import { avatarColor, initials, fmtTime, dayLabel } from "../../lib/ui";
+import { t } from "../../lib/i18n";
 import {
   smsThreads,
   smsMessages,
@@ -150,8 +151,8 @@ export default function MessagesView({
     return (
       <EmptyState
         icon="message"
-        title="Phone not linked"
-        body="Messages need the Wi-Fi link. Pair your phone from the Dashboard, then come back."
+        title={t("Phone not linked")}
+        body={t("Messages need the Wi-Fi link. Pair your phone from the Dashboard, then come back.")}
       />
     );
   }
@@ -161,10 +162,10 @@ export default function MessagesView({
   return (
     <div className="flex h-full min-h-0">
       {/* conversation list */}
-      <div className="flex w-64 shrink-0 flex-col border-r border-line">
+      <div className="flex w-64 shrink-0 flex-col border-e border-line">
         <div className="flex h-14 shrink-0 items-center justify-between px-4">
-          <h1 className="font-display text-[17px] font-semibold text-fg">Messages</h1>
-          <button onClick={loadThreads} title="Refresh" className="btn-icon">
+          <h1 className="font-display text-[17px] font-semibold text-fg">{t("Messages")}</h1>
+          <button onClick={loadThreads} title={t("Refresh")} className="btn-icon">
             <Icon name="reload" size={14} className={loading ? "spinner" : ""} />
           </button>
         </div>
@@ -173,14 +174,14 @@ export default function MessagesView({
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search"
+            placeholder={t("Search")}
             className="field w-full"
           />
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
           {compose && (
-            <div className="rise row row-selected mb-0.5 flex w-full items-center gap-2.5 px-2.5 py-2 text-left">
+            <div className="rise row row-selected mb-0.5 flex w-full items-center gap-2.5 px-2.5 py-2 text-start">
               <Avatar name={compose.name} size={32} />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[13px] font-medium text-fg">{compose.name}</p>
@@ -194,7 +195,7 @@ export default function MessagesView({
               <button
                 key={t.threadId}
                 onClick={() => openThread(t)}
-                className={`row ${active ? "row-selected" : ""} mb-0.5 flex w-full items-center gap-2.5 px-2.5 py-2 text-left`}
+                className={`row ${active ? "row-selected" : ""} mb-0.5 flex w-full items-center gap-2.5 px-2.5 py-2 text-start`}
               >
                 <Avatar name={t.name} size={32} />
                 <div className="min-w-0 flex-1">
@@ -209,7 +210,7 @@ export default function MessagesView({
           })}
           {shown.length === 0 && !loading && !compose && (
             <p className="p-6 text-center text-[12px] text-dim">
-              {q ? "No matches" : "No conversations yet"}
+              {q ? t("No matches") : t("No conversations yet")}
             </p>
           )}
           {err && <p className="p-6 text-center text-[12px] text-bad">{err}</p>}
@@ -226,8 +227,7 @@ export default function MessagesView({
               <p className="data truncate text-[10px] text-dim">{sendAddress}</p>
             </div>
             {compose && (
-              <span className="shrink-0 rounded-full bg-(--color-accent)/10 px-2 py-0.5 text-[10px] font-medium text-(--color-accent)">
-                New
+              <span className="shrink-0 rounded-full bg-(--color-accent)/10 px-2 py-0.5 text-[10px] font-medium text-(--color-accent)">{t("New")}
               </span>
             )}
           </div>
@@ -262,7 +262,7 @@ export default function MessagesView({
               <button
                 onClick={sendNow}
                 disabled={sending || !draft.trim()}
-                title="Send (carrier rates apply)"
+                title={t("Send (carrier rates apply)")}
                 className="btn btn-primary shrink-0 px-3"
               >
                 <Icon name="send" size={15} className={sending ? "spinner" : ""} />
@@ -273,8 +273,8 @@ export default function MessagesView({
       ) : (
         <EmptyState
           icon="message"
-          title="Pick a conversation"
-          body="SMS sends through your phone's SIM — carrier rates apply as usual."
+          title={t("Pick a conversation")}
+          body={t("SMS sends through your phone's SIM — carrier rates apply as usual.")}
         />
       )}
     </div>
@@ -288,8 +288,8 @@ function Bubble({ m }: { m: SmsMessage }) {
         <div
           className={`px-3.5 py-2 text-[13px] leading-relaxed ${
             m.out
-              ? "rounded-2xl rounded-br-md bg-(--color-accent) text-(--color-accent-ink)"
-              : "rounded-2xl rounded-bl-md bg-panel2 text-fg"
+              ? "rounded-2xl rounded-ee-md bg-(--color-accent) text-(--color-accent-ink)"
+              : "rounded-2xl rounded-es-md bg-panel2 text-fg"
           }`}
         >
           {m.body}
