@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, oneshot, Mutex, Semaphore};
+use tokio::sync::{mpsc, oneshot, watch, Mutex, Semaphore};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 const AUTH_TIMEOUT: Duration = Duration::from_secs(5);
@@ -34,6 +34,11 @@ struct PhoneHandle {
     /// `crate::crypto`. `None` means this session runs in plaintext, which is
     /// the default and the behaviour every build before Tier C had.
     key: Option<crate::crypto::LinkKey>,
+    /// Tier C, second half: present only when both sides also negotiated
+    /// `"enc2"` — sealed *binary* frames. Separate from `key` because a phone
+    /// build can understand sealed JSON and not sealed frames; conflating them
+    /// would break that phone's transfers the moment encryption was enabled.
+    frame_key: Option<crate::crypto::LinkKey>,
     /// The phone's own `hello.name` — display only ("MANUFACTURER MODEL").
     name: String,
     /// A stable per-install identifier the phone generates once and persists.
@@ -78,6 +83,27 @@ pub async fn current_phone_keys(state: &SharedState) -> Option<(String, Option<S
 /// wifi.js paths (e.g. the clipboard watcher) check before doing any work.
 pub async fn is_connected(state: &SharedState) -> bool {
     state.phone.lock().await.is_some()
+}
+
+/// Park until a phone is linked, waking on the link itself rather than on a
+/// timer. Returns immediately when one already is.
+///
+/// This is the sleep half of [`is_connected`]: a loop that only has work to do
+/// while a phone is around calls this instead of re-ticking into a `continue`,
+/// which is the difference between an idle app that wakes the CPU twice a
+/// second and one that wakes it not at all.
+pub async fn await_connected(state: &SharedState) {
+    let mut rx = state.connected.subscribe();
+    // `borrow_and_update` marks the value seen, so `changed()` below waits for
+    // a real transition instead of returning immediately on the first call.
+    while !*rx.borrow_and_update() {
+        if rx.changed().await.is_err() {
+            // The sender lives in the same `Arc` as this receiver, so it
+            // cannot outlive us — but park rather than spin if that ever
+            // stops being true.
+            std::future::pending::<()>().await;
+        }
+    }
 }
 
 /// Did the connected phone advertise `cap` in its `hello`?
@@ -129,6 +155,21 @@ pub struct ServerState {
     /// reqId → waiter for the phone's `mac-fs-pull-ready` handshake, so chunks
     /// never start before the phone's receiver exists.
     mac_fs_ready: Mutex<HashMap<String, oneshot::Sender<()>>>,
+    /// The caps the CURRENT link negotiated per-connection rather than from
+    /// config — today just the two encryption caps. Kept so a later live caps
+    /// push (see `push_caps`) can re-send them verbatim instead of trying to
+    /// re-derive a negotiation that already happened.
+    link_caps: Mutex<Vec<String>>,
+    /// The full cap list last sent to the phone (welcome or a live update), so
+    /// `push_caps` can stay silent when nothing actually changed.
+    last_caps: Mutex<Vec<String>>,
+    /// Mirrors `phone.is_some()` as something a task can *await* instead of
+    /// poll. The background loops (clipboard, link quality, Mac media, Mac
+    /// info) each used to wake on their own timer and immediately `continue`
+    /// while nothing was linked — together about two timer wakeups a second,
+    /// forever, on a Mac with no phone in sight. They now park on this until a
+    /// phone actually arrives, so an unlinked DroidDock costs nothing.
+    connected: watch::Sender<bool>,
 }
 
 impl Default for ServerState {
@@ -142,6 +183,9 @@ impl Default for ServerState {
             transfers: TransferRegistry::default(),
             mac_fs_pull_limit: Semaphore::new(MAX_CONCURRENT_MAC_FS_PULLS),
             mac_fs_ready: Mutex::default(),
+            link_caps: Mutex::default(),
+            last_caps: Mutex::default(),
+            connected: watch::Sender::new(false),
         }
     }
 }
@@ -170,11 +214,25 @@ pub async fn push(state: &SharedState, value: Value) -> bool {
 /// Send a raw binary frame (file-transfer chunks). Returns false if no phone.
 /// Awaits the bounded outbox, so a saturated socket back-pressures the caller.
 pub async fn send_binary(state: &SharedState, bytes: Vec<u8>) -> bool {
-    let tx = state.phone.lock().await.as_ref().map(|p| p.outbox.clone());
-    match tx {
-        Some(tx) => tx.send(WsMessage::binary(bytes)).await.is_ok(),
-        None => false,
-    }
+    let (tx, frame_key) = {
+        let g = state.phone.lock().await;
+        match g.as_ref() {
+            Some(p) => (p.outbox.clone(), p.frame_key.clone()),
+            None => return false,
+        }
+    };
+    // Sealed only when both sides negotiated `enc2`; otherwise the frame goes
+    // out exactly as it always did. A seal that fails drops the frame rather
+    // than falling back to plaintext — silently downgrading is the one
+    // behaviour an encryption toggle must never have.
+    let bytes = match frame_key {
+        None => bytes,
+        Some(key) => match crate::crypto::seal_frame(&key, &bytes) {
+            Ok(sealed) => sealed,
+            Err(_) => return false,
+        },
+    };
+    tx.send(WsMessage::binary(bytes)).await.is_ok()
 }
 
 /// Ask the phone something and await its `reqId`-tagged reply. Mirrors
@@ -309,6 +367,10 @@ fn emit_status(app: &AppHandle, connected: bool, phone_name: Option<String>, cap
     if !connected {
         // Clears the menu-bar title and re-arms the low-battery alert.
         crate::statusbar::on_disconnect(app);
+        // Drop any live audio stream: the phone announces a fresh one on the
+        // next session, and a stale replay would start a player for a stream
+        // that no longer exists.
+        crate::audio::on_disconnect(app);
     } else {
         crate::statusbar::refresh_title(app);
     }
@@ -358,6 +420,14 @@ pub async fn run(app: AppHandle, state: SharedState, port: u16) {
     loop {
         match listener.accept().await {
             Ok((stream, _peer)) => {
+                // Nagle batches small writes for up to ~40ms waiting for more
+                // to coalesce. Almost everything on this socket is small and
+                // latency-shaped — a tap to inject, a keystroke, a clipboard
+                // line, a ping being timed — so the one thing Nagle optimises
+                // for (bulk throughput on tiny writes) is the one thing this
+                // link never needs. File transfers already send 256 KiB
+                // chunks, which fill segments on their own.
+                let _ = stream.set_nodelay(true);
                 tokio::spawn(handle_connection(app.clone(), state.clone(), stream));
             }
             Err(e) => {
@@ -395,6 +465,12 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
     });
 
     let mut authed = false;
+    // The session's binary-frame key, kept here rather than read back out of
+    // `state.phone` on every frame. It is decided once at `hello` and never
+    // changes for the life of this socket, so the per-frame async lock it used
+    // to take — contending with every concurrent `push` at 60 frames a second —
+    // bought nothing.
+    let mut session_frame_key: Option<crate::crypto::LinkKey> = None;
     let auth_deadline = tokio::time::sleep(AUTH_TIMEOUT);
     tokio::pin!(auth_deadline);
 
@@ -408,7 +484,35 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                 // Binary frames: only meaningful post-auth (mirror + transfer).
                 if ws_msg.is_binary() {
                     if authed {
-                        route_binary(&app, &state, ws_msg.into_data().to_vec()).await;
+                        // `into_data()` hands over tungstenite's buffer without
+                        // copying; the `to_vec()` below is the one copy, and on
+                        // the plaintext video path even that is skipped.
+                        let data = ws_msg.into_data();
+                        // Mirror (kind 3) and audio (kind 4) are the only
+                        // frames that arrive at the frame rate, and on an
+                        // unencrypted session they need no unsealing at all —
+                        // so they go straight out of the socket buffer, with
+                        // neither the whole-frame memcpy nor the `state.phone`
+                        // lock the general path takes. At 60fps × ~100 KB that
+                        // copy alone was several MB/s of pure memory traffic.
+                        if session_frame_key.is_none() {
+                            match data.first() {
+                                Some(&3) => {
+                                    crate::mirror::on_frame(&app, &data);
+                                    continue;
+                                }
+                                Some(&4) => {
+                                    crate::audio::on_frame(&app, &data);
+                                    continue;
+                                }
+                                _ => {}
+                            }
+                        }
+                        if let Some(frame) =
+                            unseal_binary(session_frame_key.as_ref(), data.to_vec())
+                        {
+                            route_binary(&app, &state, frame).await;
+                        }
                     }
                     continue;
                 }
@@ -443,6 +547,14 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                         cfg.encrypt_link && caps.iter().any(|c| c == crate::crypto::CAP);
                     let session_key =
                         want_enc.then(|| crate::crypto::derive(&cfg.token));
+                    // Frames need the phone to advertise `enc2` as well. Same
+                    // master switch, so a user who turned encryption off gets
+                    // plaintext frames too.
+                    let want_enc_frames = cfg.encrypt_link
+                        && caps.iter().any(|c| c == crate::crypto::CAP_FRAMES);
+                    let frame_key =
+                        want_enc_frames.then(|| crate::crypto::derive(&cfg.token));
+                    session_frame_key = frame_key.clone();
 
                     // Single phone: a new valid hello closes the previous phone's
                     // socket. take+insert under ONE lock acquisition so two
@@ -458,6 +570,7 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                             name: hello_name.clone(),
                             device_id: device_id.clone(),
                             key: session_key,
+                            frame_key,
                             caps,
                             outbox: outbox_tx.clone(),
                             kill: kill_tx.take().expect("hello only authenticates once per connection"),
@@ -475,37 +588,22 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                         state.transfers.abort_all().await;
                     }
 
-                    // Phase 19: unconditional capability advertisement — the
-                    // Mac always sends "macfs" once this feature exists in the
-                    // binary (no feature flag / half-built gating). Additive
-                    // field: an older phone build ignores it safely.
-                    let mut welcome_caps: Vec<String> = Vec::new();
-                    // Reverse file browsing is now opt-in, matching photo-sync's
-                    // posture. Not advertising the cap makes the phone's tab
-                    // disappear entirely rather than fail on use.
-                    if cfg.mac_fs_enabled {
-                        welcome_caps.push("macfs".to_string());
-                    }
+                    // The caps the handshake itself decided, as opposed to
+                    // the ones settings decide (`feature_caps`). Stashed on the
+                    // state so a later live caps push can re-send them verbatim
+                    // rather than re-deriving a negotiation that already
+                    // happened.
+                    let mut enc_caps: Vec<String> = Vec::new();
                     if want_enc {
-                        welcome_caps.push(crate::crypto::CAP.to_string());
+                        enc_caps.push(crate::crypto::CAP.to_string());
                     }
-                    // Tier D: the phone can't even see the remote-control
-                    // surface unless the user switched it on here.
-                    if crate::mac_remote::enabled(&app) {
-                        welcome_caps.push(crate::mac_remote::CAP.to_string());
+                    if want_enc_frames {
+                        enc_caps.push(crate::crypto::CAP_FRAMES.to_string());
                     }
-                    // Mac → phone status. Read-only and on by default, so the
-                    // cap is really just "this Mac build can do it" — the phone
-                    // uses it to decide whether to render the row at all.
-                    if crate::mac_info::enabled(&app) {
-                        welcome_caps.push(crate::mac_info::CAP.to_string());
-                    }
-                    // Phase 3: what's playing on this Mac. Same shape as the
-                    // row above — the phone hides the player entirely rather
-                    // than showing an empty one when this is absent.
-                    if crate::mac_media::enabled(&app) {
-                        welcome_caps.push(crate::mac_media::CAP.to_string());
-                    }
+                    let mut welcome_caps = feature_caps(&app);
+                    welcome_caps.extend(enc_caps.iter().cloned());
+                    *state.link_caps.lock().await = enc_caps;
+                    *state.last_caps.lock().await = welcome_caps.clone();
                     // Deliberately sent unsealed: it is the message that tells
                     // the phone encryption is on, so it cannot itself be
                     // encrypted. Everything after it is sealed.
@@ -514,6 +612,10 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                     if outbox_tx.send(WsMessage::text(welcome.to_string())).await.is_err() {
                         break;
                     }
+                    // Wakes every loop parked in `await_connected`, so the
+                    // first clipboard poll / link ping / media push happens
+                    // now rather than up to a tick later.
+                    let _ = state.connected.send(true);
                     emit_status(&app, true, Some(hello_name.clone()), caps_for_status.clone());
                     // Phone reconnected after a pause → clear the pause and
                     // resume ADB reconnect scanning, matching wifi.js's
@@ -581,6 +683,9 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
     if phone.as_ref().is_some_and(|p| p.outbox.same_channel(&outbox_tx)) {
         *phone = None;
         drop(phone);
+        // Sends the background loops back to sleep. Set before `abort_all` so
+        // nothing starts fresh per-tick work on the way down.
+        let _ = state.connected.send(false);
         // Fail any in-flight file transfers so their commands don't hang.
         state.transfers.abort_all().await;
         emit_status(&app, false, None, Vec::new());
@@ -889,7 +994,31 @@ async fn route_text(app: &AppHandle, state: &SharedState, raw: Value) {
         "pong" => app.state::<crate::link_quality::LinkQuality>().on_pong(&raw),
         // Tier D: phone → Mac input. `mac_remote` re-checks the enable flag
         // itself rather than trusting that the caps advert was ever sent.
-        "remote" => crate::mac_remote::on_message(app, &raw),
+        "remote" => {
+            crate::mac_remote::on_message(app, &raw);
+            // A media key changes what the Mac is playing, so the card that
+            // sent it should follow the press rather than wait for the next
+            // heartbeat. `mac_media` notices a play or pause within about a
+            // second on its own; this just closes the loop on the one case
+            // where we already know a change is coming.
+            if raw.get("action").and_then(Value::as_str) == Some("media") {
+                let app2 = app.clone();
+                let state2 = state.clone();
+                tokio::spawn(async move {
+                    // Long enough for the target app to have acted on the HID
+                    // key — reading before that reports the state we just left.
+                    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                    crate::mac_media::push_now(&app2, &state2).await;
+                });
+            }
+        }
+        // The phone asking what this Mac can run, or asking to run one.
+        // `mac_apps` re-checks the enable flag itself, exactly like `remote`.
+        "mac-apps-list" | "mac-app-launch" => {
+            if let Some(reply) = crate::mac_apps::on_message(app, &raw) {
+                let _ = send_json(state, reply).await;
+            }
+        }
         // The phone's receiver for a `mac-fs-pull` is now registered; releasing
         // this lets `mac_fs::pull_to_phone` start streaming chunks.
         "mac-fs-pull-ready" => {
@@ -906,6 +1035,9 @@ async fn route_text(app: &AppHandle, state: &SharedState, raw: Value) {
         "mirror-started" => crate::mirror::on_started(app, &raw),
         "mirror-stopped" => crate::mirror::on_stopped(app, &raw),
         "mirror-error" => crate::mirror::on_error(app, &raw),
+        "audio-started" => crate::audio::on_started(app, &raw),
+        "audio-stopped" => crate::audio::on_stopped(app, &raw),
+        "audio-error" => crate::audio::on_error(app, &raw),
 
         // Phone-initiated pause (Phase 14): the phone closes its own socket
         // right after sending this, so its ONLY practical Mac-side effect is
@@ -934,9 +1066,33 @@ async fn route_text(app: &AppHandle, state: &SharedState, raw: Value) {
 /// Kind 3 is the one exception — a fixed 2-byte `[3][flags]` mirror-frame
 /// header (see `ConnectionManager.kt::sendVideo`), not the 9-byte transfer
 /// header, so it's peeled off before the transfer-shaped frames below.
+/// Unseal an inbound frame if this session negotiated `enc2`.
+///
+/// Strict in both directions once engaged: with a frame key, a frame that is
+/// *not* sealed is dropped, and a sealed frame that fails authentication is
+/// dropped. Accepting plaintext on an encrypted link would let anyone on the
+/// network inject frames simply by not encrypting them.
+///
+/// Without a frame key, a sealed frame is likewise dropped — it can only be
+/// noise, since we never advertised the capability.
+fn unseal_binary(key: Option<&crate::crypto::LinkKey>, buf: Vec<u8>) -> Option<Vec<u8>> {
+    let sealed = buf.first() == Some(&crate::crypto::KIND_SEALED);
+    match (key, sealed) {
+        (None, false) => Some(buf),
+        (Some(key), true) => crate::crypto::open_frame(key, &buf),
+        _ => None,
+    }
+}
+
 async fn route_binary(app: &AppHandle, state: &SharedState, buf: Vec<u8>) {
     if buf.first() == Some(&3) {
         crate::mirror::on_frame(app, &buf);
+        return;
+    }
+    // Kind 4 shares kind 3's fixed 2-byte header, not the 9-byte transfer one,
+    // so it is peeled off here for the same reason.
+    if buf.first() == Some(&4) {
+        crate::audio::on_frame(app, &buf);
         return;
     }
     if buf.len() < transfer::HEADER {
@@ -1012,6 +1168,76 @@ fn reply_matches(family: &str, reply_type: &str) -> bool {
 
 fn reqid_key(v: &Value) -> Option<u64> {
     v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse::<u64>().ok()))
+}
+
+/// The capabilities this Mac currently offers, as decided by *settings* —
+/// everything except the two encryption caps, which are negotiated per
+/// connection in the handshake and live in `ServerState::link_caps`.
+///
+/// Split out of the `welcome` block because caps used to be sent exactly once,
+/// at connect. Switching "Mac files" (or remote control, or Mac apps) on while
+/// the phone was already linked therefore changed nothing the phone could see:
+/// it went on believing the feature did not exist, and the Mac Files tab never
+/// appeared, until something happened to drop and remake the socket. Settings
+/// changes now recompute this list and push it — see `push_caps`.
+pub fn feature_caps(app: &AppHandle) -> Vec<String> {
+    let cfg = live_config(app);
+    let mut caps: Vec<String> = Vec::new();
+    // Reverse file browsing is opt-in, matching photo-sync's posture. Not
+    // advertising the cap makes the phone's tab disappear entirely rather than
+    // fail on use.
+    if cfg.mac_fs_enabled {
+        caps.push("macfs".to_string());
+    }
+    // Tier D: the phone can't even see the remote-control surface unless the
+    // user switched it on here.
+    if crate::mac_remote::enabled(app) {
+        caps.push(crate::mac_remote::CAP.to_string());
+    }
+    // Mac → phone status. Read-only and on by default, so the cap is really
+    // just "this Mac build can do it" — the phone uses it to decide whether to
+    // render the row at all.
+    if crate::mac_info::enabled(app) {
+        caps.push(crate::mac_info::CAP.to_string());
+    }
+    // Phase 3: what's playing on this Mac. Same shape as the row above — the
+    // phone hides the player entirely rather than showing an empty one.
+    if crate::mac_media::enabled(app) {
+        caps.push(crate::mac_media::CAP.to_string());
+    }
+    // Launching a Mac app is the same class of power as driving its pointer,
+    // so it rides the same switch — see mac_apps.
+    if cfg.remote_control {
+        caps.push(crate::mac_apps::CAP.to_string());
+    }
+    caps
+}
+
+/// Re-advertise capabilities to an already-connected phone after a settings
+/// change, as `{"type":"caps","caps":[…]}`.
+///
+/// Sends the same list `welcome` would send now: the settings-derived caps plus
+/// whatever the current link negotiated for encryption. The enc caps ride along
+/// unchanged rather than being recomputed — encryption is settled once, in the
+/// handshake, and re-deriving it here from live config would let a mid-session
+/// toggle tell the phone the link is sealed when it is not.
+///
+/// A no-op when nothing changed, and when no phone is connected (`push`
+/// returns false, and the next `welcome` carries the new list anyway). Older
+/// phone builds ignore the unknown message type, so this is purely additive.
+pub async fn push_caps(app: &AppHandle, state: &SharedState) {
+    let mut caps = feature_caps(app);
+    caps.extend(state.link_caps.lock().await.iter().cloned());
+
+    {
+        let last = state.last_caps.lock().await;
+        if *last == caps {
+            return;
+        }
+    }
+    if push(state, json!({ "type": "caps", "caps": caps.clone() })).await {
+        *state.last_caps.lock().await = caps;
+    }
 }
 
 fn live_config(app: &AppHandle) -> crate::config::Config {

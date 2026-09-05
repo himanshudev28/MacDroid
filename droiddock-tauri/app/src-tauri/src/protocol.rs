@@ -153,6 +153,13 @@ pub enum Message {
     MirrorSwipe(Extra),
     MirrorKey(Extra),
     MirrorText(Extra),
+
+    /// Phone playback audio over the Wi-Fi path (`AudioCapture.kt`). The samples
+    /// themselves ride binary kind-4 frames; these only carry the stream's
+    /// format and lifecycle.
+    AudioStarted(Extra),
+    AudioStopped(Extra),
+    AudioError(Extra),
 }
 
 /// Generic field bag for variants not yet behaviorally implemented — see

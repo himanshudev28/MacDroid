@@ -21,6 +21,7 @@
 
 use crate::ws_server::{self, SharedState};
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
@@ -36,6 +37,15 @@ const LABEL: &str = "mirror";
 pub struct MirrorState {
     last_started: Mutex<Option<Value>>,
     frame_tx: Mutex<Option<Channel<InvokeResponseBody>>>,
+    /// Whether this WebView's `VideoDecoder` can actually decode HEVC, as
+    /// reported by the frontend's `isConfigSupported` probe at startup.
+    ///
+    /// Defaults to false and is only ever raised by that probe, because the
+    /// failure it guards is a silent one: asking the phone for H.265 that the
+    /// decoder then refuses leaves a black pop-out with nothing in the log. It
+    /// is far better to under-use HEVC than to negotiate a stream nothing here
+    /// can play.
+    hevc_supported: AtomicBool,
 }
 
 // ── Tauri commands (invoked from the frontend) ──────────────────────────
@@ -53,10 +63,19 @@ pub async fn mirror_popout(
     // fields, so a phone build that predates them ignores them and keeps its
     // own defaults rather than failing to start.
     let cfg = app.state::<crate::AppState>().config.lock().unwrap().clone();
+    //
+    // `codec` and `audio` ride along the same way. H.265 is requested only when
+    // the user asked for it *and* this WebView proved it can decode it; the
+    // phone independently falls back to H.264 if it has no HEVC encoder, so
+    // both ends have to agree before the stream is anything but H.264.
+    let want_hevc = cfg.mirror_codec == "h265"
+        && app.state::<MirrorState>().hevc_supported.load(Ordering::Relaxed);
     let quality = json!({
         "bitrate": cfg.mirror_bitrate_mbps.clamp(1, 50) * 1_000_000,
         "fps": cfg.mirror_fps.clamp(15, 120),
         "maxSize": cfg.mirror_max_size,
+        "codec": if want_hevc { "h265" } else { "h264" },
+        "audio": cfg.mirror_audio && source != "camera",
     });
     let mut msg = if source == "camera" {
         json!({ "type": "camera-start", "facing": "back" })
@@ -66,6 +85,11 @@ pub async fn mirror_popout(
     if let (Some(obj), Some(q)) = (msg.as_object_mut(), quality.as_object()) {
         obj.extend(q.clone());
     }
+    eprintln!(
+        "[mirror] start source={source} codec={} audio={}",
+        if want_hevc { "h265" } else { "h264" },
+        cfg.mirror_audio && source != "camera"
+    );
     if !ws_server::push(&state, msg).await {
         return Err("Phone not linked over Wi-Fi".into());
     }
@@ -134,7 +158,22 @@ pub fn mirror_attach(
     started
 }
 
+/// The frontend's one-time WebCodecs probe result. Called from the main
+/// window at startup; until it arrives, H.265 is simply never requested.
+#[tauri::command]
+pub fn mirror_set_hevc_supported(state: tauri::State<'_, MirrorState>, supported: bool) {
+    eprintln!("[mirror] webview HEVC decode support: {supported}");
+    state.hevc_supported.store(supported, Ordering::Relaxed);
+}
+
 // ── Window lifecycle ─────────────────────────────────────────────────────
+
+/// Open (or focus) the pop-out. Public so the embedded ADB mirror can bring
+/// the window up before frames start — the decoder is configured from the
+/// stream's first config packet, and a window that isn't attached yet drops it.
+pub fn open_popout(app: &AppHandle) -> Result<(), String> {
+    open_mirror_window(app)
+}
 
 fn open_mirror_window(app: &AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window(LABEL) {
@@ -169,6 +208,10 @@ fn open_mirror_window(app: &AppHandle) -> Result<(), String> {
             // mirror-stopped forward, which only ever reaches the pop-out) —
             // reproduced exactly, quirk included (see compatibility report).
             let _ = app_for_close.emit_to("main", "mirror-stopped", json!({}));
+            // The same window serves both mirror sources, so closing it has to
+            // end whichever one is running. `stop` is a no-op when the embedded
+            // ADB session isn't the active one.
+            crate::scrcpy_client::stop(&app_for_close);
             let app = app_for_close.clone();
             tauri::async_runtime::spawn(async move {
                 let state: SharedState = app.state::<SharedState>().inner().clone();
@@ -199,6 +242,16 @@ impl MirrorState {
 /// mirrors `index.js`'s forwardCb, which never sends these three to the main
 /// window (only the pop-out's own `closed` handler does, above).
 pub fn on_started(app: &AppHandle, payload: &Value) {
+    // The codec string the phone actually derived. Logged because a wrong one
+    // is invisible: the decoder errors, closes, and every later frame is
+    // dropped on a state guard, leaving a black window and no message.
+    eprintln!(
+        "[mirror] started {}x{} codec={} source={}",
+        payload.get("width").and_then(Value::as_i64).unwrap_or(0),
+        payload.get("height").and_then(Value::as_i64).unwrap_or(0),
+        payload.get("codec").and_then(Value::as_str).unwrap_or("?"),
+        payload.get("source").and_then(Value::as_str).unwrap_or("?")
+    );
     *app.state::<MirrorState>().last_started.lock().unwrap() = Some(payload.clone());
     if let Some(w) = app.get_webview_window(LABEL) {
         apply_aspect(&w, payload);
