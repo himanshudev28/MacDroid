@@ -8,6 +8,48 @@ to a generic body.
 
 ---
 
+## v2.2.0
+
+### Added
+
+- **Phone audio now streams to the Mac over Wi-Fi**, not just over the ADB
+  mirror. It rides the MediaProjection the screen mirror already holds, so it
+  costs no extra consent tap, and it starts with the mirror when **Settings →
+  Phone audio** is on. Two things are worth knowing up front: it needs the
+  microphone permission, because Android routes captured playback through the
+  same API even though no microphone is opened; and apps that opt out of
+  playback capture — most paid music and video apps do — come through silent.
+  That is a platform restriction, not a bug in the link.
+- **H.265 on the Wi-Fi mirror.** Previously only the ADB path could use it.
+  Roughly half the bandwidth at the same quality, and it degrades on its own
+  from both ends: the phone falls back to H.264 if it has no HEVC encoder, and
+  the Mac never asks for H.265 unless its own decoder says it can play it. So
+  turning it on cannot produce a stream that fails to start.
+- **Quick Share: receive files from any nearby device.** Turn on **Settings →
+  Mac files → Quick Share** and this Mac appears in the Quick Share sheet on
+  any nearby Android, ChromeOS or Windows device — with nothing installed on
+  the sender. Files land in Downloads. Every transfer has to be accepted here,
+  and the four-digit code shown must match the sender's; that code comes out of
+  the key exchange, so it only matches if the connection really is with the
+  device in front of you.
+
+  It is **off by default, deliberately**. Quick Share's "contacts only"
+  visibility depends on Google account access a third-party app cannot have, so
+  the only mode available makes this Mac visible to everyone on the network for
+  as long as it is on. That is your call to make, not a default to inherit.
+
+  Sending *from* the Mac is not included, and is not an oversight: Android only
+  becomes discoverable after it hears a Bluetooth advertisement whose contents
+  macOS provides no way to set.
+
+### Fixed
+
+- **A locally built APK no longer needs an uninstall.** Installing one was
+  believed to mean losing pairing and every granted permission. It doesn't —
+  the debug key already matches, so `adb install -r` is an ordinary in-place
+  upgrade. Only the accessibility service has to be re-enabled afterwards,
+  which Android drops on any app update.
+
 ## v2.0.1
 
 ### Fixed
