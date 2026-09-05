@@ -21,7 +21,6 @@ Cross-platform design specs
 **/local.properties
 *.iml
 .idea/
-
 # ---- logs / misc ----
 *.log
 
@@ -36,6 +35,8 @@ graphify-out/
 
 # ---- droiddock-tauri: Rust build artifacts ----
 droiddock-tauri/src-tauri/target/
+droiddock 2
+droiddock-tauri/PHASE16_PARITY_CHECKLIST.md
 
 # ---- throwaway Phase 0 spikes, and captured protocol corpus (may contain real personal data) ----
 spikes/
