@@ -5,6 +5,7 @@ import Rail from "./components/Rail";
 import Icon from "./components/Icon";
 import Onboarding from "./components/Onboarding";
 import AppsView from "./components/views/AppsView";
+import { clearNowPlaying } from "./lib/mediaStore";
 import PhoneCard from "./components/phone/PhoneCard";
 import type { QuickAction } from "./components/phone/QuickActions";
 import { ALL_ITEMS, itemFor, type ViewId } from "./lib/nav";
@@ -28,6 +29,16 @@ import CallOverlay, { type ActiveCall } from "./components/CallOverlay";
 import SetupModal from "./components/SetupModal";
 import WirelessPairModal from "./components/WirelessPairModal";
 import Toasts, { type Toast } from "./components/Toasts";
+import { PhoneAudio, attachPhoneAudio, probeHevc } from "./lib/phoneAudio";
+import QuickShareModal from "./components/QuickShareModal";
+import {
+  quickshareRespond,
+  onQuickShareRequest,
+  onQuickShareReceived,
+  onQuickShareError,
+  type QuickShareRequest,
+} from "./lib/bridge";
+import { mirrorSetHevcSupported } from "./lib/bridge";
 import { onWifiStatus, wifiStatus, type WifiStatus } from "./lib/wifi";
 import {
   on,
@@ -45,7 +56,10 @@ import {
   adbScreenshot,
   adbScrcpyInstall,
   adbMirror,
+  adbMirrorApp,
+  scrcpyEmbeddedStart,
   adbDesktop,
+  onAutomation,
   adbCamera,
   onTools,
   onDevices,
@@ -57,7 +71,6 @@ import {
   clipboardPushNow,
   fsPush,
   wallpaperGet,
-  mediaState,
   onLinkQuality,
   onUpdateAvailable,
   onOpenUpdates,
@@ -66,7 +79,6 @@ import {
   type LinkQuality,
   type Notif,
   type IncomingCall,
-  type MediaState,
   type Progress,
   type ToolsStatus,
   type AdbDevice,
@@ -134,10 +146,12 @@ export default function App() {
   /// Set by the background check in `updater.rs`. Its only job out here is the
   /// rail dot — the row that acts on it lives in Settings → About.
   const [updateAvailable, setUpdateAvailable] = useState<UpdateInfo | null>(null);
-  const [media, setMedia] = useState<MediaState | null>(null);
   const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
   const [messageTarget, setMessageTarget] = useState<MessageTarget | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  // At most one Quick Share prompt at a time: the sender blocks on an
+  // answer, and stacking dialogs would make it unclear which is being answered.
+  const [quickShare, setQuickShare] = useState<QuickShareRequest | null>(null);
   const toastId = useRef(0);
 
   // ── Phase 13: ADB/scrcpy fallback state ─────────────────────────────────
@@ -171,7 +185,6 @@ export default function App() {
   /// phone sends only on a track change. Album art wins while something is
   /// playing — same precedence AirSync's phone card uses.
   const [wallpaper, setWallpaper] = useState<string | null>(null);
-  const [albumArt, setAlbumArt] = useState<string | null>(null);
   /// Tier C. Grade of the live link, from the Rust ping/pong probe. Distinct
   /// from `status.connected`: a socket can stay open long after the phone stops
   /// answering, which is exactly the case worth showing.
@@ -233,7 +246,7 @@ export default function App() {
     const offStatus = onWifiStatus((s) => {
       setStatus(s);
       if (!s.connected) {
-        setMedia(null);
+        clearNowPlaying();
         setActiveCall(null);
       }
     });
@@ -245,27 +258,10 @@ export default function App() {
       setNotifs((list) => list.filter((x) => x.key !== key))
     );
 
-    // Seed from the current state before subscribing. A listener alone only
-    // reports transitions, and `art` rides along only on a track change — so
-    // without this, mounting mid-song shows no player card and no artwork until
-    // the next track starts.
-    mediaState()
-      .then((m) => {
-        if (!m) return;
-        setMedia(m);
-        if (m.art) setAlbumArt(`data:image/jpeg;base64,${m.art}`);
-      })
-      .catch(() => {});
-
-    const offMedia = on<MediaState>("media", (m) => {
-      setMedia(m);
-      // `art` is present only when the track changed (or right after link-up);
-      // an explicit null means the new track genuinely has no artwork, which is
-      // different from "unchanged, keep what you have".
-      if (m.art !== undefined) {
-        setAlbumArt(m.art ? `data:image/jpeg;base64,${m.art}` : null);
-      }
-    });
+    // Now-playing is deliberately NOT held here. The phone pushes it once a
+    // second while music plays, and every one of those pushes used to re-render
+    // this component and the entire view below it. It lives in `lib/mediaStore`
+    // instead, where only the two components that display it subscribe.
 
     // Phone-initiated pushes (Android share sheet → DroidDock) land in Downloads
     // — surface them on whatever view is open.
@@ -324,7 +320,6 @@ export default function App() {
       offStatus();
       offNotif();
       offNotifGone();
-      offMedia();
       offPhonePush();
       offEditSync();
       offCall();
@@ -332,6 +327,54 @@ export default function App() {
       offUpdate();
       offOpenUpdates();
       offCallState();
+    };
+  }, [toast]);
+
+  // ── Phone audio over Wi-Fi + the HEVC capability probe ──────────────────
+  //
+  // Both live in the main window, not the mirror pop-out. Audio because its
+  // stream outlives any pop-out, and the probe because it has to have answered
+  // *before* the user starts a mirror — asking the phone for a codec this
+  // WebView cannot decode yields a black window and no error.
+  useEffect(() => {
+    const player = new PhoneAudio();
+    player.onError = (msg) => toast("bad", `Phone audio: ${msg}`);
+    const detach = attachPhoneAudio(player);
+    probeHevc()
+      .then((ok) => mirrorSetHevcSupported(ok))
+      .catch(() => mirrorSetHevcSupported(false));
+    return detach;
+  }, [toast]);
+
+  // ── Quick Share: incoming transfers from any nearby device ──────────────
+  useEffect(() => {
+    const offRequest = onQuickShareRequest((r) =>
+      setQuickShare((current) => {
+        // Already prompting: decline the newcomer rather than silently
+        // replacing a dialog the user is mid-decision on.
+        if (current) {
+          void quickshareRespond(r.id, false).catch(() => {});
+          return current;
+        }
+        return r;
+      })
+    );
+    const offReceived = onQuickShareReceived((r) =>
+      toast(
+        "ok",
+        r.paths.length === 1
+          ? `Received ${r.paths[0].split("/").pop()}`
+          : `Received ${r.paths.length} files to Downloads`
+      )
+    );
+    const offError = onQuickShareError((e) => {
+      setQuickShare(null);
+      toast("bad", `Quick Share: ${e.error}`);
+    });
+    return () => {
+      offRequest();
+      offReceived();
+      offError();
     };
   }, [toast]);
 
@@ -383,7 +426,7 @@ export default function App() {
   useEffect(() => {
     if (!status.connected) {
       setWallpaper(null);
-      setAlbumArt(null);
+      clearNowPlaying();
       setQuality(null);
       clearIcons();
       return;
@@ -564,8 +607,70 @@ export default function App() {
     try {
       await adbDesktop(serial, config?.desktopDisplaySize);
     } catch (e) {
-      // scrcpy itself rejects --new-display on Android < 11 or scrcpy < 2.5;
-      // surface its message rather than a generic failure.
+      // Two different failures reach here: our own pre-flight rejection when
+      // the local scrcpy predates virtual displays (3.0), and scrcpy's own
+      // message when the *phone* can't host one. Both are more useful than a
+      // generic failure, so neither is rewritten.
+      toast("bad", String(e));
+    }
+  };
+
+  /// Open one Android app in its own Mac window, from wherever you meet it —
+  /// currently a notification's app header. Same route the Apps grid uses.
+  const openAppOnMac = async (pkg: string, label: string) => {
+    if (!serial) return toast("bad", "Needs an ADB device — connect one from the Devices tab.");
+    try {
+      await adbMirrorApp(serial, pkg, true);
+      toast("ok", `Opening ${label} in a Mac window…`);
+    } catch (e) {
+      toast("bad", String(e));
+    }
+  };
+
+  /// `droiddock://…` routes. The Rust side validates and forwards; this runs
+  /// them through the same handlers the buttons use, so an automated mirror is
+  /// indistinguishable from a clicked one.
+  ///
+  /// `mirror` navigates rather than starting the Wi-Fi stream headlessly: that
+  /// route needs the user to approve capture on the phone, and a pop-out that
+  /// appears with no visible cause and no explanation is worse than landing
+  /// them on the tab that says so.
+  useEffect(() => {
+    return onAutomation((e) => {
+      switch (e.action) {
+        case "mirror":
+          setView("mirror");
+          break;
+        case "mirror-adb":
+          setView("mirror");
+          void embeddedAdb();
+          break;
+        case "desktop":
+          setView("mirror");
+          void desktopAdb();
+          break;
+        case "app":
+          void openAppOnMac(e.pkg, e.pkg);
+          break;
+        case "clipboard-push":
+          clipboardPushNow()
+            .then(() => toast("ok", "Clipboard sent to your phone"))
+            .catch((err) => toast("bad", String(err)));
+          break;
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serial, tools]);
+
+  /// The in-app ADB mirror. Distinct from `mirrorAdb`, which spawns scrcpy's
+  /// own window: this drives scrcpy's server directly and paints into our
+  /// pop-out, so there is no consent tap and no second app in the Dock.
+  const embeddedAdb = async () => {
+    if (!tools?.scrcpy) return setSetup({ reason: "The in-app mirror needs scrcpy." });
+    if (!serial) return toast("bad", "Needs an ADB device — connect one from the Devices tab.");
+    try {
+      await scrcpyEmbeddedStart(serial);
+    } catch (e) {
       toast("bad", String(e));
     }
   };
@@ -675,7 +780,17 @@ export default function App() {
       case "dashboard":
         return <DashboardView onNavigate={setView} />;
       case "apps":
-        return <AppsView linked={linked} adbSerial={connectedDevice?.serial ?? null} onToast={toast} />;
+        return (
+          <AppsView
+            linked={linked}
+            adbSerial={connectedDevice?.serial ?? null}
+            pinned={config?.pinnedApps ?? []}
+            onPinnedChange={(next) => updateSetting("pinnedApps", next)}
+            openOnMac={config?.openAppsOnMac ?? false}
+            onOpenOnMacChange={(next) => updateSetting("openAppsOnMac", next)}
+            onToast={toast}
+          />
+        );
       case "files":
         return <FilesView linked={linked} onToast={toast} />;
       case "photos":
@@ -708,6 +823,11 @@ export default function App() {
               setNotifs((l) => l.filter((x) => x.key !== key));
             }}
             onToggleNative={(on) => updateSetting("nativeNotifs", on)}
+            onOpenOnMac={
+              connectedDevice?.serial && tools?.scrcpy
+                ? (pkg, app) => openAppOnMac(pkg, app)
+                : null
+            }
             onToggleMute={(pkg, muted) => {
               const current = config?.mutedApps ?? [];
               updateSetting(
@@ -727,12 +847,13 @@ export default function App() {
           />
         );
       case "media":
-        return <MediaView media={media} />;
+        return <MediaView />;
       case "settings":
         return (
           <SettingsView
             config={config}
             onConfig={setConfig}
+            linked={linked}
             onToast={toast}
             updateAvailable={updateAvailable}
           />
@@ -743,7 +864,12 @@ export default function App() {
             linked={linked}
             adbSerial={connectedDevice?.serial ?? null}
             scrcpyReady={!!tools?.scrcpy}
+            scrcpyVersion={tools?.scrcpyVersion ?? null}
+            caps={tools?.caps ?? null}
+            uiMode={config?.desktopUiMode ?? "desktop"}
+            onUiMode={(m) => updateSetting("desktopUiMode", m)}
             onAdbMirror={mirrorAdb}
+            onAdbEmbedded={embeddedAdb}
             onAdbDesktop={desktopAdb}
             defaultMode={config?.defaultMirrorMode ?? "wifi"}
             onToast={toast}
@@ -825,7 +951,6 @@ export default function App() {
             <PhoneCard
               status={status}
               info={appDeviceInfo}
-              media={media}
               config={config}
               adb={connectedDevice}
               quality={quality}
@@ -835,7 +960,6 @@ export default function App() {
               // Both, unresolved. Which one shows depends on whether the
               // player card is open, and that state lives inside the card.
               wallpaper={wallpaper}
-              albumArt={media?.active ? albumArt : null}
               onRecentError={(m) => toast("bad", m)}
               onPair={() => setView("dashboard")}
             />
@@ -926,6 +1050,15 @@ export default function App() {
             <div className="text-[12.5px] text-dim">Lands in Download · use the Files view to pick a folder</div>
           </div>
         </div>
+      )}
+      {quickShare && (
+        <QuickShareModal
+          request={quickShare}
+          onRespond={(accept) => {
+            void quickshareRespond(quickShare.id, accept).catch(() => {});
+            setQuickShare(null);
+          }}
+        />
       )}
       <Toasts items={toasts} />
     </div>

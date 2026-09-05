@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "2.0.1"
+version = "2.2.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -15,6 +15,8 @@ name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
+prost-build = "0.14"
+protox = "0.9"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
@@ -28,6 +30,9 @@ tauri-plugin-autostart = "2"
 # The updater's minisign signature is its own scheme — unrelated to, and no
 # substitute for, Apple notarization.
 tauri-plugin-updater = "2"
+# Automation surface: registers the `droiddock://` URL scheme so Raycast,
+# Shortcuts, Alfred or a plain `open` can drive the app. Apache-2.0 OR MIT.
+tauri-plugin-deep-link = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
@@ -50,6 +55,16 @@ aes-gcm = "0.11.0"
 hkdf = "0.13.0"
 sha2 = "0.11.0"
 getrandom = "0.4.3"
+dav-server = { version = "0.11", default-features = false, features = ["hyper"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+bytes = "1"
+hmac = "0.13"
+aes = "0.9"
+cbc = { version = "0.2", features = ["alloc"] }
+base64 = "0.23"
+prost = "0.14"
+p256 = { version = "0.14", features = ["ecdh"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # `localtime_r` for the tray's "Paused until HH:MM" — already in the tree
@@ -83,6 +98,9 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
 ] }
 objc2-foundation = { version = "0.3", default-features = false, features = [
     "std",
+    # NSArray of NSNumber, bridged to the CFArrayRef the CoreGraphics Spaces
+    # API takes — see appearance::confine_to_one_space.
+    "NSArray",
     # The options dictionary for AXIsProcessTrustedWithOptions — NSDictionary
     # is toll-free bridged to CFDictionaryRef, so this saves building one by
     # hand (mac_remote::imp::reset_accessibility).

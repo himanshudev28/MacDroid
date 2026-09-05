@@ -34,9 +34,20 @@ import {
   updateInstall,
   onUpdateProgress,
   onOpenUpdates,
+  adbFreeformStatus,
+  adbFreeformEnable,
+  adbFreeformRevert,
+  crashLogCount,
+  webdavStart,
+  webdavStop,
+  webdavStatus,
+  crashLogsReveal,
+  crashLogsClear,
   type DroidConfig,
   type PhotoSyncProgress,
   type UpdateInfo,
+  type FreeformStatus,
+  type WebdavStatus,
 } from "../../lib/bridge";
 
 const HOUR_MS = 3_600_000;
@@ -79,11 +90,14 @@ function SettingsView({
   config,
   onConfig,
   onToast,
+  linked,
   updateAvailable,
 }: {
   config: DroidConfig | null;
   onConfig: (c: DroidConfig) => void;
   onToast: (kind: "ok" | "bad" | "info", text: string) => void;
+  /// Whether a phone is currently linked — the phone volume can't mount without one.
+  linked: boolean;
   /// Found by the once-a-day background check in `updater.rs`. Seeds the row so
   /// a user who follows the rail badge here sees the result immediately, rather
   /// than having to press Check to be told what the badge already told them.
@@ -112,21 +126,45 @@ function SettingsView({
 
   // Re-checked on a timer rather than once: the grant is made in System
   // Settings, in another window, and the user comes straight back here
-  // expecting the warning to have cleared. Only runs while the toggle is on.
+  // expecting the warning to have cleared.
+  //
+  // Gated on the System tab being open, not just on the toggle. `axTrusted` is
+  // rendered in exactly one place — inside the `tab === "system"` block — so
+  // with Remote Control on and Settings sitting on any other tab, this was an
+  // IPC round trip every two seconds, forever, for a value nothing displayed.
+  // It also keeps running while the window is hidden or behind another app,
+  // which is why the visibility listener is here too: the grant cannot change
+  // without the user going to System Settings and coming back, and coming back
+  // fires `visibilitychange`, so a hidden window has nothing to poll for.
+  const watchAx = !!config?.remoteControl && tab === "system";
   useEffect(() => {
-    if (!config?.remoteControl) return;
+    if (!watchAx) return;
     let alive = true;
+    let id: ReturnType<typeof setInterval> | null = null;
     const check = () =>
       accessibilityTrusted()
         .then((t) => alive && setAxTrusted(t))
         .catch(() => {});
-    check();
-    const id = setInterval(check, 2000);
+    const stop = () => {
+      if (id !== null) clearInterval(id);
+      id = null;
+    };
+    const sync = () => {
+      stop();
+      if (document.hidden) return;
+      // Check on the way back in as well as on the interval — returning from
+      // System Settings is the exact moment the answer changes.
+      check();
+      id = setInterval(check, 2000);
+    };
+    sync();
+    document.addEventListener("visibilitychange", sync);
     return () => {
       alive = false;
-      clearInterval(id);
+      stop();
+      document.removeEventListener("visibilitychange", sync);
     };
-  }, [config?.remoteControl]);
+  }, [watchAx]);
 
   // Read once per visit to the tab, not on a timer: the assignment only changes
   // when someone uses the Dock's menu, and re-reading it means shelling out to
@@ -365,8 +403,8 @@ function SettingsView({
               </div>
             </Field>
             <Toggle
-              label="Encrypt messages"
-              hint="AES-256-GCM on clipboard, notifications, messages, contacts and call events, keyed off your pairing code. File transfers, thumbnails and screen mirroring stay unencrypted. Needs a phone app new enough to support it — if it isn't, the link quietly stays as it is."
+              label="Encrypt the link"
+              hint="AES-256-GCM on everything after pairing — clipboard, notifications, messages, contacts, calls, and now file transfers, thumbnails and screen mirroring too. Keyed off your pairing code. Each half needs a phone app new enough to support it; whatever isn't supported quietly stays as it was rather than failing."
               on={config.encryptLink}
               onChange={(v) => set("encryptLink", v)}
             />
@@ -391,7 +429,7 @@ function SettingsView({
             </Field>
             <Field
               label="Desktop display size"
-              hint="Virtual display for desktop mode — scrcpy's “flex display”. Leave empty to let the phone choose. The window is resizable either way."
+              hint="Virtual display for desktop mode. “Auto” derives a landscape size from this Mac's screen — a phone left to choose picks its own portrait shape."
             >
               <Choice
                 value={config.desktopDisplaySize}
@@ -404,6 +442,53 @@ function SettingsView({
                 ]}
               />
             </Field>
+            {/* The density knob. Android picks phone vs tablet/desktop layouts
+                from px ÷ (dpi ÷ 160), so this — not the resolution above — is
+                what decides whether an app opens as a desktop window or a
+                magnified phone. Also surfaced on the Mirror tab, because it is
+                the one people flip per-app. */}
+            <Field
+              label="Window layout"
+              hint="Which layout Android serves on a virtual display. “Phone” keeps the device's own density, which is how this behaved before the setting existed."
+            >
+              <Choice
+                value={config.desktopUiMode}
+                onChange={(v) => set("desktopUiMode", v)}
+                options={[
+                  ["desktop", "Desktop"],
+                  ["tablet", "Tablet"],
+                  ["phone", "Phone"],
+                ]}
+              />
+            </Field>
+            <Toggle
+              label="Resize display with the window"
+              hint="scrcpy's flex display — dragging the window edge resizes the Android display itself instead of scaling a fixed one. Needs scrcpy 4.0 or newer; ignored on older builds."
+              on={config.desktopFlex}
+              onChange={(v) => set("desktopFlex", v)}
+            />
+            {/* The Apps grid's click behaviour lives here rather than under a
+                section of its own: what it switches between is "launch on the
+                phone" and "open a virtual-display window", and every knob that
+                shapes that window is the next three rows down. */}
+            <Toggle
+              label="Open apps on this Mac"
+              hint="Clicking an app in the Apps tab opens it in its own Mac window instead of launching it on the phone. Needs ADB and scrcpy; without a connected device the click falls back to the phone. Hold Option to do the other one."
+              on={config.openAppsOnMac}
+              onChange={(v) => set("openAppsOnMac", v)}
+            />
+            <Toggle
+              label="Show Android bars in app windows"
+              hint="Keeps the virtual display's launcher, status and nav bars around a single app opened on this Mac. Off makes the window read as that app rather than a phone screen."
+              on={config.appWindowChrome}
+              onChange={(v) => set("appWindowChrome", v)}
+            />
+            <Toggle
+              label="Keep apps running when the window closes"
+              hint="Hands the app back to the phone's own screen instead of killing it. Needs scrcpy 3.1 or newer."
+              on={config.appWindowKeepAlive}
+              onChange={(v) => set("appWindowKeepAlive", v)}
+            />
 
             {/* One quality group for both transports. Wi-Fi passes these to the
                 phone's MediaCodec on `mirror-start`; ADB passes them to scrcpy.
@@ -460,6 +545,59 @@ function SettingsView({
                 ]}
               />
             </Field>
+            {/* Codec and audio apply to both transports. Over Wi-Fi each end
+                degrades on its own — the phone to H.264 without an HEVC
+                encoder, this Mac by never asking when its decoder says no — so
+                neither setting can produce a stream that fails to play. */}
+            <Field
+              label="Video codec"
+              hint="H.265 roughly halves the bandwidth at the same quality. Used on both the Wi-Fi and ADB paths, and falls back to H.264 on its own if either the phone can't encode it or this Mac can't decode it."
+            >
+              <Choice
+                value={config.mirrorCodec}
+                onChange={(v) => set("mirrorCodec", v)}
+                options={[
+                  ["h264", "H.264"],
+                  ["h265", "H.265"],
+                ]}
+              />
+            </Field>
+            <Toggle
+              label="Phone audio"
+              hint="Play the phone's audio through this Mac while mirroring. Over Wi-Fi it needs Android 10+ and the microphone permission, because Android routes captured playback through the same API. Apps that opt out of capture — most paid music and video apps — come through silent."
+              on={config.mirrorAudio}
+              onChange={(v) => set("mirrorAudio", v)}
+            />
+            {/* scrcpy passthrough. Every one of these is off / scrcpy-default
+                unless switched on, so a config that predates them behaves
+                exactly as it did. */}
+            <Toggle
+              label="Low-level keyboard"
+              hint="Sends keystrokes as a virtual USB keyboard, which fixes non-Latin layouts and games. Changes how every key reaches the phone, so it's off by default. Needs scrcpy 2.4 or newer."
+              on={config.scrcpyUhid}
+              onChange={(v) => set("scrcpyUhid", v)}
+            />
+            <Toggle
+              label="Keep the phone awake"
+              hint="Stops the phone's screen timing out while it's mirroring."
+              on={config.scrcpyStayAwake}
+              onChange={(v) => set("scrcpyStayAwake", v)}
+            />
+            <Toggle
+              label="Blank the phone screen"
+              hint="Turns the phone's own display off while mirroring — the phone still responds, it just isn't showing anything."
+              on={config.scrcpyTurnScreenOff}
+              onChange={(v) => set("scrcpyTurnScreenOff", v)}
+            />
+            <Toggle
+              label="Float mirror windows on top"
+              hint="Keeps scrcpy windows above other Mac windows."
+              on={config.scrcpyAlwaysOnTop}
+              onChange={(v) => set("scrcpyAlwaysOnTop", v)}
+            />
+
+            <FreeformCard />
+
             <Field
               label="Reset quality"
               hint="Back to 12 Mb · 60 fps · phone resolution — the defaults these ship with."
@@ -609,6 +747,18 @@ function SettingsView({
                 Choose…
               </button>
             </Field>
+            <PhoneVolumeCard linked={linked} />
+          </Section>
+        )}
+
+        {tab === "macfiles" && (
+          <Section icon="download" title="Quick Share">
+            <Toggle
+              label="Receive files from nearby devices"
+              hint="Makes this Mac appear in the Quick Share sheet on any nearby Android, ChromeOS or Windows device — no DroidDock needed on the sender. Every transfer still has to be accepted here, and the code shown must match the sender's. Off by default: Quick Share's “contacts only” mode needs Google account access this app doesn't have, so while it's on, this Mac is visible to everyone on the network."
+              on={config.quickShareEnabled}
+              onChange={(v) => set("quickShareEnabled", v)}
+            />
           </Section>
         )}
 
@@ -665,11 +815,19 @@ function SettingsView({
                 <div>
                   <strong>DroidDock is assigned to every desktop</strong>
                   <p>
-                    macOS has a Space assignment recorded for this app (Dock icon
-                    → Options → Assign To), and the Dock applies it to every
-                    window DroidDock opens — which is why the main window shows
-                    up on whichever desktop you switch to. It's stored with your
-                    Dock preferences, so it outlives reinstalls and updates.
+                    The window server has this window on more than one desktop,
+                    which is why it shows up on whichever one you switch to. It
+                    comes from the Dock's per-app Space assignment (Dock icon →
+                    Options → Assign To), which the Dock stamps onto every window
+                    DroidDock opens and which overrides anything the app asks for
+                    its own window. It lives with your Dock preferences, so it
+                    outlives reinstalls and updates.
+                  </p>
+                  <p>
+                    <strong>If the button below doesn't help,</strong> set it by
+                    hand: right-click DroidDock in the Dock → Options → Assign To
+                    → None. The Dock doesn't always write this choice somewhere
+                    DroidDock can read or change, so the menu is the reliable fix.
                   </p>
                   {spacesFixFailed && (
                     <p>
@@ -857,6 +1015,7 @@ function SettingsView({
             <Field label="Port" hint="Wi-Fi link + UDP discovery (port + 1)">
               <span className="data text-dim">{config.port}</span>
             </Field>
+            <CrashLogsRow />
           </Section>
         )}
       </div>
@@ -1039,6 +1198,196 @@ function SegmentedControl<T extends string>({
   );
 }
 
+/// Mount the phone's storage as a Finder volume.
+///
+/// Lives in Mac files rather than Mirroring because it is the same question as
+/// the rest of that section — where files live and who can reach them.
+function PhoneVolumeCard({ linked }: { linked: boolean }) {
+  const [status, setStatus] = useState<WebdavStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    webdavStatus().then(setStatus).catch(() => {});
+  }, []);
+
+  const act = async (fn: () => Promise<WebdavStatus>) => {
+    setBusy(true);
+    setErr(null);
+    try {
+      setStatus(await fn());
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-1 rounded-xl bg-panel3/60 p-4">
+      <p className="text-[12px] font-semibold text-fg">Phone in Finder</p>
+      <p className="mt-1 text-[11px] leading-relaxed text-dim">
+        Mounts your phone's storage as a volume, so any Mac app can open a file from it —
+        not just the Files tab here.
+      </p>
+      <p className="mt-2 text-[11px] leading-relaxed text-dim">
+        <span className="text-fg/80">Read-only.</span> Finder writes <code>.DS_Store</code> into
+        every folder it opens, and mounting read-write would scatter those across your phone.
+        Use the Files tab to upload, rename or delete.
+      </p>
+
+      {status?.running && status.mountPoint && (
+        <p className="mt-2 font-mono text-[10.5px] text-dim">{status.mountPoint}</p>
+      )}
+      {err && <p className="mt-2 text-[11px] leading-relaxed text-dim">{err}</p>}
+      {!linked && (
+        <p className="mt-2 text-[11px] text-dim">Needs a linked phone.</p>
+      )}
+
+      <div className="mt-3 flex items-center gap-2">
+        {status?.running ? (
+          <button onClick={() => act(webdavStop)} disabled={busy} className="btn btn-secondary">
+            Unmount
+          </button>
+        ) : (
+          <button
+            onClick={() => act(webdavStart)}
+            disabled={busy || !linked}
+            className="btn btn-secondary"
+          >
+            {busy ? "Mounting…" : "Mount in Finder"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/// Panic logs, written locally and never sent anywhere.
+///
+/// Shown only once there is something to show — an always-visible "0 logs" row
+/// invites people to worry about a folder that is empty precisely because
+/// nothing is wrong.
+function CrashLogsRow() {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    crashLogCount().then(setCount).catch(() => setCount(0));
+  }, []);
+
+  if (count === 0) return null;
+
+  return (
+    <Field
+      label="Crash logs"
+      hint={`${count} ${count === 1 ? "log" : "logs"} in ~/Library/Logs/DroidDock. Written on this Mac only — DroidDock never sends them anywhere.`}
+    >
+      <div className="flex items-center gap-2">
+        <button onClick={() => crashLogsReveal()} className="btn btn-secondary">
+          Reveal
+        </button>
+        <button
+          onClick={async () => {
+            await crashLogsClear();
+            setCount(0);
+          }}
+          className="btn btn-secondary"
+        >
+          Clear
+        </button>
+      </div>
+    </Field>
+  );
+}
+
+/// Android's freeform-windowing settings, applied over ADB.
+///
+/// Deliberately a card with its own buttons rather than a Toggle: these are
+/// three secure system settings on the *user's phone* that survive DroidDock
+/// being uninstalled. Nothing here fires as a side effect of starting a mirror,
+/// the current values are shown before anything is changed, and Revert restores
+/// what was captured rather than blindly writing 0.
+function FreeformCard() {
+  const [status, setStatus] = useState<FreeformStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const refresh = async () => {
+    try {
+      setStatus(await adbFreeformStatus());
+      setErr(null);
+    } catch (e) {
+      // No ADB device is the ordinary case, not a failure worth shouting
+      // about — the card just explains that it needs one.
+      setStatus(null);
+      setErr(String(e));
+    }
+  };
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  const act = async (fn: () => Promise<FreeformStatus>) => {
+    setBusy(true);
+    try {
+      setStatus(await fn());
+      setErr(null);
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-1 rounded-xl bg-panel3/60 p-4">
+      <p className="text-[12px] font-semibold text-fg">Freeform windows on the phone</p>
+      <p className="mt-1 text-[11px] leading-relaxed text-dim">
+        Desktop mode gives you large-screen layouts on its own. Draggable, resizable app
+        windows additionally need three Android developer settings switched on. DroidDock can
+        set them for you over ADB.
+      </p>
+      <p className="mt-2 text-[11px] leading-relaxed text-dim">
+        These are settings on <span className="text-fg/80">your phone</span>, not in DroidDock —
+        they stay on if you uninstall this app. Revert puts back exactly what was there before.
+      </p>
+
+      {status && (
+        <div className="mt-3 space-y-1 font-mono text-[10.5px] text-dim">
+          <div>enable_freeform_support: {status.values[0] ?? "unset"}</div>
+          <div>force_desktop_mode_on_external_displays: {status.values[1] ?? "unset"}</div>
+          <div>enable_non_resizable_multi_window: {status.values[2] ?? "unset"}</div>
+          {status.sdk != null && (
+            <div className="pt-1 not-italic">
+              Android API {status.sdk}
+              {status.supported ? "" : " — needs 35 (Android 15) or newer"}
+            </div>
+          )}
+        </div>
+      )}
+
+      {err && <p className="mt-3 text-[11px] leading-relaxed text-dim">{err}</p>}
+
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          onClick={() => act(adbFreeformEnable)}
+          disabled={busy || !status?.supported || status?.enabled}
+          className="btn btn-secondary"
+        >
+          {status?.enabled ? "Already on" : "Enable on phone"}
+        </button>
+        <button onClick={() => act(adbFreeformRevert)} disabled={busy} className="btn btn-secondary">
+          Revert
+        </button>
+        <button onClick={() => void refresh()} disabled={busy} className="btn btn-secondary">
+          Refresh
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Toggle({
   label,
   hint,
@@ -1074,9 +1423,11 @@ function Toggle({
   );
 }
 
-/* Memoised: App holds `media`, which the phone pushes once a second while
-   something is playing. Without this, every one of those ticks re-rendered this
-   whole view (thumbnail grids, file lists) even though none of its props
-   changed. All props here are primitives or stable useCallback refs, so the
-   comparison is sound. */
+/* Memoised. This was originally defence against the phone's 1 Hz now-playing
+   push re-rendering every view; that push no longer reaches `App` at all (it
+   lives in `lib/mediaStore`, read only by the two components that show it). The
+   memo stays because `App` still re-renders for its own reasons — an arriving
+   notification, a toast appearing and expiring, a transfer's progress — and
+   none of those change this view's props. All props here are primitives or
+   stable useCallback refs, so the comparison is sound. */
 export default memo(SettingsView);

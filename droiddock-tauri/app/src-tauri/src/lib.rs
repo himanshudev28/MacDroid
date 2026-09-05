@@ -1,11 +1,16 @@
 mod adb;
 mod appearance;
+mod audio;
+mod automation;
 mod clipboard;
 mod config;
+mod crash;
 mod crypto;
 mod discovery;
 mod edit_cache;
 mod link_quality;
+mod mac_apps;
+mod mac_audio;
 mod mac_fs;
 mod mac_info;
 mod mac_media;
@@ -15,10 +20,13 @@ mod mirror;
 mod notifications;
 mod photo_sync;
 mod protocol;
+mod quickshare;
+mod scrcpy_client;
 mod statusbar;
 mod transfer;
 mod tray;
 mod updater;
+mod webdav;
 mod ws_server;
 
 use adb::AdbState;
@@ -98,6 +106,7 @@ fn set_setting(app: AppHandle, state: State<AppState>, key: String, value: Value
         // list edited wholesale from Settings (add/remove folder), same as
         // any other setting here, just array-shaped instead of scalar.
         "macFsEnabled" => cfg.mac_fs_enabled = value.as_bool().unwrap_or(false),
+        "quickShareEnabled" => cfg.quickshare_enabled = value.as_bool().unwrap_or(false),
         "macFsRoots" => {
             cfg.mac_fs_roots = value
                 .as_array()
@@ -113,6 +122,25 @@ fn set_setting(app: AppHandle, state: State<AppState>, key: String, value: Value
         "lowBatteryAlert" => cfg.low_battery_alert = value.as_bool().unwrap_or(true),
         "lowBatteryPct" => cfg.low_battery_pct = value.as_u64().unwrap_or(20).clamp(5, 50) as u8,
         "desktopDisplaySize" => cfg.desktop_display_size = value.as_str().unwrap_or("").trim().to_string(),
+        // Virtual-display behaviour. `desktopUiMode` is the one that decides
+        // whether an app opens as a desktop window or a magnified phone.
+        "desktopUiMode" => cfg.desktop_ui_mode = str_setting(&value, "desktop"),
+        "desktopFlex" => cfg.desktop_flex = value.as_bool().unwrap_or(true),
+        "appWindowChrome" => cfg.app_window_chrome = value.as_bool().unwrap_or(false),
+        "appWindowKeepAlive" => cfg.app_window_keep_alive = value.as_bool().unwrap_or(true),
+        "mirrorCodec" => cfg.mirror_codec = str_setting(&value, "h264"),
+        "mirrorAudio" => cfg.mirror_audio = value.as_bool().unwrap_or(true),
+        "scrcpyUhid" => cfg.scrcpy_uhid = value.as_bool().unwrap_or(false),
+        "scrcpyStayAwake" => cfg.scrcpy_stay_awake = value.as_bool().unwrap_or(false),
+        "scrcpyTurnScreenOff" => cfg.scrcpy_turn_screen_off = value.as_bool().unwrap_or(false),
+        "scrcpyAlwaysOnTop" => cfg.scrcpy_always_on_top = value.as_bool().unwrap_or(false),
+        "pinnedApps" => {
+            cfg.pinned_apps = value
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_default()
+        }
+        "openAppsOnMac" => cfg.open_apps_on_mac = value.as_bool().unwrap_or(false),
         // Mirror quality. Clamped here as well as at each use site — this is
         // the boundary the frontend can write through, so it's the one place
         // that has to hold.
@@ -137,6 +165,23 @@ fn set_setting(app: AppHandle, state: State<AppState>, key: String, value: Value
     drop(cfg);
     if key.starts_with("menubar") {
         statusbar::refresh_title(&app);
+    }
+    // Several settings here decide what the Mac *advertises* it can do, and the
+    // phone only ever heard that list once, in `welcome`. So turning "Mac
+    // files" (or remote control, or Mac apps) on while the phone was already
+    // linked left the phone's UI unchanged — the Mac Files tab is gated on the
+    // `macfs` cap and simply never appeared, which read as "I granted the
+    // folders and the phone still can't see them".
+    //
+    // Rather than maintain a list of which keys matter, re-advertise after
+    // every save and let `push_caps` stay silent when the list is unchanged.
+    // It is a single small JSON message on a user-driven action.
+    {
+        let app2 = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let ws = app2.state::<ws_server::SharedState>().inner().clone();
+            ws_server::push_caps(&app2, &ws).await;
+        });
     }
     Ok(updated)
 }
@@ -541,8 +586,14 @@ pub(crate) fn base64_encode(bytes: &[u8]) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before anything spawns: a panic in a background task is otherwise
+    // silent, and the app keeps running with one feature dead.
+    crash::install();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // Registers the `droiddock://` scheme. Must be initialised before
+        // setup so a URL that launched the app is delivered, not dropped.
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -561,11 +612,28 @@ pub fn run() {
             app.manage(ClipboardGuard::default());
             app.manage(NotifState::default());
             app.manage(MirrorState::default());
+            app.manage(audio::AudioState::default());
+            app.manage(quickshare::server::QuickShareState::default());
             app.manage(link_quality::LinkQuality::default());
             app.manage(statusbar::StatusState::default());
             app.manage(ws_server::LastPhoneName::default());
             app.manage(AdbState::default());
             app.manage(updater::UpdaterState::default());
+            app.manage(webdav::WebdavState::default());
+            app.manage(scrcpy_client::ScrcpyState::default());
+
+            // `droiddock://…` — the automation surface. Registered here so a URL
+            // that arrives while the app is already running is handled; one that
+            // *launched* the app is delivered by the plugin on the same channel.
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    for url in event.urls() {
+                        automation::handle_url(&handle, url.as_str());
+                    }
+                });
+            }
 
             // Phase 17: clears stale edit-cache sessions (keeping any still-pending
             // unsynced edit) and starts a fresh session dir for this launch. Managed
@@ -624,6 +692,24 @@ pub fn run() {
                             // directed broadcast. Additive — the UDP responder
                             // above is unchanged.
                             tokio::spawn(mdns::run(h.clone(), port));
+                            // Quick Share advertises only when switched on;
+                            // `start` is a no-op otherwise.
+                            {
+                                let h = h.clone();
+                                tokio::spawn(async move {
+                                    let on = h
+                                        .state::<AppState>()
+                                        .config
+                                        .lock()
+                                        .unwrap()
+                                        .quickshare_enabled;
+                                    if on {
+                                        if let Err(e) = quickshare::server::start(h).await {
+                                            eprintln!("[quickshare] could not start: {e}");
+                                        }
+                                    }
+                                });
+                            }
                             tokio::spawn(link_quality::run(h.clone(), ws.clone()));
                             // Phase 3: 1s clipboard watcher (outbound Mac→phone).
                             tokio::spawn(clipboard::run(h.clone(), ws.clone()));
@@ -728,6 +814,14 @@ pub fn run() {
             mirror::mirror_set_on_top,
             mirror::mirror_input,
             mirror::mirror_attach,
+            mirror::mirror_set_hevc_supported,
+            audio::audio_attach,
+            quickshare::server::quickshare_set_enabled,
+            quickshare::server::quickshare_status,
+            quickshare::server::quickshare_respond,
+            scrcpy_client::scrcpy_embedded_start,
+            scrcpy_client::scrcpy_embedded_stop,
+            scrcpy_client::scrcpy_embedded_running,
             adb::adb_tools,
             adb::adb_scrcpy_install,
             adb::adb_devices,
@@ -743,6 +837,9 @@ pub fn run() {
             adb::adb_mirror,
             adb::adb_desktop,
             adb::adb_mirror_app,
+            adb::adb_freeform_status,
+            adb::adb_freeform_enable,
+            adb::adb_freeform_revert,
             adb::adb_screenshot,
             adb::adb_volume_get,
             adb::adb_volume_set,
@@ -767,6 +864,12 @@ pub fn run() {
             updater::update_check,
             updater::update_install,
             updater::app_version,
+            webdav::webdav_start,
+            webdav::webdav_stop,
+            webdav::webdav_status,
+            crash::crash_log_count,
+            crash::crash_logs_reveal,
+            crash::crash_logs_clear,
         ])
         // ── Close means hide, not destroy ────────────────────────────────
         //
@@ -811,6 +914,14 @@ pub fn run() {
                 // open on another desktop is reached by going there, not by
                 // hauling it here. See `tray::raise_main`.
                 tray::raise_main(app);
+            }
+            // Quitting with the in-app mirror running otherwise leaves its
+            // `adb forward` behind: the phone-side server dies with us
+            // (kill_on_drop), but the forward lives in the adb server and
+            // survives until adb itself is restarted. They accumulate one per
+            // session. This removes it on the way out.
+            if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
+                scrcpy_client::cleanup_blocking(app);
             }
         });
 }

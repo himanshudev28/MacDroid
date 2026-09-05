@@ -28,6 +28,11 @@ fn default_mirror_mode() -> String { "wifi".to_string() }
 // 6 Mbps / 30 fps was a conservative guess nobody ever revisited.
 fn default_mirror_bitrate() -> u32 { 12 }
 fn default_mirror_fps() -> u32 { 60 }
+/// The mode the feature exists to provide. A user who wants the old
+/// stretched-phone behaviour can still pick `phone`.
+fn default_desktop_ui_mode() -> String { "desktop".to_string() }
+/// scrcpy's own default. See `Config::mirror_codec` for why this isn't h265.
+fn default_mirror_codec() -> String { "h264".to_string() }
 
 fn default_mac_fs_roots() -> Vec<String> {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
@@ -100,6 +105,16 @@ pub struct Config {
     /// paired phone can reach on this Mac.
     #[serde(default)]
     pub mac_fs_enabled: bool,
+    /// Advertise this Mac as a Quick Share target so any nearby Android,
+    /// ChromeOS or Windows device can send it files.
+    ///
+    /// Off by default, and that is a deliberate privacy posture rather than
+    /// caution: Quick Share's "contacts only" visibility depends on Google
+    /// account state a third-party implementation cannot obtain, so the only
+    /// mode available makes this Mac visible to *everyone* on the network for
+    /// as long as it is on.
+    #[serde(default)]
+    pub quickshare_enabled: bool,
     #[serde(default = "default_mac_fs_roots")]
     pub mac_fs_roots: Vec<String>,
     /// Tier C: encrypt JSON control messages (AES-256-GCM keyed off the pairing
@@ -157,6 +172,74 @@ pub struct Config {
     /// "let the device choose".
     #[serde(default)]
     pub desktop_display_size: String,
+
+    // ── Virtual-display behaviour (desktop mode + per-app windows) ───────
+    /// Which Android layout the virtual display asks for:
+    /// `desktop` (160 dpi) | `tablet` (240 dpi) | `phone` (device density).
+    ///
+    /// This is the setting behind "why does the app open as a stretched phone".
+    /// Android chooses its layout from `px ÷ (dpi ÷ 160)`, so forcing a low
+    /// density is what produces a real desktop rather than a magnified phone.
+    /// `phone` reproduces the behaviour this app had before the setting
+    /// existed, and is here because some apps genuinely behave better that way.
+    #[serde(default = "default_desktop_ui_mode")]
+    pub desktop_ui_mode: String,
+    /// scrcpy's "flex display" — resize the Android display with the Mac
+    /// window instead of scaling a fixed one. Needs scrcpy 4.0+; silently
+    /// omitted on older builds.
+    #[serde(default = "default_true")]
+    pub desktop_flex: bool,
+    /// Keep the virtual display's launcher/status/nav bars around an app
+    /// window. Off by default: without them the window reads as that app on
+    /// the Mac rather than a phone screen with the app open.
+    #[serde(default)]
+    pub app_window_chrome: bool,
+    /// On closing an app window, hand the app back to the phone's own display
+    /// instead of killing it. Needs scrcpy 3.1+.
+    #[serde(default = "default_true")]
+    pub app_window_keep_alive: bool,
+
+    // ── scrcpy passthrough (all opt-in; absent flags = scrcpy's own default) ──
+    /// `h264` (scrcpy's default — the flag is not passed at all) or `h265`.
+    /// Not defaulted to H.265 on purpose: naming a codec the phone can't
+    /// encode is a hard failure at spawn, not a quality regression.
+    #[serde(default = "default_mirror_codec")]
+    pub mirror_codec: String,
+    /// Forward phone audio over the ADB/scrcpy mirror. scrcpy already does this
+    /// by default on Android 11+, so this only ever adds `--no-audio` when off.
+    #[serde(default = "default_true")]
+    pub mirror_audio: bool,
+    /// `--keyboard=uhid`: low-level key injection, which fixes non-Latin
+    /// layouts and games. Off by default because it changes how every
+    /// keystroke reaches the phone. Needs scrcpy 2.4+.
+    #[serde(default)]
+    pub scrcpy_uhid: bool,
+    /// Keep the phone awake while mirroring.
+    #[serde(default)]
+    pub scrcpy_stay_awake: bool,
+    /// Blank the phone's own screen while mirroring.
+    #[serde(default)]
+    pub scrcpy_turn_screen_off: bool,
+    /// Float the scrcpy window above other Mac windows.
+    #[serde(default)]
+    pub scrcpy_always_on_top: bool,
+
+    /// The phone's freeform-windowing settings as they were *before* DroidDock
+    /// turned them on, so Revert restores exactly that rather than writing 0.
+    /// `None` = we have never changed them. See `adb::freeform_enable`.
+    #[serde(default)]
+    pub freeform_prev: Option<serde_json::Map<String, serde_json::Value>>,
+
+    /// Packages pinned to the top of the Apps grid, in user order.
+    #[serde(default)]
+    pub pinned_apps: Vec<String>,
+    /// What a single click in the Apps grid does: `false` = launch the app on
+    /// the phone (the original behaviour), `true` = open it in its own Mac
+    /// window on a virtual display. Off by default because the Mac route needs
+    /// ADB + scrcpy, which not every install has — with neither present the
+    /// Apps grid must still do something on click.
+    #[serde(default)]
+    pub open_apps_on_mac: bool,
     /// Which mirror the Mirror tab's primary action starts: `wifi` | `adb` | `desktop`.
     #[serde(default = "default_mirror_mode")]
     pub default_mirror_mode: String,
@@ -235,6 +318,7 @@ impl Default for Config {
             photo_sync_enabled: false,
             photo_sync_dest: None,
             mac_fs_enabled: false,
+            quickshare_enabled: false,
             mac_fs_roots: default_mac_fs_roots(),
             encrypt_link: false,
             remote_control: false,
@@ -249,6 +333,19 @@ impl Default for Config {
             low_battery_alert: true,
             low_battery_pct: default_low_battery_pct(),
             desktop_display_size: String::new(),
+            desktop_ui_mode: default_desktop_ui_mode(),
+            desktop_flex: true,
+            app_window_chrome: false,
+            app_window_keep_alive: true,
+            mirror_codec: default_mirror_codec(),
+            mirror_audio: true,
+            scrcpy_uhid: false,
+            scrcpy_stay_awake: false,
+            scrcpy_turn_screen_off: false,
+            scrcpy_always_on_top: false,
+            freeform_prev: None,
+            pinned_apps: Vec::new(),
+            open_apps_on_mac: false,
             default_mirror_mode: default_mirror_mode(),
             mirror_bitrate_mbps: default_mirror_bitrate(),
             mirror_fps: default_mirror_fps(),

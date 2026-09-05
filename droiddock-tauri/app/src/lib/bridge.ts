@@ -21,6 +21,7 @@ export function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<
         photoSyncEnabled: false,
         photoSyncDest: null,
         macFsEnabled: false,
+        quickShareEnabled: false,
         macFsRoots: [],
         encryptLink: false,
         remoteControl: false,
@@ -35,6 +36,17 @@ export function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<
         lowBatteryAlert: true,
         lowBatteryPct: 20,
         desktopDisplaySize: "",
+        desktopUiMode: "desktop",
+        desktopFlex: true,
+        appWindowChrome: false,
+        appWindowKeepAlive: true,
+        mirrorCodec: "h264",
+        mirrorAudio: true,
+        scrcpyUhid: false,
+        scrcpyStayAwake: false,
+        scrcpyTurnScreenOff: false,
+        scrcpyAlwaysOnTop: false,
+        pinnedApps: [],
         defaultMirrorMode: "wifi",
         mirrorBitrateMbps: 12,
         mirrorFps: 60,
@@ -57,6 +69,8 @@ export function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<
         brew: true,
         adbPath: null,
         scrcpyPath: null,
+        scrcpyVersion: null,
+        caps: { virtualDisplay: false, keepContent: false, flexDisplay: false, uhid: false },
       } as unknown as T);
     }
     if (cmd === "adb_devices") return Promise.resolve([] as unknown as T);
@@ -117,6 +131,7 @@ export type DroidConfig = {
   /// Phase 19: reverse file browsing. Now opt-in — the Mac only advertises the
   /// capability (and the phone only shows the tab) while this is on.
   macFsEnabled: boolean;
+  quickShareEnabled: boolean;
   /// Mac directories the paired phone may browse/pull from — edited wholesale
   /// (add/remove folder) via `setSetting`, same as any other setting here.
   macFsRoots: string[];
@@ -148,6 +163,32 @@ export type DroidConfig = {
   lowBatteryPct: number;
   /// Virtual-display size for desktop mode, e.g. "1920x1080". Empty = device default.
   desktopDisplaySize: string;
+  /// Which Android layout a virtual display asks for. `desktop` forces ~160dpi
+  /// so Android serves its large-screen layouts; `phone` leaves the device's
+  /// own density alone, which is what makes an app look like a magnified phone.
+  desktopUiMode: "desktop" | "tablet" | "phone";
+  /// Resize the Android display with the Mac window (scrcpy 4.0+).
+  desktopFlex: boolean;
+  /// Keep the launcher/status/nav bars around a single-app window.
+  appWindowChrome: boolean;
+  /// On close, hand the app back to the phone instead of killing it (scrcpy 3.1+).
+  appWindowKeepAlive: boolean;
+  /// `h264` (scrcpy's default, flag omitted) or `h265`.
+  mirrorCodec: "h264" | "h265";
+  /// Forward phone audio over the ADB mirror. On by default — this only ever
+  /// adds `--no-audio` when switched off.
+  mirrorAudio: boolean;
+  /// scrcpy passthrough, all opt-in.
+  scrcpyUhid: boolean;
+  scrcpyStayAwake: boolean;
+  scrcpyTurnScreenOff: boolean;
+  scrcpyAlwaysOnTop: boolean;
+  /// Packages pinned to the top of the Apps grid, in user order.
+  pinnedApps: string[];
+  /// What a single click in the Apps grid does: `false` opens the app on the
+  /// phone, `true` opens it in its own Mac window (virtual display + scrcpy).
+  /// Holding Option always does the other one.
+  openAppsOnMac: boolean;
   /// Which mirror the Mirror tab's primary action starts.
   defaultMirrorMode: "wifi" | "adb" | "desktop";
   /// Mirror quality, shared by both transports — Wi-Fi sends these to the
@@ -399,7 +440,79 @@ export const onMirrorStarted = (cb: (m: MirrorStarted) => void) => on<MirrorStar
 export const onMirrorStopped = (cb: () => void) => on<void>("mirror-stopped", cb);
 export const onMirrorError = (cb: (e: MirrorError) => void) => on<MirrorError>("mirror-error", cb);
 
+/// Report whether this WebView can decode HEVC. Until this says yes, the
+/// backend never asks the phone for H.265 — a codec the decoder then refuses
+/// produces a black window, not an error.
+export const mirrorSetHevcSupported = (supported: boolean) =>
+  invoke<void>("mirror_set_hevc_supported", { supported });
+
+// ── Phone audio over Wi-Fi (kind-4 frames) ────────────────────────────────
+
+export type AudioStarted = { sampleRate: number; channels: number; format: string };
+export type AudioError = { error: string };
+
+/// Attach the main window's PCM channel. `reset` is set on the first chunk
+/// after a silent gap, telling the player its schedule has gone stale.
+/// Resolves with a replayed `audio-started` when the stream began before this
+/// window was listening.
+export const audioAttach = (onChunk: (reset: boolean, pcm: Uint8Array) => void) => {
+  const channel = new Channel<ArrayBuffer | number[]>();
+  channel.onmessage = (buf) => {
+    const bytes = buf instanceof ArrayBuffer ? new Uint8Array(buf) : Uint8Array.from(buf);
+    if (bytes.length < 2) return;
+    onChunk((bytes[0] & 1) === 1, bytes.subarray(1));
+  };
+  return invoke<AudioStarted | null>("audio_attach", { channel });
+};
+
+// ── Quick Share (receive) ─────────────────────────────────────────────────
+
+export type QuickShareFile = { name: string; size: number; mime: string };
+export type QuickShareRequest = {
+  id: number;
+  peer: string;
+  pin: string;
+  files: QuickShareFile[];
+};
+
+/// Start or stop advertising this Mac as a Quick Share target.
+export const quickshareSetEnabled = (on: boolean) =>
+  invoke<boolean>("quickshare_set_enabled", { on });
+export const quickshareStatus = () => invoke<boolean>("quickshare_status");
+/// Answer a pending transfer prompt. The sender is waiting on this.
+export const quickshareRespond = (id: number, accept: boolean) =>
+  invoke<void>("quickshare_respond", { id, accept });
+
+export const onQuickShareRequest = (cb: (r: QuickShareRequest) => void) =>
+  on<QuickShareRequest>("quickshare-request", cb);
+export const onQuickShareProgress = (cb: (p: { received: number; total: number }) => void) =>
+  on<{ received: number; total: number }>("quickshare-progress", cb);
+export const onQuickShareReceived = (cb: (r: { paths: string[] }) => void) =>
+  on<{ paths: string[] }>("quickshare-received", cb);
+export const onQuickShareError = (cb: (e: { error: string }) => void) =>
+  on<{ error: string }>("quickshare-error", cb);
+
+export const onAudioStarted = (cb: (m: AudioStarted) => void) => on<AudioStarted>("audio-started", cb);
+export const onAudioStopped = (cb: () => void) => on<void>("audio-stopped", cb);
+export const onAudioError = (cb: (e: AudioError) => void) => on<AudioError>("audio-error", cb);
+
 // ── Phase 13: ADB/scrcpy fallback ─────────────────────────────────────────
+
+/// Which optional scrcpy features the resolved binary actually supports.
+///
+/// The virtual-display flags arrived across four releases and an older scrcpy
+/// rejects the whole command line rather than ignoring an unknown option — so
+/// the UI disables an action with a reason instead of letting the spawn fail.
+export type ScrcpyCaps = {
+  /// `--new-display` — desktop mode and per-app windows (scrcpy 3.0+).
+  virtualDisplay: boolean;
+  /// `--no-vd-destroy-content` (3.1+).
+  keepContent: boolean;
+  /// `--flex-display` (4.0+).
+  flexDisplay: boolean;
+  /// `--keyboard=uhid` (2.4+).
+  uhid: boolean;
+};
 
 export type ToolsStatus = {
   adb: boolean;
@@ -407,7 +520,58 @@ export type ToolsStatus = {
   brew: boolean;
   adbPath: string | null;
   scrcpyPath: string | null;
+  /// e.g. "4.1", or null when scrcpy is missing or didn't answer `--version`.
+  scrcpyVersion: string | null;
+  caps: ScrcpyCaps;
 };
+
+/// The phone's freeform/desktop-windowing settings. Read-only unless the user
+/// presses Enable — these persist after DroidDock is uninstalled.
+export type FreeformStatus = {
+  sdk: number | null;
+  supported: boolean;
+  values: (string | null)[];
+  enabled: boolean;
+};
+/// `droiddock://…` routes, forwarded from the Rust side. See automation.rs for
+/// why these come back through the UI rather than being run directly.
+export type AutomationEvent =
+  | { action: "mirror" }
+  | { action: "mirror-adb" }
+  | { action: "desktop" }
+  | { action: "app"; pkg: string }
+  | { action: "clipboard-push" };
+export const onAutomation = (cb: (e: AutomationEvent) => void) =>
+  on<AutomationEvent>("automation", cb);
+
+/// The in-app ADB mirror: scrcpy's server driven directly, decoded by the
+/// pop-out's own WebCodecs pipeline. No MediaProjection consent tap, and the
+/// window is ours rather than scrcpy's.
+export const scrcpyEmbeddedStart = (serial: string) =>
+  invoke<void>("scrcpy_embedded_start", { serial });
+export const scrcpyEmbeddedStop = () => invoke<void>("scrcpy_embedded_stop");
+export const scrcpyEmbeddedRunning = () => invoke<boolean>("scrcpy_embedded_running");
+
+/// The phone's storage mounted as a Finder volume. Read-only by design — see
+/// webdav.rs for why writes are not implemented.
+export type WebdavStatus = {
+  running: boolean;
+  url: string | null;
+  mountPoint: string | null;
+};
+export const webdavStart = () => invoke<WebdavStatus>("webdav_start");
+export const webdavStop = () => invoke<WebdavStatus>("webdav_stop");
+export const webdavStatus = () => invoke<WebdavStatus>("webdav_status");
+
+/// Local-only panic logs (~/Library/Logs/DroidDock). There is no reporting
+/// service behind these — see `crash.rs` for why.
+export const crashLogCount = () => invoke<number>("crash_log_count");
+export const crashLogsReveal = () => invoke<void>("crash_logs_reveal");
+export const crashLogsClear = () => invoke<number>("crash_logs_clear");
+
+export const adbFreeformStatus = () => invoke<FreeformStatus>("adb_freeform_status");
+export const adbFreeformEnable = () => invoke<FreeformStatus>("adb_freeform_enable");
+export const adbFreeformRevert = () => invoke<FreeformStatus>("adb_freeform_revert");
 export type AdbDevice = {
   id: string;
   serial: string;

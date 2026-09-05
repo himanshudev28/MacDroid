@@ -91,7 +91,7 @@ pub async fn run(app: AppHandle, port: u16) {
 
 /// The name the phone shows for this Mac — the same one `get_pairing_info`
 /// reports, so the two never disagree.
-fn instance_name(app: &AppHandle) -> String {
+pub(crate) fn instance_name(app: &AppHandle) -> String {
     let configured = app
         .state::<crate::AppState>()
         .config
@@ -111,7 +111,7 @@ fn instance_name(app: &AppHandle) -> String {
         })
 }
 
-fn lan_ipv4s() -> Vec<IpAddr> {
+pub(crate) fn lan_ipv4s() -> Vec<IpAddr> {
     let mut ips: Vec<IpAddr> = if_addrs::get_if_addrs()
         .unwrap_or_default()
         .into_iter()
