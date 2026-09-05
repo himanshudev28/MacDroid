@@ -1,21 +1,27 @@
 import { memo } from "react";
 import EmptyState from "../EmptyState";
 import Icon from "../Icon";
+import { t, useT } from "../../lib/i18n";
 
-/// Phase 9 — CallsView is purely informational, exactly like CallsView.jsx.
-/// There is no dialer or call log here: over Wi-Fi the phone only supports
-/// outbound `action-call` (dial, triggered from Contacts) and inbound `call`
-/// ringing alerts. Rich in-call control (hang up / mute / speaker / DTMF) is
-/// ADB-only (Phase 13) — when a live ADB device is connected, dialing from
-/// Contacts now upgrades the call overlay automatically; this tab itself
-/// stays the same informational summary as the reference.
-function CallsView({ linked }: { linked: boolean }) {
+/// CallsView is purely informational — there is no dialer or call log here.
+///
+/// What it says depends on what the phone can actually do, which is now two
+/// different stories. A phone advertising `callctl` can be answered, hung up
+/// and re-routed from the Mac over the plain Wi-Fi link (`CallControl.kt`);
+/// one that can't still gets the caller-ID alert and nothing more. DTMF is the
+/// one control that stays ADB-only in both cases, because playing tones into a
+/// live call is reachable only from the device's default dialer.
+function CallsView({ linked, canControl }: { linked: boolean; canControl: boolean }) {
+  // Memoised: its props do not change when the language does, so without its
+  // own subscription it would keep the old strings. Same for every memo() view.
+  useT();
+
   if (!linked) {
     return (
       <EmptyState
         icon="phone"
-        title="Connect phone to see calls"
-        body="Pair the DroidDock phone app over Wi-Fi to see incoming calls with caller ID here."
+        title={t("Connect phone to see calls")}
+        body={t("Pair the DroidDock phone app over Wi-Fi to see incoming calls with caller ID here.")}
       />
     );
   }
@@ -30,25 +36,35 @@ function CallsView({ linked }: { linked: boolean }) {
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <p className="font-display text-[15px] font-semibold text-fg">Calls ring through</p>
+                <p className="font-display text-[15px] font-semibold text-fg">{t("Calls ring through")}</p>
                 <span className="led h-1.5 w-1.5 shrink-0 rounded-full bg-(--color-link)" />
               </div>
               <p className="mt-1 text-[12px] leading-relaxed text-dim">
-                Incoming calls show a Mac alert with the caller's name and number, and you can dial
-                any contact from the Contacts tab.
+                {canControl
+                  ? t("Incoming calls show a Mac alert with the caller's name and number — answer or decline it right there, and manage the call without picking up the phone.")
+                  : t("Incoming calls show a Mac alert with the caller's name and number, and you can dial any contact from the Contacts tab.")}
               </p>
             </div>
           </div>
         </div>
 
         <div className="card p-4">
-          <p className="label">How it works</p>
+          <p className="label">{t("How it works")}</p>
           <ul className="mt-2 space-y-1.5 text-[12px] leading-relaxed text-dim">
-            {[
-              "Incoming calls raise a Mac alert with name and number",
-              "Dial a contact from the Contacts tab to ring your phone",
-              "Mute, speaker and hang-up from the Mac need an ADB connection",
-            ].map((t) => (
+            {(canControl
+              ? [
+                  "Incoming calls raise a Mac alert with name and number",
+                  "Answer or decline from the Mac, then mute and switch to speaker mid-call",
+                  "Dial a contact from the Contacts tab to ring your phone",
+                  "Keypad tones still need an ADB connection — Android only lets the default dialer send them",
+                ]
+              : [
+                  "Incoming calls raise a Mac alert with name and number",
+                  "Dial a contact from the Contacts tab to ring your phone",
+                  "Answering, hanging up, mute and speaker need the Phone permissions (Calls) granted to DroidDock on your phone",
+                  "Keypad tones need an ADB connection",
+                ]
+            ).map((t) => (
               <li key={t} className="flex items-start gap-2">
                 <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-faint" />
                 {t}
