@@ -16,6 +16,10 @@ is retired and kept only as a protocol reference.)*
 ![Android app](https://img.shields.io/badge/Android-Kotlin%20%2B%20Compose-3DDC84?style=for-the-badge&logo=android&logoColor=white)
 ![Link](https://img.shields.io/badge/link-LAN%20WebSocket-FFB454?style=for-the-badge)
 
+[![Website](https://img.shields.io/badge/%F0%9F%8C%90%20Website-Screenshots%20%26%20demo-F5A623?style=for-the-badge)](https://himanshudev28.github.io/DroidDockWebsite/)
+
+**[See it in action → himanshudev28.github.io/DroidDockWebsite/](https://himanshudev28.github.io/DroidDockWebsite/)**
+
 </div>
 
 ---
@@ -37,17 +41,74 @@ It's two apps that talk to each other:
 
 ---
 
+## 📸 Screenshots
+
+<div align="center">
+
+### 🖥️ On the Mac
+
+<table>
+<tr>
+<td width="50%" align="center">
+  <img src="docs/shots/mac-dashboard.webp" alt="DroidDock Dashboard on macOS — the paired phone in the side rail, with battery, Android version and shortcuts to Files, Messages and Mirror" width="100%" />
+  <br><strong>Dashboard</strong><br><sub>The phone lives in the rail — battery, Android version, one tap to anything</sub>
+</td>
+<td width="50%" align="center">
+  <img src="docs/shots/mac-notifications.webp" alt="Phone notifications mirrored on the Mac, grouped by app, with a Show on Mac toggle" width="100%" />
+  <br><strong>Notifications</strong><br><sub>Grouped by app, dismissible, with inline reply — or off with one toggle</sub>
+</td>
+</tr>
+<tr>
+<td width="50%" align="center">
+  <img src="docs/shots/mac-mirror.webp" alt="The phone screen mirrored in its own resizable macOS window over Wi-Fi" width="100%" />
+  <br><strong>Screen mirror</strong><br><sub>Its own window — move it, resize it, pin it on top</sub>
+</td>
+<td width="50%" align="center">
+  <img src="docs/shots/mac-apps.webp" alt="A searchable grid of every app installed on the phone, launchable from the Mac" width="100%" />
+  <br><strong>Apps</strong><br><sub>Every phone app, searchable, launched from your keyboard</sub>
+</td>
+</tr>
+</table>
+
+### 📱 On the phone
+
+<table>
+<tr>
+<td width="33%" align="center">
+  <img src="docs/shots/phone-home.webp" alt="The DroidDock Android home screen showing the connected Mac, its battery and Mac media controls" width="100%" />
+  <br><strong>Home</strong><br><sub>Which Mac, how full its battery is, what it's playing</sub>
+</td>
+<td width="33%" align="center">
+  <img src="docs/shots/phone-control.webp" alt="The Mac Remote tab on Android — a trackpad, arrow keys and a field for typing on the Mac" width="100%" />
+  <br><strong>Mac Remote</strong><br><sub>Trackpad, arrow keys, and a keyboard for the Mac</sub>
+</td>
+<td width="33%" align="center">
+  <img src="docs/shots/phone-clipboard.webp" alt="The Android clipboard tab, with a history toggle and a box for sending text to the Mac" width="100%" />
+  <br><strong>Clipboard</strong><br><sub>Copy on either device — history optional, cleared on close</sub>
+</td>
+</tr>
+</table>
+
+<sub>More at <a href="https://himanshudev28.github.io/DroidDockWebsite/">himanshudev28.github.io/DroidDockWebsite</a></sub>
+
+</div>
+
+---
+
 ## 🚀 Features
 
 | | Feature | What it does |
 |:--:|---|---|
-| 📋 | **Clipboard sync** | Mac → phone automatically; phone → Mac automatically or manually — **Auto / Manual** toggle. Works on Android 13+ / Samsung (uses accessibility events, not clipboard reads). |
+| 📋 | **Clipboard sync** | Mac → phone automatically; phone → Mac automatically or manually — **Auto / Manual** toggle. Works on Android 13+ / Samsung (uses accessibility events, not clipboard reads). **Images** cross too: Mac → phone automatically, phone → Mac from the tile, widget or share sheet. |
 | 🔔 | **Notification mirroring** | Phone notifications on your Mac as native macOS alerts with **inline reply** and dismiss. Incoming calls shown with caller ID. |
 | 📁 | **File transfer & browser** | Drag-and-drop both ways with live progress; browse, download, upload, **rename**, **delete** and **search** phone storage. Android Files tab shows an **upload queue** with real-time progress bar, transfer speed, and a **recent transfers** history with colored file-type badges. |
 | 🖼️ | **Photos & Videos** | Browse thumbnails, open full-res in Preview / QuickTime, download originals. |
 | 💬 | **Messages** | Polished 2-pane SMS chat — conversation list with avatar initials, search, day dividers, composer. Threads sync live. |
 | 👤 | **Contacts** | Browse and search your phone's contacts. |
-| 📞 | **Phone calls** | Place calls from the Mac; incoming-call alerts with caller ID. |
+| 📞 | **Phone calls** | Place calls from the Mac, and **answer, decline, hang up, mute and switch to speaker** from it — over Wi-Fi, no ADB. Incoming-call alerts with caller ID. (Keypad tones stay ADB-only: Android only lets the default dialer send them.) |
+| 🩺 | **Setup check** | One panel listing every permission both devices need, what breaks without each, and a Fix button that opens the exact settings screen — on either device. |
+| 🔊 | **Ring my phone** | Find a phone down the back of the sofa. Plays on the alarm stream, so silent mode doesn't mute it; stops from the Mac, from its own notification, or after a minute. |
+| 📸 | **Mirror stills & recordings** | Save a PNG of the phone screen, or record it to MP4, straight from the mirror window. |
 | 🎵 | **Media remote** | Now-Playing card with transport + volume control. |
 | 🪞 | **Screen mirroring** | Mirror **and control** your phone over Wi-Fi (MediaProjection + H.264) — tap, swipe, scroll, type and use the nav bar from your Mac. Pops out into a phone-shaped, always-on-top window. **No ADB, no scrcpy, no Developer Options.** |
 | 📷 | **Phone camera** | Use your phone's back or front camera as a Mac webcam-style feed — live, switchable, no ADB. |
@@ -398,5 +459,6 @@ PhonePe · GPay · Paytm · BHIM · any UPI app
 <br>
 
 [![GitHub Stars](https://img.shields.io/github/stars/himanshudev28/MacDroid?style=for-the-badge&logo=github&color=F5A623&logoColor=white&label=⭐%20Star%20on%20GitHub)](https://github.com/himanshudev28/MacDroid)
+[![Website](https://img.shields.io/badge/%F0%9F%8C%90%20Visit%20the%20website-F5A623?style=for-the-badge)](https://himanshudev28.github.io/DroidDockWebsite/)
 
 </div>
