@@ -11,6 +11,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -20,6 +23,7 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
+import okio.ByteString.Companion.toByteString
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -50,6 +54,7 @@ object ConnectionManager {
         // failure this capability exists to prevent.
         if (Build.VERSION.SDK_INT >= 28 || LockAdmin.isActive(appCtx)) add("lock")
         add(LinkCrypto.CAP)
+        add(LinkCrypto.CAP_FRAMES)
     }
 
     val connected = MutableStateFlow(false)
@@ -107,6 +112,12 @@ object ConnectionManager {
     val clipHistory = MutableStateFlow<List<ClipEntry>>(emptyList())
     private const val CLIP_HISTORY_MAX = 50
 
+    /** Deadline for the parallel "is anyone home" knock in [reachableFirst].
+     *  Short on purpose: this is a LAN round trip, so a Mac that needs longer
+     *  than this to accept a TCP connection is not the one we want to try
+     *  first — and it is still tried, just after the addresses that answered. */
+    private const val KNOCK_TIMEOUT_MS = 900
+
     private fun recordClip(text: String, fromMac: Boolean) {
         if (text.isBlank()) return
         if (!Prefs.clipboardHistory(appCtx)) return
@@ -148,6 +159,9 @@ object ConnectionManager {
     /// Tier C: set only when the Mac's welcome echoed "enc". Null means this
     /// session is plaintext — the default, and how every pre-Tier-C build ran.
     @Volatile private var linkKey: javax.crypto.spec.SecretKeySpec? = null
+    /** Key for sealed binary frames; null = frames go out in the clear.
+     *  Separate from [linkKey] because `enc` and `enc2` negotiate apart. */
+    @Volatile private var frameKey: javax.crypto.spec.SecretKeySpec? = null
     // Last copy we couldn't deliver (link was down). Flushed on the next reconnect
     // so a copy made during a Wi-Fi blip / Mac restart still reaches the Mac.
     @Volatile private var pendingClip: String? = null
@@ -160,6 +174,9 @@ object ConnectionManager {
 
     fun ensureLoop(ctx: Context) {
         appCtx = ctx.applicationContext
+        // Registered once, process-wide. This is what lets the loop below sleep
+        // on the network instead of polling it — see [NetworkWatch].
+        NetworkWatch.start(appCtx)
         pausedUntil.value = Prefs.pausedUntil(appCtx)
         // Every entry point into the app funnels through here, so this is the
         // one place a pre-address-book pairing is guaranteed to be seen.
@@ -211,6 +228,7 @@ object ConnectionManager {
         knownDevices.value = Prefs.knownDevices(appCtx)
         macInfo.value = null // belongs to the Mac we're leaving
         macCaps.value = emptyList()
+        frameKey = null
         Prefs.setPausedUntil(appCtx, 0L)
         pausedUntil.value = 0L
         manuallyDisconnected.value = false
@@ -333,17 +351,28 @@ object ConnectionManager {
             val pairing = Prefs.load(appCtx)
             if (pairing == null) {
                 lastEvent.value = "not paired"
-                delay(3_000)
+                // Was `delay(3_000)`: a wake-up every three seconds, forever,
+                // to re-read a preference that only changes when the user
+                // pairs — and pairing calls `restart()`, which cancels this
+                // loop outright. The long sleep is a backstop, not a poll.
+                NetworkWatch.sleepOrWake(60_000)
                 continue
             }
             // Honor a pause: idle without connecting until it expires / the user resumes.
             val until = Prefs.pausedUntil(appCtx)
             if (until != 0L) {
-                if (System.currentTimeMillis() < until) {
+                val now = System.currentTimeMillis()
+                if (now < until) {
                     pausedUntil.value = until
                     connected.value = false
                     lastEvent.value = "paused"
-                    delay(2_000)
+                    // Sleep to the deadline rather than re-checking the clock
+                    // every two seconds. `resume`/`restart`/`quickConnect` all
+                    // cancel this job, so nothing needs us awake to notice
+                    // them; only a *timed* pause expiring does, and that has a
+                    // known time. Capped so a "pause indefinitely"
+                    // (`Long.MAX_VALUE`) can't overflow the arithmetic.
+                    NetworkWatch.sleepOrWake((until - now).coerceIn(0L, 60_000L))
                     continue
                 }
                 // deadline passed → auto-resume
@@ -351,8 +380,28 @@ object ConnectionManager {
                 pausedUntil.value = 0L
                 lastEvent.value = "resuming…"
             }
+
+            // Nothing below can succeed without a network, and probing without
+            // one is the single most expensive thing this app used to do:
+            // four TCP dials, a UDP broadcast and a live mDNS browse, on a
+            // 15s ceiling, all night, in airplane mode. Park instead.
+            if (!NetworkWatch.online.value) {
+                connected.value = false
+                lastEvent.value = "waiting for a network"
+                NetworkWatch.awaitOnline()
+                // A fresh network deserves a fresh, fast retry.
+                backoff = 2_000L
+            }
+
             var linked = false
-            for (ip in pairing.ips) {
+            // Stale addresses are the norm, not the exception — a pairing
+            // holds up to four and after a router reboot or a network change
+            // most of them are dead. Dialed one at a time at OkHttp's 4s
+            // connect timeout that is 16s of nothing before the discovery
+            // probes even start, which is most of why a reconnect could take
+            // half a minute. A parallel TCP knock finds who is actually home
+            // in about one timeout, and only that address gets a real session.
+            for (ip in reachableFirst(pairing)) {
                 if (attempt(ip, pairing)) {
                     linked = true
                     break
@@ -405,8 +454,49 @@ object ConnectionManager {
                 }
             }
             backoff = if (linked) 2_000L else minOf(backoff * 2, 15_000L)
-            delay(backoff)
+            // Interruptible: Wi-Fi coming back is exactly the moment the Mac
+            // becomes reachable again, and waiting out the rest of a 15s
+            // backoff to discover that is the difference between a reconnect
+            // that feels instant and one that feels broken.
+            NetworkWatch.sleepOrWake(backoff)
         }
+    }
+
+    /**
+     * The pairing's addresses, ordered by which ones actually answered a TCP
+     * knock just now, with the rest kept behind them as a fallback.
+     *
+     * A plain `connect()` to a dead LAN address costs the full connect timeout;
+     * doing that serially across four stored addresses is the bulk of a slow
+     * reconnect. These knocks run concurrently and share one short deadline, so
+     * the whole probe costs about one timeout no matter how many addresses are
+     * stored — and the winner is dialed for real immediately after.
+     *
+     * Unreachable addresses are still tried afterwards rather than dropped: the
+     * knock is a hint, and a Mac that is slow to accept must not become
+     * permanently unreachable because of it.
+     */
+    private suspend fun reachableFirst(pairing: Pairing): List<String> {
+        val ips = pairing.ips
+        if (ips.size < 2) return ips
+        val alive = coroutineScope {
+            ips.map { ip ->
+                async(Dispatchers.IO) {
+                    val ok = runCatching {
+                        java.net.Socket().use { probe ->
+                            probe.connect(
+                                java.net.InetSocketAddress(ip, pairing.port),
+                                KNOCK_TIMEOUT_MS,
+                            )
+                            true
+                        }
+                    }.getOrDefault(false)
+                    ip to ok
+                }
+            }.awaitAll()
+        }
+        val (up, down) = alive.partition { it.second }
+        return up.map { it.first } + down.map { it.first }
     }
 
     /** Tries one address; if the session opens, suspends until it dies. Returns true if it ever connected. */
@@ -464,6 +554,12 @@ object ConnectionManager {
                         linkKey = if (macCaps.value.contains(LinkCrypto.CAP)) {
                             LinkCrypto.derive(pairing.token)
                         } else null
+                        // Sealed binary frames are negotiated separately — a Mac
+                        // can engage one half and not the other, and transfers
+                        // must keep working either way.
+                        frameKey = if (macCaps.value.contains(LinkCrypto.CAP_FRAMES)) {
+                            LinkCrypto.derive(pairing.token)
+                        } else null
                         lastEvent.value = "linked"
                         // Stamp the address book: records "last seen" for the
                         // Home card and promotes the address that actually
@@ -479,6 +575,20 @@ object ConnectionManager {
                         NotifListener.pushActive()
                         DeviceInfo.push(appCtx)
                         flushPendingClip() // deliver any copy made while we were offline
+                    }
+                    // The Mac re-advertising what it can do, after a switch was
+                    // flipped in its Settings mid-session. Caps used to arrive
+                    // only in `welcome`, so turning "Mac files" on over there
+                    // did nothing visible here until the socket happened to be
+                    // remade — the Mac Files tab is gated on the `macfs` cap.
+                    //
+                    // Deliberately does NOT touch `linkKey`/`frameKey`:
+                    // encryption is negotiated once, in the handshake, and
+                    // re-keying the live socket from a later message would
+                    // desync both ends mid-stream. The Mac re-sends the enc
+                    // caps here unchanged for exactly that reason.
+                    "caps" -> msg.optJSONArray("caps")?.let { arr ->
+                        macCaps.value = List(arr.length()) { i -> arr.optString(i) }
                     }
                     // Tier C link-quality probe. Echo `t` back untouched — it's
                     // the Mac's own clock reading, so this needs no time sync
@@ -549,6 +659,11 @@ object ConnectionManager {
                     "phone-push", "phone-push-result" ->
                         TransferManager.onControl(msg)
                     "mac-fs-list-result", "mac-fs-list-error", "mac-fs-pull-begin" -> {
+                        pendingMacFs.remove(msg.optString("reqId"))?.complete(msg)
+                    }
+                    // Mac apps ride the same pending registry as mac-fs: both are
+                    // phone-initiated requests to the Mac, keyed by our own reqId.
+                    "mac-apps-list", "mac-app-launch" -> {
                         pendingMacFs.remove(msg.optString("reqId"))?.complete(msg)
                     }
                     "mac-fs-pull-done" -> TransferManager.onMacFsPullControl(msg)
@@ -646,6 +761,8 @@ object ConnectionManager {
                         MirrorService.setQuality(
                             msg.optInt("bitrate"), msg.optInt("fps"), msg.optInt("maxSize")
                         )
+                        MirrorService.setCodec(msg.optString("codec"))
+                        MirrorService.setAudio(msg.optBoolean("audio"))
                         val inst = MirrorService.instance
                         if (inst != null && inst.isScreenAlive()) inst.resumeStreaming()
                         else launchMirror(
@@ -662,6 +779,8 @@ object ConnectionManager {
                         MirrorService.setQuality(
                             msg.optInt("bitrate"), msg.optInt("fps"), msg.optInt("maxSize")
                         )
+                        MirrorService.setCodec(msg.optString("codec"))
+                        MirrorService.setAudio(false)
                         val facing = if (msg.optString("facing") == "front")
                             android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT
                         else
@@ -719,7 +838,10 @@ object ConnectionManager {
             }
 
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                runCatching { TransferManager.onBinary(bytes) }
+                runCatching {
+                    val plain = openFrame(bytes.toByteArray()) ?: return@runCatching
+                    TransferManager.onBinary(plain.toByteString())
+                }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
@@ -733,8 +855,16 @@ object ConnectionManager {
             }
         })
 
-        closed.await()
-        socket.cancel()
+        // `closed.await()` is cancellable, and `restart`/`resume`/`onPaired`
+        // all cancel this job while it is parked right here. Without the
+        // finally, `socket.cancel()` never ran: the OkHttp WebSocket, its
+        // reader thread and its connection stayed alive, so repeated Quick
+        // Connect taps stacked live sockets.
+        try {
+            closed.await()
+        } finally {
+            socket.cancel()
+        }
         return didConnect
     }
 
@@ -833,13 +963,75 @@ object ConnectionManager {
 
     /** Send one H.264 access unit as a binary frame: [kind=3][flags][payload].
      *  flags bit0 = keyframe. Used by MirrorService for screen mirroring. */
-    fun sendVideo(flags: Int, payload: ByteArray): Boolean {
-        val socket = ws ?: return false
-        val out = ByteArray(payload.size + 2)
+    fun sendVideo(flags: Int, payload: ByteArray): Boolean = sendVideoParts(flags, null, payload)
+
+    /**
+     * [sendVideo], but assembling the header, the optional codec-config prefix
+     * and the access unit into a single buffer.
+     *
+     * A keyframe used to cost three whole-frame arrays on the way out: one for
+     * `configBytes + bytes`, one for the two header bytes, and one more for
+     * okio's vararg spread. Every one of those is a full memcpy of an
+     * I-frame-sized payload, on the encoder's drain thread, at the keyframe
+     * rate. This builds the wire buffer once.
+     */
+    fun sendVideoParts(flags: Int, prefix: ByteArray?, payload: ByteArray): Boolean {
+        val pre = prefix?.size ?: 0
+        val out = ByteArray(2 + pre + payload.size)
         out[0] = 3
         out[1] = flags.toByte()
+        if (prefix != null) System.arraycopy(prefix, 0, out, 2, pre)
+        System.arraycopy(payload, 0, out, 2 + pre, payload.size)
+        return sendBinary(out)
+    }
+
+    /** Bytes queued for transmission but not yet written to the socket.
+     *  The mirror path uses this to decide when it is falling behind — see
+     *  `MirrorService.VIDEO_BACKLOG_BYTES`. Zero when nothing is linked. */
+    fun outboundQueueBytes(): Long = ws?.queueSize() ?: 0L
+
+    /** Send one PCM chunk as a binary frame: [kind=4][flags][s16le stereo].
+     *  flags bit0 = first frame after a silent gap, so the Mac resets its
+     *  playback schedule instead of queueing behind a long-past timestamp. */
+    fun sendAudio(flags: Int, payload: ByteArray): Boolean {
+        val out = ByteArray(payload.size + 2)
+        out[0] = 4
+        out[1] = flags.toByte()
         System.arraycopy(payload, 0, out, 2, payload.size)
-        return socket.send(ByteString.of(*out))
+        return sendBinary(out)
+    }
+
+    /**
+     * The single exit for every binary frame — mirror video, audio, file chunks,
+     * thumbnails. Seals when `enc2` was negotiated, otherwise sends as-is.
+     *
+     * One funnel on purpose: four separate `socket.send` sites is four places to
+     * forget the seal, and a frame that escapes unsealed on an encrypted link is
+     * a silent downgrade nobody would notice.
+     */
+    fun sendBinary(frame: ByteArray): Boolean {
+        val socket = ws ?: return false
+        val key = frameKey
+        val bytes = if (key == null) frame else LinkCrypto.sealFrame(key, frame)
+        // `ByteString.of(*bytes)` spreads the array into a vararg, which the
+        // compiler implements as an `Arrays.copyOf` — okio then copies again
+        // internally. On the video path that was two extra full-frame memcpys
+        // per frame at 30–60fps, and two more per 256 KiB transfer chunk. The
+        // offset/length overload takes the array directly.
+        return socket.send(bytes.toByteString())
+    }
+
+    /** Unseal an inbound frame, or null to drop it. Strict once engaged: an
+     *  unsealed frame on an encrypted link is dropped rather than trusted, or
+     *  anyone on the network could inject simply by not encrypting. */
+    fun openFrame(buf: ByteArray): ByteArray? {
+        val key = frameKey
+        val sealed = buf.isNotEmpty() && buf[0] == LinkCrypto.KIND_SEALED
+        return when {
+            key == null && !sealed -> buf
+            key != null && sealed -> LinkCrypto.openFrame(key, buf)
+            else -> null
+        }
     }
 
     /** Replies to a reqId-tagged request from the Mac, converting failures into readable errors. */
@@ -873,6 +1065,32 @@ object ConnectionManager {
             throw Exception(reply.optString("error").ifEmpty { "Could not list folder" })
         }
         return reply.optJSONArray("entries") ?: JSONArray()
+    }
+
+    /** List the Mac's applications. Only answered while the Mac has
+     *  "Let the phone control this Mac" switched on — otherwise it replies with
+     *  an `error` explaining that, which surfaces as the exception below. */
+    suspend fun macAppsList(): JSONArray {
+        val socket = ws ?: throw IllegalStateException("Not connected to Mac")
+        val reqId = nextMacFsReqId()
+        val deferred = CompletableDeferred<JSONObject>()
+        pendingMacFs[reqId] = deferred
+        socket.send(wire(JSONObject().put("type", "mac-apps-list").put("reqId", reqId)))
+        val reply = deferred.await()
+        reply.optString("error").takeIf { it.isNotEmpty() }?.let { throw Exception(it) }
+        return reply.optJSONArray("apps") ?: JSONArray()
+    }
+
+    /** Open one Mac app by bundle id. The Mac refuses anything not in its own
+     *  scan, so a stale list can fail — hence the error path. */
+    suspend fun macAppLaunch(pkg: String) {
+        val socket = ws ?: throw IllegalStateException("Not connected to Mac")
+        val reqId = nextMacFsReqId()
+        val deferred = CompletableDeferred<JSONObject>()
+        pendingMacFs[reqId] = deferred
+        socket.send(wire(JSONObject().put("type", "mac-app-launch").put("reqId", reqId).put("pkg", pkg)))
+        val reply = deferred.await()
+        reply.optString("error").takeIf { it.isNotEmpty() }?.let { throw Exception(it) }
     }
 
     /** Phase 19 — pull a file from the Mac into Downloads. Awaits mac-fs-pull-begin here,

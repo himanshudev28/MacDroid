@@ -14,6 +14,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <!-- Playback capture (phone audio → Mac) runs through AudioRecord, so it needs
+         RECORD_AUDIO and the microphone service type even though no mic is opened. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <!-- Prerequisite for the connectedDevice FGS type, and genuinely used: mDNS
          discovery (MdnsDiscovery) browses the LAN over multicast. -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
@@ -146,7 +150,7 @@
         <service
             android:name=".MirrorService"
             android:exported="false"
-            android:foregroundServiceType="mediaProjection|camera" />
+            android:foregroundServiceType="mediaProjection|camera|microphone" />
 
         <activity
             android:name=".MirrorPermissionActivity"
@@ -238,6 +242,22 @@
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
         </service>
+
+        <!-- Home-screen widget. Exported because the launcher (a different
+             process) both hosts it and delivers its click broadcasts; the
+             custom widget actions are same-package PendingIntents, so nothing
+             else can trigger them. -->
+        <receiver
+            android:name=".DockWidget"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_dock_info" />
+        </receiver>
 
         <service
             android:name=".ClipTileService"

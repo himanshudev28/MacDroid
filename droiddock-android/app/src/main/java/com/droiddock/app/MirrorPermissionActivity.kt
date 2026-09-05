@@ -42,6 +42,17 @@ class MirrorPermissionActivity : ComponentActivity() {
         finish()
     }
 
+    /**
+     * Playback capture needs RECORD_AUDIO. Asked *before* the projection dialog
+     * so the user sees one uninterrupted consent run rather than a second prompt
+     * appearing over a screen that is already being recorded — and the result is
+     * deliberately ignored: a denied mic still mirrors, just without sound.
+     * [MirrorService] is the single place that reports that back to the Mac.
+     */
+    private val audioPermLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { askProjection() }
+
     private val cameraPermLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -60,11 +71,21 @@ class MirrorPermissionActivity : ComponentActivity() {
             } else {
                 cameraPermLauncher.launch(Manifest.permission.CAMERA)
             }
+        } else if (
+            MirrorService.reqAudio &&
+            Build.VERSION.SDK_INT >= 29 &&
+            checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
+        ) {
+            audioPermLauncher.launch(Manifest.permission.RECORD_AUDIO)
         } else {
-            val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            runCatching { projectionLauncher.launch(mpm.createScreenCaptureIntent()) }
-                .onFailure { finish() }
+            askProjection()
         }
+    }
+
+    private fun askProjection() {
+        val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        runCatching { projectionLauncher.launch(mpm.createScreenCaptureIntent()) }
+            .onFailure { finish() }
     }
 
     private fun startCameraService() {

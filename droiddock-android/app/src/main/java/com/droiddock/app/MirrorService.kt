@@ -17,6 +17,7 @@ import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
+import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
@@ -51,9 +52,15 @@ class MirrorService : Service() {
     private var drainThread: Thread? = null
     @Volatile private var running = false
     @Volatile private var streaming = true // gated off while paused (Auto-mode keep-alive)
+    /** True while [drain] is skipping predicted frames because the socket is
+     *  backed up. Latched so the "give me a keyframe" request is made once per
+     *  gap rather than once per dropped frame. */
+    @Volatile private var droppingVideo = false
     private var configBytes: ByteArray? = null
     private var startedJson: JSONObject? = null
     private var source = "screen"
+    /** Non-null only while phone audio is being captured (screen source, opt-in). */
+    @Volatile private var audio: AudioCapture? = null
 
     // camera
     private var cameraDevice: CameraDevice? = null
@@ -65,6 +72,9 @@ class MirrorService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         instance = this
+        // The home-screen widget's Mirror button doubles as Stop, and `instance`
+        // is the only signal that a stream is up.
+        DockWidget.refresh(applicationContext)
         if (intent?.action == ACTION_STOP) {
             stopSelf()
             return START_NOT_STICKY
@@ -100,20 +110,47 @@ class MirrorService : Service() {
 
     /** Configure + start the encoder, begin draining, and return its input surface. */
     private fun startEncoder(w: Int, h: Int, source: String): Surface {
-        val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, w, h).apply {
+        // HEVC is opt-in and *degrades* rather than failing. An HEVC encoder is
+        // not guaranteed to exist on every device, and a phone without one
+        // should still mirror in H.264 rather than show the Mac a black window.
+        val mime = if (reqCodec == "h265" && hasEncoder(MediaFormat.MIMETYPE_VIDEO_HEVC)) {
+            MediaFormat.MIMETYPE_VIDEO_HEVC
+        } else {
+            MediaFormat.MIMETYPE_VIDEO_AVC
+        }
+        val format = MediaFormat.createVideoFormat(mime, w, h).apply {
             setInteger(
                 MediaFormat.KEY_COLOR_FORMAT,
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
             )
             setInteger(MediaFormat.KEY_BIT_RATE, reqBitrate)
             setInteger(MediaFormat.KEY_FRAME_RATE, reqFps)
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_SECONDS)
             setInteger(
                 MediaFormat.KEY_BITRATE_MODE,
                 MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR
             )
+            // Realtime priority. Without it the encoder is scheduled as a
+            // best-effort transcode, which is the wrong trade for a stream
+            // somebody is watching and tapping on.
+            setInteger(MediaFormat.KEY_PRIORITY, 0)
+            // Tell the encoder the rate we actually want, so it doesn't pace
+            // itself for offline encoding.
+            setInteger(MediaFormat.KEY_OPERATING_RATE, reqFps)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // B-frames are encoded out of order, so each one adds a frame
+                // of latency at both ends before anything can be displayed.
+                // Off is the default on most encoders — but only most.
+                setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                // "Emit each frame as soon as it is encoded" — the encoder
+                // otherwise holds a small queue of frames for rate control,
+                // which is latency you can see when you drag something.
+                setInteger(MediaFormat.KEY_LATENCY, 1)
+            }
         }
-        val enc = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+        val enc = MediaCodec.createEncoderByType(mime)
         enc.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         val surface = enc.createInputSurface()
         enc.start()
@@ -121,9 +158,17 @@ class MirrorService : Service() {
         running = true
         streaming = true
         this.source = source
-        drainThread = thread(name = "mirror-drain") { drain(enc, w, h, source) }
+        drainThread = thread(name = "mirror-drain") { drain(enc, w, h, source, mime) }
         return surface
     }
+
+    /** Is there an encoder for this MIME type at all? Asked before requesting
+     *  HEVC, because `createEncoderByType` throws rather than degrading. */
+    private fun hasEncoder(mime: String): Boolean = runCatching {
+        MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.any { info ->
+            info.isEncoder && info.supportedTypes.any { it.equals(mime, ignoreCase = true) }
+        }
+    }.getOrDefault(false)
 
     private fun startScreen(resultCode: Int, data: Intent) {
         val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
@@ -168,6 +213,37 @@ class MirrorService : Service() {
             DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC,
             surface, null, null
         )
+        startAudio(proj)
+    }
+
+    /**
+     * Begin capturing playback audio on the same projection, when the Mac asked
+     * for it. Deliberately never fatal to the mirror: audio that cannot start
+     * reports itself and the screen keeps streaming.
+     */
+    private fun startAudio(proj: MediaProjection) {
+        if (!reqAudio) return
+        if (Build.VERSION.SDK_INT < 29) {
+            audioErr("phone audio needs Android 10 or newer")
+            return
+        }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            // The consent activity asks for this before the projection; landing
+            // here means it was denied, and silence with no explanation would
+            // read to the user as a broken feature.
+            audioErr("microphone permission denied — needed to capture playback")
+            return
+        }
+        val cap = AudioCapture { audio = null }
+        audio = if (cap.start(proj)) cap else null
+    }
+
+    private fun audioErr(msg: String) {
+        runCatching {
+            ConnectionManager.send(JSONObject().put("type", "audio-error").put("error", msg))
+        }
     }
 
     private fun startCamera(facing: Int) {
@@ -241,7 +317,7 @@ class MirrorService : Service() {
         }, handler)
     }
 
-    private fun drain(enc: MediaCodec, w: Int, h: Int, source: String) {
+    private fun drain(enc: MediaCodec, w: Int, h: Int, source: String, mime: String) {
         val info = MediaCodec.BufferInfo()
         var announced = false
         while (running) {
@@ -256,18 +332,27 @@ class MirrorService : Service() {
                     enc.releaseOutputBuffer(idx, false)
                     continue
                 }
+                val isConfig = info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0
+                val isKey = info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0
+                // Paused (`pauseStreaming`) keeps the projection and encoder
+                // alive so resuming needs no fresh consent — but there is no
+                // reason to copy a frame out of the codec buffer just to drop
+                // it. Config packets are still read: they are what the Mac
+                // needs to reconfigure its decoder on resume.
+                if (!streaming && !isConfig) {
+                    enc.releaseOutputBuffer(idx, false)
+                    continue
+                }
                 buf.position(info.offset)
                 buf.limit(info.offset + info.size)
                 val bytes = ByteArray(info.size)
                 buf.get(bytes)
-                val isConfig = info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0
-                val isKey = info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0
                 if (isConfig) {
                     configBytes = bytes
                     if (!announced) {
                         val started = JSONObject().put("type", "mirror-started")
                             .put("width", w).put("height", h)
-                            .put("codec", avcCodecString(bytes))
+                            .put("codec", codecString(mime, bytes))
                             .put("source", source)
                             .put(
                                 "facing",
@@ -277,10 +362,42 @@ class MirrorService : Service() {
                         if (streaming) ConnectionManager.send(started)
                         announced = true
                     }
-                } else {
-                    val payload =
-                        if (isKey && configBytes != null) configBytes!! + bytes else bytes
-                    if (streaming) ConnectionManager.sendVideo(if (isKey) 1 else 0, payload)
+                } else if (streaming) {
+                    // Backpressure. The video path used to push into OkHttp's
+                    // outbound queue unconditionally, so a Wi-Fi dip meant
+                    // frames piling up in RAM and the Mac rendering seconds
+                    // behind reality — with the queue never draining, because
+                    // the encoder keeps producing. Past a threshold we drop
+                    // predicted frames instead, then ask for a keyframe so the
+                    // Mac has a clean resync point: an inter-frame stream can't
+                    // survive a gap, so dropping without that would show
+                    // smeared garbage until the next scheduled IDR.
+                    val backlogged =
+                        ConnectionManager.outboundQueueBytes() > VIDEO_BACKLOG_BYTES
+                    if (backlogged && !isKey) {
+                        if (!droppingVideo) {
+                            droppingVideo = true
+                            requestSyncFrame(enc)
+                        }
+                    } else {
+                        // Cleared only once the queue has actually drained —
+                        // NOT merely because this frame was a keyframe and got
+                        // sent. Clearing on the keyframe would re-arm the
+                        // latch for the very next predicted frame, so a link
+                        // that stays congested would be asked for a fresh IDR
+                        // every few frames — the most expensive possible
+                        // response to not having enough bandwidth.
+                        if (!backlogged) droppingVideo = false
+                        // One allocation, not three. This used to be
+                        // `configBytes!! + bytes` (a whole new array on every
+                        // keyframe) handed to `sendVideo`, which allocated
+                        // another to prepend its two header bytes.
+                        ConnectionManager.sendVideoParts(
+                            if (isKey) 1 else 0,
+                            if (isKey) configBytes else null,
+                            bytes,
+                        )
+                    }
                 }
                 enc.releaseOutputBuffer(idx, false)
             } else if (idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
@@ -293,6 +410,11 @@ class MirrorService : Service() {
             }
         }
     }
+
+    /** The RFC 6381 codec string WebCodecs needs for this stream's config bytes. */
+    private fun codecString(mime: String, config: ByteArray): String =
+        if (mime == MediaFormat.MIMETYPE_VIDEO_HEVC) HevcCodec.codecString(config)
+        else avcCodecString(config)
 
     private fun avcCodecString(config: ByteArray): String {
         var i = 0
@@ -342,29 +464,42 @@ class MirrorService : Service() {
         }
     }
 
+    /** Ask the encoder for an IDR now. Used to resume after a dropped-frame
+     *  gap and when unpausing — both are cases where the Mac's decoder has no
+     *  usable reference and every predicted frame would decode to garbage. */
+    private fun requestSyncFrame(enc: MediaCodec) {
+        runCatching {
+            enc.setParameters(Bundle().apply {
+                putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0)
+            })
+        }
+    }
+
     /** Auto-mode keep-alive: a live screen session whose projection we can reuse. */
     fun isScreenAlive(): Boolean = source == "screen" && projection != null && encoder != null
 
     /** Stop transmitting but keep the projection + encoder alive (no re-consent later). */
     fun pauseStreaming() {
         streaming = false
+        audio?.pauseStreaming()
     }
 
     /** Resume transmitting: re-announce so the Mac reconfigures, and force a keyframe. */
     fun resumeStreaming() {
         streaming = true
+        audio?.resumeStreaming()
         startedJson?.let { ConnectionManager.send(it) }
-        runCatching {
-            encoder?.setParameters(Bundle().apply {
-                putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0)
-            })
-        }
+        droppingVideo = false
+        encoder?.let { requestSyncFrame(it) }
     }
 
     override fun onDestroy() {
         if (instance === this) instance = null
+        DockWidget.refresh(applicationContext)
         startedJson = null
         running = false
+        runCatching { audio?.stop() }
+        audio = null
         runCatching { drainThread?.join(300) }
         runCatching { captureSession?.close() }
         runCatching { cameraDevice?.close() }
@@ -401,13 +536,53 @@ class MirrorService : Service() {
             } else {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
             }
-            startForeground(NOTIF_ID, n, type)
+            // Playback capture goes through AudioRecord, so Android 14+ wants
+            // the microphone type declared even though no microphone is opened.
+            // Asking for it without RECORD_AUDIO actually granted throws, hence
+            // the permission check *and* the fallback: a service that refuses to
+            // start would take the whole mirror down over an optional extra.
+            val wantsAudio = source != "camera" && reqAudio &&
+                checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+            try {
+                startForeground(
+                    NOTIF_ID, n,
+                    if (wantsAudio) type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else type
+                )
+            } catch (e: Exception) {
+                startForeground(NOTIF_ID, n, type)
+            }
         } else {
             startForeground(NOTIF_ID, n)
         }
     }
 
     companion object {
+        /**
+         * Seconds between forced keyframes.
+         *
+         * This was 1 — a full IDR every single second, forever, even on a
+         * completely static screen. Keyframes are many times the size of a
+         * predicted frame, so at the default bitrate they dominated both the
+         * encode cost and the bytes on the wire, and each one arrived as a
+         * transmission spike you could see as a hitch.
+         *
+         * A longer interval is safe here in a way it would not be over UDP:
+         * this is a WebSocket over TCP, so frames are never simply lost, and
+         * the two cases that genuinely need a fresh keyframe — a decoder
+         * joining mid-stream, and resyncing after [droppingVideo] — both ask
+         * for one explicitly via [requestSyncFrame].
+         */
+        private const val I_FRAME_SECONDS = 3
+
+        /**
+         * How many bytes may sit unsent in the socket's outbound queue before
+         * the video path starts dropping predicted frames. Roughly a second of
+         * video at the default bitrate: past that, the Mac is showing the past
+         * and catching up matters more than completeness.
+         */
+        private const val VIDEO_BACKLOG_BYTES = 1_500_000L
+
         @Volatile var instance: MirrorService? = null
 
         /**
@@ -426,6 +601,25 @@ class MirrorService : Service() {
         @Volatile var reqFps = 30
         /** Longest-edge cap in px; 0 = use the built-in 1280 ceiling. */
         @Volatile var reqMaxSize = 0
+
+        /** "h264" (always safe) or "h265". Honoured only if the device has an
+         *  HEVC encoder; [startEncoder] falls back rather than failing. */
+        @Volatile var reqCodec = "h264"
+
+        /** Stream phone playback audio alongside the screen. Screen source only —
+         *  playback capture rides the MediaProjection, which the camera path has
+         *  no reason to hold. */
+        @Volatile var reqAudio = false
+
+        /** Unknown values pin to h264: an unrecognised codec must degrade to the
+         *  one every decoder handles, never to a stream nothing can play. */
+        fun setCodec(codec: String?) {
+            reqCodec = if (codec == "h265" || codec == "hevc") "h265" else "h264"
+        }
+
+        fun setAudio(on: Boolean) {
+            reqAudio = on
+        }
 
         /** Clamped at the edge, so nothing downstream has to re-check. */
         fun setQuality(bitrate: Int, fps: Int, maxSize: Int) {
