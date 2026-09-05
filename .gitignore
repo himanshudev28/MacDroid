@@ -36,7 +36,13 @@ graphify-out/
 # ---- droiddock-tauri: Rust build artifacts ----
 droiddock-tauri/src-tauri/target/
 droiddock 2
+# ---- internal planning docs (local only, not for the public repo) ----
+droiddock-tauri/AIRSYNC_GAP_ANALYSIS.md
+droiddock-tauri/AIRSYNC_MOBILE_GAP.md
+droiddock-tauri/CLAUDE.md
 droiddock-tauri/PHASE16_PARITY_CHECKLIST.md
+droiddock-tauri/checkpoint.md
+droiddock-tauri/droiddock-tauri-prd-v3.md
 
 # ---- throwaway Phase 0 spikes, and captured protocol corpus (may contain real personal data) ----
 spikes/
