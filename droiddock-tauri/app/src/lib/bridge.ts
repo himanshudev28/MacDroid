@@ -21,6 +21,7 @@ export function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<
         photoSyncEnabled: false,
         photoSyncDest: null,
         macFsEnabled: false,
+        webdavWritable: false,
         quickShareEnabled: false,
         macFsRoots: [],
         encryptLink: false,
@@ -131,6 +132,9 @@ export type DroidConfig = {
   /// Phase 19: reverse file browsing. Now opt-in — the Mac only advertises the
   /// capability (and the phone only shows the tab) while this is on.
   macFsEnabled: boolean;
+  /// Whether the Finder mount accepts writes. Read when the volume is mounted,
+  /// so a change applies on the next mount.
+  webdavWritable: boolean;
   quickShareEnabled: boolean;
   /// Mac directories the paired phone may browse/pull from — edited wholesale
   /// (add/remove folder) via `setSetting`, same as any other setting here.
@@ -346,8 +350,88 @@ export const contactsList = () => invoke<Contact[]>("contacts_list");
 
 // ── Phase 9: calls ───────────────────────────────────────────────────────
 
-export type IncomingCall = { state: string; number?: string; name?: string; key?: string };
+/// A `call` push from the phone. `state` is `"ringing"` → `"active"` → `"idle"`.
+///
+/// The three `can*` flags are recomputed by the phone on every push rather than
+/// read from the handshake's caps: the Calls permission is very often granted
+/// *because* the Mac just said a button needed it, and a handshake-time answer
+/// would stay stale until the link happened to drop. `muted`/`speaker` only
+/// appear on `"active"` — on a ringing phone they describe an idle audio route.
+export type IncomingCall = {
+  state: string;
+  number?: string;
+  name?: string;
+  key?: string;
+  canAnswer?: boolean;
+  canEnd?: boolean;
+  canAudio?: boolean;
+  muted?: boolean;
+  speaker?: boolean;
+};
 export const actionCall = (number: string) => invoke<void>("action_call", { number });
+
+/// What the phone did, as opposed to what it was asked to do. `muted` and
+/// `speaker` are read back from the device after the write, so render the
+/// toggles from these rather than from optimistic local state — the dialer that
+/// owns the call is free to put the route back, and does.
+export type CallActionResult = { ok: boolean; muted?: boolean; speaker?: boolean; error?: string };
+
+/// Answer / hang up / mute / speaker over the Wi-Fi link. `on` is absolute for
+/// the two toggles, never a flip; rejects rather than resolves when the phone
+/// could not do it, with the phone's own wording (missing permission, no call
+/// to end, dialer overrode the route).
+export const callAction = (action: "answer" | "end" | "mute" | "speaker", on?: boolean) =>
+  invoke<CallActionResult>("call_action", { action, on: on ?? null });
+
+/// Save a mirror still or recording and resolve with the path it landed at.
+///
+/// The bytes go over Tauri's **raw** request body rather than as a `Uint8Array`
+/// argument: a recording is tens of megabytes and the default marshalling is a
+/// JSON array with one element per byte. `ext` rides a header because the raw
+/// body is the entire payload — there is no room for a second argument beside
+/// it. See `capture.rs`.
+export const mirrorSaveCapture = async (blob: Blob, ext: string): Promise<string> => {
+  if (!isTauri()) throw new Error("Saving is only available in the app");
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  // `tauriInvoke` directly, not the wrapper above: the wrapper's signature is
+  // (cmd, argsObject), and this call needs the bytes to *be* the payload with
+  // the format riding a header beside it.
+  return tauriInvoke<string>("mirror_save_capture", bytes, {
+    headers: { "x-capture-ext": ext },
+  });
+};
+
+/// Ring the phone, or stop it. Resolves with whether it is ringing *now*, read
+/// back from the phone — it stops itself after a minute and from its own
+/// notification, so the button must not stay lit beside a silent phone.
+export const ringPhone = (on: boolean) => invoke<boolean>("ring_phone", { on });
+
+// ── Setup check ──────────────────────────────────────────────────────────
+
+/// One row of the setup check. `detail` describes the *broken* state — it reads
+/// as an explanation of a fault, not a neutral description — so show it when
+/// `ok` is false, and on `info` rows where the text is the whole point.
+export type HealthItem = {
+  id: string;
+  ok: boolean;
+  severity: "error" | "warn" | "info";
+  title: string;
+  detail: string;
+  /// Present only when there is a screen to open. A row with no `fix` is a
+  /// statement of fact, not a button.
+  fix?: string;
+  /// Which device has to be visited: `"mac"` or `"phone"`.
+  side: string;
+};
+
+/// Probe both devices. One round trip to the phone, so call it on an explicit
+/// action or a slow poll — never a background timer.
+export const healthCheck = () => invoke<HealthItem[]>("health_check");
+
+/// Open the screen that fixes one row. Resolves with a sentence to show the
+/// user: a Mac pane opening, a phone screen opening, or — on a phone that can't
+/// start activities from the background — a notification left for them to tap.
+export const healthFix = (id: string) => invoke<string>("health_fix", { id });
 
 // ── Phase 10: media remote ───────────────────────────────────────────────
 
@@ -552,8 +636,11 @@ export const scrcpyEmbeddedStart = (serial: string) =>
 export const scrcpyEmbeddedStop = () => invoke<void>("scrcpy_embedded_stop");
 export const scrcpyEmbeddedRunning = () => invoke<boolean>("scrcpy_embedded_running");
 
-/// The phone's storage mounted as a Finder volume. Read-only by design — see
-/// webdav.rs for why writes are not implemented.
+/// The phone's storage mounted as a Finder volume.
+///
+/// Read-only unless `webdavWritable` is on — that default is deliberate, not a
+/// gap: a bug on the write path damages files on the phone where a bug on the
+/// read path shows a wrong listing. See webdav.rs.
 export type WebdavStatus = {
   running: boolean;
   url: string | null;

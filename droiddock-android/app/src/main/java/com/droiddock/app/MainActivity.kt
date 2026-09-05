@@ -498,7 +498,6 @@ private fun DroidDockScreen(
                         paired = true
                     },
                     onGoToConnect = { currentTab = "connect" },
-                    onGoToMirror  = { currentTab = "mirror" },
                     onGoToFiles   = { currentTab = "files" },
                 )
                 "connect" -> ConnectTab(
@@ -670,7 +669,6 @@ private fun HomeTab(
     onDisconnect: () -> Unit,
     onPickDevice: (KnownDevice) -> Unit,
     onGoToConnect: () -> Unit,
-    onGoToMirror:  () -> Unit,
     onGoToFiles:   () -> Unit,
 ) {
     Column(
@@ -4160,14 +4158,11 @@ private fun GuideCard(section: GuideSection) {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-private val PHONE_PERMS = arrayOf(
-    Manifest.permission.READ_SMS,
-    Manifest.permission.SEND_SMS,
-    Manifest.permission.READ_CONTACTS,
-    Manifest.permission.READ_PHONE_STATE,
-    Manifest.permission.READ_CALL_LOG,
-    Manifest.permission.CALL_PHONE
-)
+/// The runtime permissions the "Grant" button asks for, and the same list
+/// `PermissionHealth` reads back — sharing it is what keeps the phone's own
+/// Settings screen and the Mac's health panel from disagreeing about whether
+/// the Phone group is complete.
+private val PHONE_PERMS = PermissionHealth.PHONE_HEALTH_PERMS
 
 /**
  * The current clipboard as plain text, or "" when there is nothing readable.

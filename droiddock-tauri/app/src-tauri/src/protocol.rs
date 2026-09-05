@@ -81,6 +81,22 @@ pub enum Message {
     PhotosChanged,
     Call(Extra),
     ActionCall(Extra),
+    /// Answer / hang up / mute / speaker for the phone's current call, over the
+    /// plain Wi-Fi link rather than ADB. Numeric-reqId request/reply pair like
+    /// the other `respond()`-based features, caps-gated on `"callctl"` so an
+    /// older phone build never receives one. See `CallControl.kt`.
+    CallAction(Extra),
+    CallActionResult(Extra),
+    /// Permission-health request and its reply share this one type, the way
+    /// `wallpaper` and `apps-list` do — see `health.rs` and
+    /// `PermissionHealth.kt`. `health-fix` likewise: the Mac asks, the phone
+    /// echoes back which of "opened it" / "left a notification" happened.
+    Health(Extra),
+    HealthFix(Extra),
+    /// "Find my phone": request and reply share the type, and the reply carries
+    /// `ringing` so the Mac's button reflects what the phone is actually doing
+    /// rather than what it was last told. See `Ringer.kt`.
+    Ring(Extra),
     ActionSms(Extra),
     Dismiss(Extra),
 

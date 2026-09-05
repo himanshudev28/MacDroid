@@ -29,6 +29,17 @@
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
+    <!-- Answer / hang up the current call from the Mac. Runtime permission; the
+         Mac hides those two buttons until it is actually granted, because a
+         dead Answer button on an incoming call is worse than none. -->
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+    <!-- Mute and speaker for the current call. Install-time, so those two are
+         available whenever the app is — though the dialer that owns the call
+         can still put the route back, which CallControl reads back and reports. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- "Ring my phone" buzzes as well as sounds, for a phone left on a soft
+         surface where the alarm alone is easy to miss. Normal permission. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <!-- Auto mode: lets the Mac start mirroring/camera without a tap on the phone. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -141,6 +152,21 @@
             </intent-filter>
         </activity>
 
+        <!-- Serves received clipboard images as `content://` URIs, which is the
+             only way an image can go on the clipboard: a clip crosses a ~1 MB
+             Binder transaction, so it carries a URI and the system grants the
+             pasting app a temporary read. Not exported, and scoped by
+             file_paths.xml to one cache subdirectory. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.clips"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <service
             android:name=".BridgeService"
             android:exported="false"
@@ -175,6 +201,15 @@
         <receiver android:name=".UpdateInstallReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="com.droiddock.app.INSTALL_RESULT" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Stop button on the ringing notification. Not exported: the only
+             sender is a same-package PendingIntent this app created, so nothing
+             else can silence a ring it did not start. -->
+        <receiver android:name=".RingStopReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="com.droiddock.app.RING_STOP" />
             </intent-filter>
         </receiver>
 

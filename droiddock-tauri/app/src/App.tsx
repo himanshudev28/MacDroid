@@ -26,6 +26,7 @@ import CameraView from "./components/views/CameraView";
 import DevicesView from "./components/views/DevicesView";
 import SettingsView from "./components/views/SettingsView";
 import CallOverlay, { type ActiveCall } from "./components/CallOverlay";
+import HealthModal from "./components/HealthModal";
 import SetupModal from "./components/SetupModal";
 import WirelessPairModal from "./components/WirelessPairModal";
 import Toasts, { type Toast } from "./components/Toasts";
@@ -72,6 +73,8 @@ import {
   fsPush,
   wallpaperGet,
   onLinkQuality,
+  healthCheck,
+  ringPhone,
   onUpdateAvailable,
   onOpenUpdates,
   type UpdateInfo,
@@ -147,6 +150,15 @@ export default function App() {
   /// rail dot — the row that acts on it lives in Settings → About.
   const [updateAvailable, setUpdateAvailable] = useState<UpdateInfo | null>(null);
   const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
+  const [healthOpen, setHealthOpen] = useState(false);
+  /// Whether the phone is ringing, as the phone last reported it — not as we
+  /// last asked. It stops itself on a timer and from its own notification.
+  const [ringing, setRinging] = useState(false);
+  /// How many grants are missing, from the check run at link-up. Drives the
+  /// strip below the header — the whole point of that strip is to say something
+  /// is wrong *before* the user tries the feature it breaks and concludes the
+  /// app is broken instead.
+  const [healthIssues, setHealthIssues] = useState(0);
   const [messageTarget, setMessageTarget] = useState<MessageTarget | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   // At most one Quick Share prompt at a time: the sender blocks on an
@@ -244,10 +256,26 @@ export default function App() {
     wifiStatus().then(setStatus).catch(() => {});
 
     const offStatus = onWifiStatus((s) => {
-      setStatus(s);
+      setStatus((prev) => {
+        // One setup check per arrival, not a background timer: the phone half
+        // is a round trip that wakes several binder calls over there, and this
+        // app has spent real work removing exactly that kind of idle cost. A
+        // phone that has just connected is also the moment the answer matters
+        // most — everything it can't do is about to look like a bug.
+        if (s.connected && !prev.connected) {
+          healthCheck()
+            .then((items) => setHealthIssues(items.filter((i) => !i.ok && i.severity === "error").length))
+            .catch(() => setHealthIssues(0));
+        }
+        if (!s.connected) setHealthIssues(0);
+        return s;
+      });
       if (!s.connected) {
         clearNowPlaying();
         setActiveCall(null);
+        // A phone that has gone away is not ringing for us any more, whatever
+        // it is doing in someone's bag — and it will stop itself.
+        setRinging(false);
       }
     });
 
@@ -810,7 +838,7 @@ export default function App() {
           />
         );
       case "calls":
-        return <CallsView linked={linked} />;
+        return <CallsView linked={linked} canControl={phoneSupports(status, "callctl")} />;
       case "notifications":
         return (
           <NotificationsView
@@ -856,6 +884,7 @@ export default function App() {
             linked={linked}
             onToast={toast}
             updateAvailable={updateAvailable}
+            onOpenHealth={() => setHealthOpen(true)}
           />
         );
       case "mirror":
@@ -1020,6 +1049,19 @@ export default function App() {
       </main>
 
       {activeCall && <CallOverlay call={activeCall} onDismiss={() => setActiveCall(null)} onToast={toast} />}
+      {healthOpen && (
+        <HealthModal
+          onToast={toast}
+          onClose={() => {
+            setHealthOpen(false);
+            // Re-read on close so acting on the panel clears the strip, rather
+            // than leaving it accusing the user of something they just fixed.
+            healthCheck()
+              .then((items) => setHealthIssues(items.filter((i) => !i.ok && i.severity === "error").length))
+              .catch(() => {});
+          }}
+        />
+      )}
       {setup && (
         <SetupModal tools={tools} reason={setup.reason} onClose={() => setSetup(null)} onInstallScrcpy={installScrcpy} />
       )}

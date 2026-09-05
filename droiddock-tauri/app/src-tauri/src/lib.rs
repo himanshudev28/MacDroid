@@ -1,5 +1,6 @@
 mod adb;
 mod appearance;
+mod capture;
 mod audio;
 mod automation;
 mod clipboard;
@@ -8,6 +9,7 @@ mod crash;
 mod crypto;
 mod discovery;
 mod edit_cache;
+mod health;
 mod link_quality;
 mod mac_apps;
 mod mac_audio;
@@ -473,6 +475,123 @@ async fn action_call(app: AppHandle, state: State<'_, SharedState>, adb_state: S
     }
 }
 
+/// Answer, hang up, mute or change the route on the call the phone is holding,
+/// over the Wi-Fi link.
+///
+/// This is the Wi-Fi counterpart to `adb::adb_call_*`, and the reason the
+/// incoming-call overlay stopped being view-only: an alert you could not
+/// decline was half a feature. The ADB commands stay as they are — they drive
+/// the dialer's UI with `input keyevent` and can do DTMF, which no public
+/// framework API exposes to a non-dialer app.
+///
+/// `on` is the absolute state wanted for the two toggles, never a flip. The
+/// phone reads the audio state back after writing it and returns what the
+/// device *actually* settled on, because the dialer that owns the call can and
+/// does override the route — so the caller should render from the returned
+/// `muted`/`speaker`, not from what it asked for.
+#[tauri::command]
+async fn call_action(
+    state: State<'_, SharedState>,
+    action: String,
+    on: Option<bool>,
+) -> Result<Value, String> {
+    // Closed allow-list, matching `mac_remote`'s posture: the action name
+    // reaches a `when` on the phone, so the set of things it can name is
+    // decided here rather than by whatever string a caller passes.
+    if !matches!(action.as_str(), "answer" | "end" | "mute" | "speaker") {
+        return Err(format!("Unknown call action: {action}"));
+    }
+    let mut body = serde_json::Map::new();
+    body.insert("type".into(), Value::from("call-action"));
+    body.insert("action".into(), Value::from(action));
+    if let Some(on) = on {
+        body.insert("on".into(), Value::from(on));
+    }
+    let reply = ws_server::request_default(&state, body).await?;
+    if reply.get("ok").and_then(Value::as_bool) == Some(true) {
+        return Ok(reply);
+    }
+    // The phone distinguishes "you lack the permission", "there was no call to
+    // end" and "the dialer put the route back". Passing its wording through
+    // means the toast names the actual fix instead of a generic failure.
+    Err(reply
+        .get("error")
+        .and_then(Value::as_str)
+        .unwrap_or("The phone could not do that")
+        .to_string())
+}
+
+// ── Saving what the mirror shows ─────────────────────────────────────────
+
+/// Save a still or a recording of the mirror, and return where it landed.
+///
+/// Synchronous, and takes a raw [`tauri::ipc::Request`] rather than `Vec<u8>`:
+/// a recording is tens of megabytes, and Tauri's default `Vec<u8>` marshalling
+/// is a JSON array with one element per byte. See `capture.rs`.
+#[tauri::command]
+fn mirror_save_capture(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let ext = request
+        .headers()
+        .get("x-capture-ext")
+        .and_then(|v| v.to_str().ok())
+        .ok_or("No capture format was given")?;
+    match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => capture::save(&app, ext, bytes),
+        // A JSON body means the frontend sent something other than an
+        // ArrayBuffer. Failing loudly beats writing a file full of digits.
+        tauri::ipc::InvokeBody::Json(_) => Err("The capture did not arrive as raw bytes".into()),
+    }
+}
+
+// ── Find my phone ────────────────────────────────────────────────────────
+
+/// Make the phone ring, or stop it.
+///
+/// Returns whether it is ringing *now*, read from the phone rather than assumed
+/// from the request — the phone stops itself after a minute and from its own
+/// notification, so the Mac's button would otherwise sit lit next to a silent
+/// phone. See `Ringer.kt` for why the alarm stream is the one that survives
+/// silent mode.
+#[tauri::command]
+async fn ring_phone(state: State<'_, SharedState>, on: bool) -> Result<bool, String> {
+    let mut body = serde_json::Map::new();
+    body.insert("type".into(), Value::from("ring"));
+    body.insert("on".into(), Value::from(on));
+    let reply = ws_server::request_default(&state, body).await?;
+    if let Some(err) = reply.get("error").and_then(Value::as_str) {
+        return Err(err.to_string());
+    }
+    Ok(reply.get("ringing").and_then(Value::as_bool).unwrap_or(on))
+}
+
+// ── Permission health ────────────────────────────────────────────────────
+
+/// Probe every grant both devices need and report what's missing.
+///
+/// Called when the health panel opens and on a slow poll while it stays open.
+/// Not on a background timer: the phone half is a round trip that wakes several
+/// binder calls over there, and this app has spent real effort removing exactly
+/// that kind of idle cost.
+#[tauri::command]
+async fn health_check(
+    app: AppHandle,
+    state: State<'_, SharedState>,
+) -> Result<Vec<health::HealthItem>, String> {
+    Ok(health::check(&app, &state).await)
+}
+
+/// Take the user to the screen that fixes one row, on whichever device owns it.
+///
+/// Returns a sentence to show, rather than `()`, because the outcomes are
+/// genuinely different: a Mac pane opens in front of you, a phone screen may
+/// open on a device in your pocket, and on a phone that cannot start activities
+/// from the background all that happens is a notification appears. Collapsing
+/// those into "done" would leave someone waiting for a screen that never came.
+#[tauri::command]
+async fn health_fix(state: State<'_, SharedState>, id: String) -> Result<String, String> {
+    health::fix(&state, &id).await
+}
+
 // ── Phase 10: media remote ───────────────────────────────────────────────
 
 /// Outbound transport/volume command. `value` is an integer (ms for `seek`,
@@ -802,6 +921,11 @@ pub fn run() {
             sms_send,
             contacts_list,
             action_call,
+            call_action,
+            mirror_save_capture,
+            ring_phone,
+            health_check,
+            health_fix,
             media_cmd,
             clipboard::clipboard_push_now,
             wallpaper_get,

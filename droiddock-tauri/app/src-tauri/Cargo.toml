@@ -81,6 +81,11 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSWorkspace",
     "NSAccessibility",
     "NSPasteboard",
+    # Clipboard images. macOS routinely leaves only TIFF on the pasteboard —
+    # Preview and Safari copies do — and Android's BitmapFactory cannot decode
+    # TIFF, so NSBitmapImageRep re-encodes it as PNG before it goes on the wire.
+    "NSBitmapImageRep",
+    "NSImageRep",
     # Media keys (NX_KEYTYPE_PLAY etc.) can only be posted as an NSSystemDefined
     # event — see mac_remote::imp::media_key. NSGraphicsContext comes along
     # because the NSEvent constructor's signature names it (we pass nil).
@@ -106,6 +111,8 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
     # hand (mac_remote::imp::reset_accessibility).
     "NSDictionary",
     "NSString",
+    # NSData — reading pasteboard image bytes out, and handing them back in.
+    "NSData",
     "NSValue",
 ] }
 # Tier D: synthesising input events for the phone→Mac remote (mac_remote.rs).

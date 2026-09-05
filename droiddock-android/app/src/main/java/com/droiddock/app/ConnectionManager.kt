@@ -53,6 +53,27 @@ object ConnectionManager {
         // put a button on the Mac that silently does nothing — the exact
         // failure this capability exists to prevent.
         if (Build.VERSION.SDK_INT >= 28 || LockAdmin.isActive(appCtx)) add("lock")
+        // "callctl" says this build understands `call-action`. Like "lock" it is
+        // evaluated per connection and gated on the grant actually being there,
+        // so the Mac never renders an Answer button that cannot answer. The
+        // per-call flags on the `call` message are the finer-grained answer —
+        // this one only decides whether the Calls tab describes the feature at
+        // all. See CallControl.kt.
+        if (CallControl.available(appCtx)) add("callctl")
+        // "health" says this build can answer the Mac's permission-health
+        // request. Unconditional: unlike the two above it describes a message
+        // this build understands rather than a grant it holds — the whole point
+        // of the panel is to report grants that are *missing*.
+        add("health")
+        // "fsmkdir" gates the Finder mount's folder creation. Without it the
+        // Mac refuses MKCOL outright rather than sending a message an older
+        // phone would ignore, leaving Finder waiting on a folder that never
+        // appears.
+        add("fsmkdir")
+        // "ring" is unconditional for the same reason as "health": it describes
+        // a message this build understands, not a grant. The alarm stream needs
+        // no permission, and VIBRATE is install-time.
+        add("ring")
         add(LinkCrypto.CAP)
         add(LinkCrypto.CAP_FRAMES)
     }
@@ -598,8 +619,17 @@ object ConnectionManager {
                         webSocket, JSONObject().put("type", "pong").put("t", msg.optLong("t"))
                     )
                     "clipboard" -> {
-                        val t = msg.optString("text")
-                        if (t.isNotEmpty()) setClipboard(t)
+                        // An image carries `kind:"image"` and no `text` at all,
+                        // so a build that predates this simply skipped it —
+                        // which is what makes the shape safe to add.
+                        if (msg.optString("kind") == "image") {
+                            val n = ClipImage.receive(appCtx, msg.optString("data"))
+                            lastEvent.value =
+                                if (n != null) "image ← Mac" else "image blocked by Android"
+                        } else {
+                            val t = msg.optString("text")
+                            if (t.isNotEmpty()) setClipboard(t)
+                        }
                     }
                     // The Mac telling us about itself, so Home can show both
                     // devices. Purely informational — nothing here acts on it,
@@ -650,6 +680,11 @@ object ConnectionManager {
                     "fs-delete" -> respond(webSocket, msg, "fs-delete") {
                         FileRepo.delete(msg.optString("path"))
                         it.put("ok", true)
+                    }
+                    // MKCOL from the Finder mount. The only write the mount
+                    // needed that had no phone-side operation already.
+                    "fs-mkdir" -> respond(webSocket, msg, "fs-mkdir") {
+                        it.put("path", FileRepo.mkdir(msg.optString("path"), msg.optString("name")))
                     }
                     "fs-rename" -> respond(webSocket, msg, "fs-rename") {
                         val newPath = FileRepo.rename(msg.optString("path"), msg.optString("newName"))
@@ -705,8 +740,54 @@ object ConnectionManager {
                             val action = if (canCall) Intent.ACTION_CALL else Intent.ACTION_DIAL
                             val intent = Intent(action).setData(Uri.parse("tel:$number"))
                             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            // Arm before starting: on a fast dial the OFFHOOK
+                            // broadcast can beat us back here, and an unarmed
+                            // receiver drops it as a call the Mac never knew
+                            // about — leaving the Mac stuck on "Calling…".
+                            if (canCall) CallReceiver.armOutgoing(appCtx, number)
                             runCatching { appCtx.startActivity(intent) }
                         }
+                    }
+                    // Answer / hang up / mute / speaker for the current call.
+                    // Replies with the audio state the device really ended up in
+                    // rather than the state that was asked for — see CallControl.
+                    "call-action" -> respond(webSocket, msg, "call-action-result") {
+                        val action = msg.optString("action")
+                        require(action in CallControl.ACTIONS) { "unknown call action" }
+                        val on = if (msg.has("on")) msg.optBoolean("on") else null
+                        val outcome = CallControl.perform(appCtx, action, on)
+                        it.put("ok", outcome.ok)
+                        outcome.error?.let { e -> it.put("error", e) }
+                        outcome.muted?.let { m -> it.put("muted", m) }
+                        outcome.speaker?.let { sp -> it.put("speaker", sp) }
+                    }
+                    // Find the phone. `on:false` stops it; the phone also stops
+                    // itself after a minute and from its own notification, so a
+                    // Mac that walks out of range can't leave it ringing.
+                    "ring" -> respond(webSocket, msg, "ring") {
+                        val on = msg.optBoolean("on", true)
+                        if (on) {
+                            Ringer.start(appCtx, msg.optInt("seconds", Ringer.DEFAULT_SECONDS))
+                                .getOrThrow()
+                        } else {
+                            Ringer.stop(appCtx)
+                        }
+                        it.put("ringing", Ringer.ringing)
+                    }
+                    // Every grant this app needs, and what breaks without each —
+                    // see PermissionHealth. Answered on demand rather than
+                    // pushed: the probes are binder round trips, and nothing
+                    // needs them until a Mac has the panel open.
+                    "health" -> respond(webSocket, msg, "health") {
+                        it.put("items", PermissionHealth.snapshot(appCtx))
+                    }
+                    // Take the user to the screen that fixes one of them. The
+                    // result distinguishes "opened it" from "left a
+                    // notification", because a phone that cannot start
+                    // activities from the background can only do the latter and
+                    // the Mac must not claim otherwise.
+                    "health-fix" -> respond(webSocket, msg, "health-fix") {
+                        it.put("result", PermissionHealth.openFix(appCtx, msg.optString("id")))
                     }
                     "action-sms" -> {
                         val number = msg.optString("number")
@@ -1124,6 +1205,28 @@ object ConnectionManager {
         val obj = JSONObject().put("type", "remote").put("action", action)
         runCatching { build(obj) }
         return send(obj)
+    }
+
+    /**
+     * Send the clipboard's current *image* to the Mac.
+     *
+     * Separate from [sendClipboardText] rather than folded into it: the caller
+     * has to distinguish "there was no image, try text" from "there was an
+     * image and the link is down", and a single boolean cannot say both.
+     */
+    fun sendClipboardImage(base64: String): Boolean {
+        val socket = ws ?: return false
+        val ok = socket.send(
+            wire(
+                JSONObject()
+                    .put("type", "clipboard")
+                    .put("kind", "image")
+                    .put("mime", "image/png")
+                    .put("data", base64)
+            )
+        )
+        if (ok) lastEvent.value = "image → Mac"
+        return ok
     }
 
     fun sendClipboardText(text: String): Boolean {

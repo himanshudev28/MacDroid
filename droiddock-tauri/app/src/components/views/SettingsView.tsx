@@ -92,6 +92,7 @@ function SettingsView({
   onToast,
   linked,
   updateAvailable,
+  onOpenHealth,
 }: {
   config: DroidConfig | null;
   onConfig: (c: DroidConfig) => void;
@@ -143,7 +144,7 @@ function SettingsView({
     let id: ReturnType<typeof setInterval> | null = null;
     const check = () =>
       accessibilityTrusted()
-        .then((t) => alive && setAxTrusted(t))
+        .then((trusted) => alive && setAxTrusted(trusted))
         .catch(() => {});
     const stop = () => {
       if (id !== null) clearInterval(id);
@@ -1202,7 +1203,17 @@ function SegmentedControl<T extends string>({
 ///
 /// Lives in Mac files rather than Mirroring because it is the same question as
 /// the rest of that section — where files live and who can reach them.
-function PhoneVolumeCard({ linked }: { linked: boolean }) {
+function PhoneVolumeCard({
+  linked,
+  writable,
+  onWritable,
+}: {
+  linked: boolean;
+  /// From config, not local state — it has to survive a restart, and the Rust
+  /// side reads the same value when the volume is mounted.
+  writable: boolean;
+  onWritable: (v: boolean) => void;
+}) {
   const [status, setStatus] = useState<WebdavStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
