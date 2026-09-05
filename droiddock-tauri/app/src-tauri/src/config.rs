@@ -117,6 +117,19 @@ pub struct Config {
     pub quickshare_enabled: bool,
     #[serde(default = "default_mac_fs_roots")]
     pub mac_fs_roots: Vec<String>,
+
+    /// Whether the Finder mount accepts writes.
+    ///
+    /// **Off by default, and that is the point.** Read-only is a posture, not a
+    /// missing feature: a write bug here destroys the user's phone files where
+    /// a read bug shows a wrong listing. Turning it on is opting into that
+    /// trade for the one thing the Files tab cannot do — saving straight from
+    /// any Mac app onto a file on the phone. See `webdav.rs`.
+    ///
+    /// Read when the volume is mounted, not per request, so changing it takes
+    /// effect on the next mount.
+    #[serde(default)]
+    pub webdav_writable: bool,
     /// Tier C: encrypt JSON control messages (AES-256-GCM keyed off the pairing
     /// token). Off by default and negotiated per connection — see
     /// `crate::crypto`. `#[serde(default)]` means an existing droiddock.json
@@ -320,6 +333,7 @@ impl Default for Config {
             mac_fs_enabled: false,
             quickshare_enabled: false,
             mac_fs_roots: default_mac_fs_roots(),
+            webdav_writable: false,
             encrypt_link: false,
             remote_control: false,
             mac_info_sync: true,

@@ -8,19 +8,49 @@
 //! one from the phone — which is the thing a file *browser* inside our own
 //! window can never give you.
 //!
-//! # Read-only, deliberately
+//! # Read-only by default, writable by choice
 //!
-//! `PUT`/`DELETE`/`MOVE`/`LOCK` are not implemented. Two reasons:
+//! Writes are off unless **Settings → Mac files → Allow writing to the phone**
+//! is on. Read-only stays the default posture for the second of the two reasons
+//! below, which no amount of implementation removes.
 //!
-//! 1. Finder is aggressive with writes — it drops `.DS_Store` into every
-//!    directory it looks at, and writes `._` AppleDouble sidecars next to
-//!    files. Mounting read-write means Finder litters the phone's storage as a
-//!    side effect of browsing it.
-//! 2. A write bug here destroys the user's phone files. A read bug shows the
-//!    wrong listing.
+//! 1. **Finder litters.** It drops `.DS_Store` into every directory it merely
+//!    *looks at*, and writes `._name` AppleDouble sidecars beside files it
+//!    saves — plus `.Trashes`, `.fseventsd` and friends at a volume root.
+//!    Mounted read-write and unfiltered, browsing phone storage dirties it.
 //!
-//! The existing Files tab still does uploads, renames and deletes, with
-//! confirmation, which is the right place for destructive operations.
+//!    Handled by [`is_finder_junk`]: those names are accepted and **discarded**
+//!    rather than sent to the phone. That is a deliberate lie to Finder —
+//!    refusing them instead produces a stream of error dialogs — and it is
+//!    confined to a fixed list of names macOS generates and no user types.
+//!
+//! 2. **A write bug destroys files; a read bug shows a wrong listing.** Still
+//!    true, still the reason for the default. What reduces it: the junk filter,
+//!    the path handling `DavPath` already does, and a `MOVE` narrow enough to
+//!    have no failure mode of its own (below).
+//!
+//! The Files tab remains the better place for deliberate destructive work — it
+//! confirms. This exists for the thing a browser inside our own window can
+//! never do: ⌘S in any Mac app, straight onto a file on the phone.
+//!
+//! # What each method maps to
+//!
+//! | WebDAV | Phone |
+//! |---|---|
+//! | `PUT` | `fs-push-begin` with `overwrite: true` |
+//! | `DELETE` | `fs-delete` |
+//! | `MOVE` | `fs-rename`, **same directory only** |
+//! | `MKCOL` | `fs-mkdir` (caps-gated on `fsmkdir`) |
+//! | `LOCK`/`UNLOCK` | in-memory [`FakeLs`], nothing reaches the phone |
+//!
+//! `MOVE` across directories is refused rather than emulated. The emulation
+//! would be pull-push-delete: slow for a large file, and if it fails between
+//! the push and the delete the user has two copies, or between pull and push,
+//! none. A clean "not supported" is a better outcome than either.
+//!
+//! Locks are a formality: macOS's WebDAV client asks for them before writing,
+//! and a lock on a volume only this Mac can reach protects against nothing, so
+//! `FakeLs` answers without involving the phone.
 //!
 //! # Access control
 //!
@@ -106,6 +136,30 @@ impl DavDirEntry for Entry {
     }
 }
 
+/// Names macOS writes on its own that must never reach the phone.
+///
+/// Finder creates `.DS_Store` in any directory it displays and `._name`
+/// AppleDouble sidecars beside files it writes; the rest appear at volume
+/// roots. A write to one of these is answered as a success and thrown away —
+/// see the module docs for why that is a lie worth telling.
+///
+/// The list is exact names and one prefix, not a general "hidden file" rule: a
+/// dotfile the user actually wants on their phone must still get there.
+fn is_finder_junk(name: &str) -> bool {
+    name.starts_with("._")
+        || matches!(
+            name,
+            ".DS_Store"
+                | ".Trashes"
+                | ".fseventsd"
+                | ".Spotlight-V100"
+                | ".TemporaryItems"
+                | ".apdisk"
+                | ".DocumentRevisions-V100"
+                | ".VolumeIcon.icns"
+        )
+}
+
 /// Parse one `fs-list` entry. Shape is fixed by `FileRepo.list` on the phone:
 /// `{name, dir, size, modified}` — the Android app is the protocol's source of
 /// truth, so this reads those names rather than inventing its own.
@@ -139,6 +193,12 @@ struct PhoneFs {
     /// run, cleared on stop.
     cache: PathBuf,
     listings: Arc<tokio::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, Listing)>>>,
+    /// Read from config at mount time, not per request. Toggling the setting
+    /// while a volume is mounted therefore does nothing until it is remounted —
+    /// which is the honest behaviour: Finder has already been told what the
+    /// volume supports, and a mount that silently changes capability underneath
+    /// it produces failures with no explanation.
+    writable: bool,
 }
 
 impl PhoneFs {
@@ -214,6 +274,39 @@ impl PhoneFs {
             .map(|e| e.meta.clone())
             .ok_or(FsError::NotFound)
     }
+
+    /// Drop a cached listing so the next look reflects a write we just made.
+    ///
+    /// Without this, creating a file and immediately listing its directory
+    /// shows the pre-write state for up to `LISTING_TTL` — which Finder reads
+    /// as the save having failed.
+    async fn forget(&self, phone_path: &str) {
+        let parent = phone_path.rsplit_once('/').map(|(p, _)| p).unwrap_or("/");
+        let parent = if parent.is_empty() { "/" } else { parent };
+        let mut cache = self.listings.lock().await;
+        cache.remove(parent);
+        cache.remove(phone_path);
+    }
+
+    /// Refuse anything that would modify the phone while writes are off.
+    fn writes_allowed(&self) -> FsResult<()> {
+        write_guard(self.writable)
+    }
+
+    async fn ask(&self, body: Value) -> FsResult<Value> {
+        let reply = ws_server::request_default(&self.ws, crate::map_of(body))
+            .await
+            .map_err(|_| FsError::GeneralFailure)?;
+        if let Some(e) = reply.get("error").and_then(Value::as_str) {
+            eprintln!("[webdav] phone refused: {e}");
+            // The phone reports "already exists", "no permission" and "not
+            // found" all as `error`. Mapping every one to Exists would make a
+            // permission failure look like a name clash, so the generic failure
+            // is the honest answer where the text isn't parsed.
+            return Err(FsError::GeneralFailure);
+        }
+        Ok(reply)
+    }
 }
 
 impl DavFileSystem for PhoneFs {
@@ -244,10 +337,41 @@ impl DavFileSystem for PhoneFs {
 
     fn open<'a>(&'a self, path: &'a DavPath, options: OpenOptions) -> FsFuture<'a, Box<dyn DavFile>> {
         Box::pin(async move {
-            // Read-only: anything that would modify the phone is refused here
-            // rather than half-implemented. See the module docs.
             if options.write || options.append || options.truncate || options.create_new {
-                return Err(FsError::Forbidden);
+                self.writes_allowed()?;
+                let phone_path = self.phone_path(path);
+                let name = leaf(&phone_path).to_string();
+
+                // Finder's own droppings never reach the phone. The handle it
+                // gets back is a real file in our cache, so writing to it
+                // succeeds and reading it back works — it simply never syncs.
+                if is_finder_junk(&name) {
+                    return Ok(Box::new(
+                        WriteFile::discarding(self.cache.join(cache_name(&phone_path, &name))).await?,
+                    ) as Box<dyn DavFile>);
+                }
+
+                // `append` would mean reading the phone's copy back first and
+                // then rewriting the whole file, since the transfer protocol
+                // has no partial write. Nothing on macOS opens a WebDAV file
+                // for append, so refusing is better than a read-modify-write
+                // that silently costs a full download per save.
+                if options.append {
+                    return Err(FsError::NotImplemented);
+                }
+                if options.create_new && self.stat(&phone_path).await.is_ok() {
+                    return Err(FsError::Exists);
+                }
+
+                let local = self.cache.join(cache_name(&phone_path, &name));
+                return Ok(Box::new(
+                    WriteFile::syncing(
+                        self.clone(),
+                        local,
+                        phone_path,
+                    )
+                    .await?,
+                ) as Box<dyn DavFile>);
             }
             let phone_path = self.phone_path(path);
             let meta = self.stat(&phone_path).await?;
@@ -269,6 +393,104 @@ impl DavFileSystem for PhoneFs {
             let file = tokio::fs::File::open(&dest).await.map_err(|_| FsError::NotFound)?;
             Ok(Box::new(CachedFile { file, meta }) as Box<dyn DavFile>)
         })
+    }
+
+    fn create_dir<'a>(&'a self, path: &'a DavPath) -> FsFuture<'a, ()> {
+        Box::pin(async move {
+            self.writes_allowed()?;
+            let phone_path = self.phone_path(path);
+            let name = leaf(&phone_path).to_string();
+            if is_finder_junk(&name) {
+                return Ok(());
+            }
+            // Caps-gated: an older phone would ignore `fs-mkdir` entirely and
+            // Finder would sit waiting for a folder that never appears.
+            if !ws_server::phone_has_cap(&self.ws, "fsmkdir").await {
+                return Err(FsError::NotImplemented);
+            }
+            let parent = phone_path.rsplit_once('/').map(|(p, _)| p).unwrap_or("/");
+            self.ask(json!({
+                "type": "fs-mkdir",
+                "path": if parent.is_empty() { "/" } else { parent },
+                "name": name,
+            }))
+            .await?;
+            self.forget(&phone_path).await;
+            Ok(())
+        })
+    }
+
+    fn remove_file<'a>(&'a self, path: &'a DavPath) -> FsFuture<'a, ()> {
+        Box::pin(async move { self.remove(path).await })
+    }
+
+    /// Same operation as [`Self::remove_file`] — the phone's `fs-delete` is
+    /// recursive and does not distinguish, so splitting them here would only
+    /// invent a difference the other end does not have.
+    fn remove_dir<'a>(&'a self, path: &'a DavPath) -> FsFuture<'a, ()> {
+        Box::pin(async move { self.remove(path).await })
+    }
+
+    fn rename<'a>(&'a self, from: &'a DavPath, to: &'a DavPath) -> FsFuture<'a, ()> {
+        Box::pin(async move {
+            self.writes_allowed()?;
+            let src = self.phone_path(from);
+            let dst = self.phone_path(to);
+            let (src_parent, _) = src.rsplit_once('/').ok_or(FsError::NotFound)?;
+            let (dst_parent, dst_name) = dst.rsplit_once('/').ok_or(FsError::NotFound)?;
+
+            if is_finder_junk(leaf(&src)) || is_finder_junk(dst_name) {
+                return Ok(());
+            }
+            // Same-directory renames only — see the module docs for why moving
+            // between directories is refused rather than emulated.
+            if src_parent != dst_parent {
+                return Err(FsError::NotImplemented);
+            }
+            self.ask(json!({ "type": "fs-rename", "path": src, "name": dst_name })).await?;
+            self.forget(&src).await;
+            self.forget(&dst).await;
+            Ok(())
+        })
+    }
+}
+
+/// The single gate every mutating operation passes through.
+///
+/// A free function so it can be tested for what it is — the thing standing
+/// between a read-only mount and the user's phone storage — without needing an
+/// `AppHandle` to build a `PhoneFs` around.
+fn write_guard(writable: bool) -> FsResult<()> {
+    if writable {
+        Ok(())
+    } else {
+        Err(FsError::Forbidden)
+    }
+}
+
+/// The last path component. `phone_path` never produces a trailing slash, so
+/// this is the file or directory name.
+fn leaf(phone_path: &str) -> &str {
+    phone_path.rsplit('/').next().unwrap_or(phone_path)
+}
+
+impl PhoneFs {
+    async fn remove(&self, path: &DavPath) -> FsResult<()> {
+        self.writes_allowed()?;
+        let phone_path = self.phone_path(path);
+        // Deleting junk that was never sent has to succeed, or Finder reports
+        // an error emptying a folder it filled itself.
+        if is_finder_junk(leaf(&phone_path)) {
+            return Ok(());
+        }
+        // Refusing to delete the volume root is not paranoia: `fs-delete` is
+        // recursive on the phone, so one stray request here wipes /sdcard.
+        if phone_path == PHONE_ROOT {
+            return Err(FsError::Forbidden);
+        }
+        self.ask(json!({ "type": "fs-delete", "path": phone_path })).await?;
+        self.forget(&phone_path).await;
+        Ok(())
     }
 }
 
@@ -338,6 +560,155 @@ impl DavFile for CachedFile {
     }
 }
 
+/// A file being written through the mount.
+///
+/// # Why it buffers instead of streaming
+///
+/// The link's push is `fs-push-begin` → chunks → `fs-push-done`, and it
+/// declares the total size up front — the phone allocates a receiver for
+/// exactly that many bytes. WebDAV gives no size until the last byte arrives
+/// (`Content-Length` is advisory and absent for chunked uploads), so there is
+/// nothing to declare at the point streaming would have to start.
+///
+/// So bytes land in the same per-mount cache directory reads already use, and
+/// the push happens on close, when the size is known. The cost is that a save
+/// is not durable on the phone until the app closes the file — which is exactly
+/// when Finder expects a save to complete anyway.
+///
+/// # `flush` is not close
+///
+/// `dav-server` calls `flush` at the end of a `PUT`, and an application may
+/// call it mid-write. Pushing on every flush would send the file once per call
+/// — so the push is guarded by `synced` and the local file is closed first, or
+/// the phone can receive a partially-written file.
+struct WriteFile {
+    file: Option<tokio::fs::File>,
+    local: PathBuf,
+    /// `None` for a discarded write — Finder junk, which is written to the
+    /// cache and never sent. See [`is_finder_junk`].
+    target: Option<(PhoneFs, String)>,
+    written: u64,
+    synced: bool,
+}
+
+impl std::fmt::Debug for WriteFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The phone path is deliberately not printed: it is user data, and this
+        // type's Debug is what ends up in dav-server's own logging.
+        f.debug_struct("WriteFile")
+            .field("written", &self.written)
+            .field("discarded", &self.target.is_none())
+            .finish()
+    }
+}
+
+impl WriteFile {
+    async fn create(local: PathBuf, target: Option<(PhoneFs, String)>) -> FsResult<Self> {
+        let file = tokio::fs::File::create(&local)
+            .await
+            .map_err(|_| FsError::GeneralFailure)?;
+        Ok(Self { file: Some(file), local, target, written: 0, synced: false })
+    }
+
+    /// A real local file that never reaches the phone.
+    async fn discarding(local: PathBuf) -> FsResult<Self> {
+        Self::create(local, None).await
+    }
+
+    async fn syncing(fs: PhoneFs, local: PathBuf, phone_path: String) -> FsResult<Self> {
+        Self::create(local, Some((fs, phone_path))).await
+    }
+
+    async fn sync(&mut self) -> FsResult<()> {
+        if self.synced {
+            return Ok(());
+        }
+        self.synced = true;
+
+        // Close the local file before reading it back: an open handle with
+        // buffered bytes would push a file missing its tail.
+        if let Some(mut f) = self.file.take() {
+            use tokio::io::AsyncWriteExt;
+            f.flush().await.map_err(|_| FsError::GeneralFailure)?;
+            drop(f);
+        }
+
+        let Some((fs, phone_path)) = self.target.clone() else {
+            return Ok(());
+        };
+        let (dir, _) = phone_path.rsplit_once('/').ok_or(FsError::GeneralFailure)?;
+        crate::transfer::push(
+            fs.app.clone(),
+            fs.ws.clone(),
+            self.local.to_string_lossy().into_owned(),
+            if dir.is_empty() { "/".into() } else { dir.to_string() },
+            // Always overwrite. Without it the phone's `uniqueDest` forks every
+            // save into "name (2).ext" and leaves the file the user opened
+            // untouched, while reporting success — the exact failure this flag
+            // was added for.
+            true,
+        )
+        .await
+        .map_err(|e| {
+            eprintln!("[webdav] push failed: {e}");
+            FsError::GeneralFailure
+        })?;
+        fs.forget(&phone_path).await;
+        Ok(())
+    }
+}
+
+impl DavFile for WriteFile {
+    fn metadata(&mut self) -> FsFuture<'_, Box<dyn DavMetaData>> {
+        Box::pin(async move {
+            Ok(Box::new(Meta { is_dir: false, len: self.written, modified_ms: 0 })
+                as Box<dyn DavMetaData>)
+        })
+    }
+
+    fn write_bytes(&mut self, buf: bytes::Bytes) -> FsFuture<'_, ()> {
+        Box::pin(async move {
+            use tokio::io::AsyncWriteExt;
+            let file = self.file.as_mut().ok_or(FsError::GeneralFailure)?;
+            file.write_all(&buf).await.map_err(|_| FsError::GeneralFailure)?;
+            self.written += buf.len() as u64;
+            Ok(())
+        })
+    }
+
+    fn write_buf(&mut self, mut buf: Box<dyn bytes::Buf + Send>) -> FsFuture<'_, ()> {
+        Box::pin(async move {
+            use bytes::Buf;
+            use tokio::io::AsyncWriteExt;
+            let file = self.file.as_mut().ok_or(FsError::GeneralFailure)?;
+            while buf.has_remaining() {
+                let chunk = buf.chunk().to_vec();
+                file.write_all(&chunk).await.map_err(|_| FsError::GeneralFailure)?;
+                self.written += chunk.len() as u64;
+                buf.advance(chunk.len());
+            }
+            Ok(())
+        })
+    }
+
+    fn read_bytes(&mut self, _count: usize) -> FsFuture<'_, bytes::Bytes> {
+        // A handle opened for writing is never read back through the mount;
+        // reads go through `CachedFile`.
+        Box::pin(async move { Err(FsError::NotImplemented) })
+    }
+
+    fn seek(&mut self, _pos: std::io::SeekFrom) -> FsFuture<'_, u64> {
+        // Seeking would mean a sparse or out-of-order write, and the push sends
+        // one contiguous file. Refused rather than silently producing a file
+        // whose bytes are in the wrong places.
+        Box::pin(async move { Err(FsError::NotImplemented) })
+    }
+
+    fn flush(&mut self) -> FsFuture<'_, ()> {
+        Box::pin(async move { self.sync().await })
+    }
+}
+
 // ── Server ───────────────────────────────────────────────────────────────
 
 /// A running mount: the loopback port, the capability token, and the handle
@@ -387,18 +758,34 @@ pub async fn webdav_start(
     let cache = std::env::temp_dir().join(format!("droiddock-dav-{token}"));
     std::fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
 
+    // Read once, here. See the field's own note for why this is not consulted
+    // per request.
+    let writable = {
+        use tauri::Manager;
+        app.state::<crate::AppState>().config.lock().unwrap().webdav_writable
+    };
+
     let fs = PhoneFs {
         app: app.clone(),
         ws: ws.inner().clone(),
         cache: cache.clone(),
         listings: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        writable,
     };
     // The token is the first path segment, so it is stripped before the
     // filesystem ever sees a path — `strip_prefix` is what enforces it.
-    let dav = dav_server::DavHandler::builder()
+    // A lock system is only attached when writes are on. macOS asks to LOCK
+    // before writing, and `FakeLs` answers from memory — nothing reaches the
+    // phone, because a lock on a volume only this Mac can reach protects
+    // against nothing. Leaving it off for a read-only mount keeps that mount
+    // advertising itself as class-1 WebDAV, which is what it is.
+    let mut builder = dav_server::DavHandler::builder()
         .filesystem(Box::new(fs))
-        .strip_prefix(format!("/{token}"))
-        .build_handler();
+        .strip_prefix(format!("/{token}"));
+    if writable {
+        builder = builder.locksystem(dav_server::fakels::FakeLs::new());
+    }
+    let dav = builder.build_handler();
 
     // Port 0 = let the OS choose. Loopback only.
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
@@ -562,5 +949,59 @@ mod tests {
         assert!(a.ends_with(".jpg"), "extension is kept for mime detection");
         // A hostile "extension" must not survive into the cache filename.
         assert!(!cache_name("/sdcard/x.a/b", "x.a/b").contains('/'));
+    }
+
+    /// The filter is what makes a writable mount survivable: without it,
+    /// *browsing* the phone in Finder leaves `.DS_Store` in every folder.
+    #[test]
+    fn finder_junk_is_recognised() {
+        for n in [
+            ".DS_Store",
+            "._notes.txt",
+            "._",
+            ".Trashes",
+            ".fseventsd",
+            ".Spotlight-V100",
+            ".TemporaryItems",
+            ".apdisk",
+            ".DocumentRevisions-V100",
+            ".VolumeIcon.icns",
+        ] {
+            assert!(is_finder_junk(n), "{n} should be filtered");
+        }
+    }
+
+    /// It is a fixed list, not a "hidden files" rule. A dotfile the user
+    /// actually put on their phone has to keep working — and a normal file
+    /// whose name merely resembles one must not be silently discarded.
+    #[test]
+    fn ordinary_files_are_not_junk() {
+        for n in [
+            ".gitignore",
+            ".bashrc",
+            "DS_Store",
+            "notes.txt",
+            "_photo.jpg",
+            "my._file.txt",
+            ".Trash",
+            "IMG_0001.HEIC",
+        ] {
+            assert!(!is_finder_junk(n), "{n} must reach the phone");
+        }
+    }
+
+    #[test]
+    fn leaf_is_the_last_component() {
+        assert_eq!(leaf("/sdcard/Download/a.txt"), "a.txt");
+        assert_eq!(leaf("/sdcard"), "sdcard");
+        assert_eq!(leaf("a.txt"), "a.txt");
+    }
+
+    /// Every mutating path calls this first, so a read-only mount cannot be
+    /// talked into a write by any request shape.
+    #[test]
+    fn writes_are_refused_while_read_only() {
+        assert!(matches!(write_guard(false), Err(FsError::Forbidden)));
+        assert!(write_guard(true).is_ok());
     }
 }

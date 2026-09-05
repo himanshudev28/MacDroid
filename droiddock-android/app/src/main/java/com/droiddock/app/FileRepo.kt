@@ -62,6 +62,31 @@ object FileRepo {
         return dest.absolutePath
     }
 
+    /**
+     * Create one directory under [parent]. Returns its absolute path.
+     *
+     * Added for the Finder mount's `MKCOL` — every other write the mount needs
+     * already had a phone-side operation. Deliberately **not** recursive
+     * (`mkdir`, not `mkdirs`): WebDAV specifies `MKCOL` as failing when the
+     * parent is missing, and creating a chain of directories from a single
+     * request is how a typo in a mount path silently builds a tree in phone
+     * storage.
+     */
+    fun mkdir(parent: String, name: String): String {
+        if (!hasAllFiles()) throw denied()
+        // Same rule as [rename]: a separator here would let a create escape the
+        // directory it was asked for.
+        val clean = name.trim()
+        if (clean.isEmpty() || clean.contains('/') || clean == "." || clean == "..")
+            throw IllegalArgumentException("Invalid name")
+        val dir = File(parent)
+        if (!dir.isDirectory) throw java.io.FileNotFoundException(parent)
+        val dest = File(dir, clean)
+        if (dest.exists()) throw java.io.IOException("\"$clean\" already exists")
+        if (!dest.mkdir()) throw java.io.IOException("Could not create $clean")
+        return dest.absolutePath
+    }
+
     fun uniqueDest(dir: File, name: String): File {
         dir.mkdirs()
         var candidate = File(dir, name)
