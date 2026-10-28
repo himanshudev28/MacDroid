@@ -563,10 +563,17 @@ pub fn cleanup_blocking(app: &AppHandle) {
         b
     };
     if let Some(adb_bin) = adb_bin {
-        let _ = std::process::Command::new(adb_bin)
-            .args(["-s", &s.serial, "forward", "--remove", &format!("tcp:{}", s.local_port)])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
+        // Bounded, like every quit-time command: a wedged adb server must
+        // not hang Quit.
+        crate::shutdown::run_bounded(
+            std::process::Command::new(adb_bin).args([
+                "-s",
+                &s.serial,
+                "forward",
+                "--remove",
+                &format!("tcp:{}", s.local_port),
+            ]),
+            std::time::Duration::from_secs(2),
+        );
     }
 }

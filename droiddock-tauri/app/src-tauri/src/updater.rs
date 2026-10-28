@@ -136,6 +136,10 @@ pub async fn update_install(app: AppHandle) -> Result<(), String> {
 
     match result {
         Ok(()) => {
+            // Same cleanup as Quit. A restart may not pass through the exit
+            // events that trigger it, and the new copy would otherwise start
+            // alongside the old one's scrcpy windows and Finder volume.
+            crate::shutdown::on_quit(&app);
             app.restart();
         }
         Err(e) => {

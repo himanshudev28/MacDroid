@@ -8,6 +8,23 @@ to a generic body.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **Quitting DroidDock now stops everything it started.** Before, several
+  things kept running after Quit: Mirror, Camera, Desktop and app windows
+  (each one is a separate scrcpy program), the adb background server, and the
+  "DroidDock Phone" volume in Finder. That last one was the worst, because a
+  volume left mounted on a server that no longer exists makes Finder hang.
+  Quit now closes the scrcpy windows, unmounts the volume, withdraws the
+  network announcements so phones stop listing the Mac straight away, and
+  stops the adb server. DroidDock starts adb again on the next launch.
+
+  Stopping adb also disconnects any other tool that shares the same adb
+  server, such as Android Studio. Force Quit and crashes can't run any
+  cleanup, so the next launch unmounts a Finder volume left behind by one.
+
 ## v2.3.0
 
 ### Added

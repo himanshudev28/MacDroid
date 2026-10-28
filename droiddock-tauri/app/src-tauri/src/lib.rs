@@ -24,6 +24,7 @@ mod photo_sync;
 mod protocol;
 mod quickshare;
 mod scrcpy_client;
+mod shutdown;
 mod statusbar;
 mod transfer;
 mod tray;
@@ -741,6 +742,9 @@ pub fn run() {
             app.manage(webdav::WebdavState::default());
             app.manage(scrcpy_client::ScrcpyState::default());
 
+            // Tidy up after a last run that ended without its quit cleanup.
+            shutdown::on_launch();
+
             // `droiddock://…` — the automation surface. Registered here so a URL
             // that arrives while the app is already running is handled; one that
             // *launched* the app is delivered by the plugin on the same channel.
@@ -1039,13 +1043,11 @@ pub fn run() {
                 // hauling it here. See `tray::raise_main`.
                 tray::raise_main(app);
             }
-            // Quitting with the in-app mirror running otherwise leaves its
-            // `adb forward` behind: the phone-side server dies with us
-            // (kill_on_drop), but the forward lives in the adb server and
-            // survives until adb itself is restarted. They accumulate one per
-            // session. This removes it on the way out.
+            // Quitting stops everything DroidDock started: scrcpy windows, the
+            // Finder volume, network announcements, the adb server. See
+            // `shutdown.rs`. Runs once, whichever event arrives first.
             if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
-                scrcpy_client::cleanup_blocking(app);
+                shutdown::on_quit(app);
             }
         });
 }

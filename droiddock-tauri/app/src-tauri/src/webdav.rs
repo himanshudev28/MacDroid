@@ -878,6 +878,59 @@ pub async fn webdav_stop(state: tauri::State<'_, WebdavState>) -> Result<WebdavS
     Ok(WebdavStatus::default())
 }
 
+/// Quit cleanup: unmount and stop the server, without the async runtime.
+///
+/// Must run while the server is still answering, which during quit means
+/// before the process ends. Without it the volume stays mounted on a server
+/// that no longer exists, and Finder hangs whenever it touches it.
+pub fn shutdown_blocking(app: &AppHandle) {
+    use tauri::Manager;
+    let running = app.state::<WebdavState>().0.lock().unwrap().take();
+    let Some(running) = running else { return };
+    if let Some(mp) = mount_point() {
+        let unmounted = crate::shutdown::run_bounded(
+            std::process::Command::new("/sbin/umount").arg(&mp),
+            Duration::from_secs(5),
+        );
+        // A plain unmount refuses while something has the volume open — a
+        // Finder window, a Preview of a phone photo. Quitting wins.
+        if !unmounted {
+            crate::shutdown::run_bounded(
+                std::process::Command::new("/sbin/umount").arg("-f").arg(&mp),
+                Duration::from_secs(5),
+            );
+        }
+    }
+    let _ = running.stop.send(());
+    let _ = std::fs::remove_dir_all(&running.cache);
+}
+
+/// Launch cleanup: unmount a volume left behind by a run that ended without
+/// `shutdown_blocking` (Force Quit, a crash). Its server died with that run,
+/// so only a forced unmount works.
+///
+/// Reads the mount table rather than looking at the folder, because touching
+/// a dead WebDAV mount is exactly what hangs. Runs on its own thread so a slow
+/// unmount never delays launch; the user can't turn the volume back on before
+/// the window is up, so there's no race with `webdav_start`.
+pub fn unmount_stale() {
+    let Some(mp) = mount_point() else { return };
+    std::thread::spawn(move || {
+        let Ok(out) = std::process::Command::new("/sbin/mount").output() else { return };
+        let table = String::from_utf8_lossy(&out.stdout);
+        // The tail of the path, not all of it: the kernel's spelling of the
+        // home folder needn't match `$HOME` exactly.
+        let needle = format!("/Library/Caches/DroidDock/{VOLUME_DIR} (webdav");
+        if table.lines().any(|l| l.contains(&needle)) {
+            eprintln!("[webdav] unmounting a volume left over from the last run");
+            crate::shutdown::run_bounded(
+                std::process::Command::new("/sbin/umount").arg("-f").arg(&mp),
+                Duration::from_secs(15),
+            );
+        }
+    });
+}
+
 #[tauri::command]
 pub fn webdav_status(state: tauri::State<'_, WebdavState>) -> Result<WebdavStatus, String> {
     let g = state.0.lock().unwrap();

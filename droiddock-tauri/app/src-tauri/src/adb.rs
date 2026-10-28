@@ -272,6 +272,13 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(20);
 fn reap(app: AppHandle, what: &'static str, child: std::process::Child) {
     const IMMEDIATE: Duration = Duration::from_secs(3);
     let started = Instant::now();
+    let pid = child.id();
+    OPEN_WINDOWS.lock().unwrap().push(pid);
+    // Launched while quitting, after `close_windows` took its list: close it
+    // now, or it would be the one window left running after Quit.
+    if crate::shutdown::quitting() {
+        send_signal(pid, Signal::Term);
+    }
     std::thread::spawn(move || {
         let mut child = child;
         // Drained to EOF (not a bounded read) so a chatty session can never
@@ -287,6 +294,7 @@ fn reap(app: AppHandle, what: &'static str, child: std::process::Child) {
             tail = String::from_utf8_lossy(&buf).to_string();
         }
         let ok = child.wait().map(|s| s.success()).unwrap_or(false);
+        OPEN_WINDOWS.lock().unwrap().retain(|&p| p != pid);
         if ok || started.elapsed() >= IMMEDIATE {
             return;
         }
@@ -308,6 +316,91 @@ fn shq(s: &str) -> String {
 pub async fn start_server(adb: &str) {
     let _ = run(adb, &["start-server"], DEFAULT_TIMEOUT).await;
 }
+
+// ── Quit cleanup ─────────────────────────────────────────────────────────
+
+/// PIDs of the scrcpy windows (mirror, camera, desktop, app window) that are
+/// still open. Each one is a separate program, so it outlives DroidDock unless
+/// it is closed on the way out. `reap` adds a PID on spawn and removes it once
+/// the process has been waited on.
+static OPEN_WINDOWS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+/// Stop everything this module started: the background pollers, every open
+/// scrcpy window, then the adb server itself. `ensure_adb` starts the server
+/// again on the next launch.
+///
+/// This stops the adb server even when another tool shares it (Android Studio,
+/// a terminal). That's deliberate: the user asked for DroidDock to leave
+/// nothing running.
+pub fn shutdown_blocking(app: &AppHandle) {
+    let state = app.state::<AdbState>();
+    let stops = [
+        state.tracker_stop.lock().unwrap().take(),
+        state.call_poll_stop.lock().unwrap().take(),
+    ];
+    for stop in stops.into_iter().flatten() {
+        stop.store(true, Ordering::Relaxed);
+    }
+
+    close_windows();
+
+    // Last, because closing scrcpy uses the adb server to clean up on the
+    // phone. Stopping the server also ends any adb processes still attached
+    // to it: the device tracker, and the in-app mirror's phone-side server.
+    let adb = state.adb.lock().unwrap().clone();
+    if let Some(adb) = adb {
+        crate::shutdown::run_bounded(
+            std::process::Command::new(adb)
+                .arg("kill-server")
+                .env("PATH", augmented_path()),
+            Duration::from_secs(3),
+        );
+    }
+}
+
+/// Ask every open scrcpy window to close, then force any that ignore it.
+///
+/// SIGTERM first: scrcpy treats it as an ordinary window close, so it removes
+/// its own adb tunnels and stops its phone-side server (and a desktop-mode
+/// virtual display) itself. SIGKILL is only for one still running after 3s.
+/// The PID list can't point at a reused PID: an entry is only removed after
+/// the process is waited on, and until then the kernel keeps the PID reserved.
+fn close_windows() {
+    let pids = OPEN_WINDOWS.lock().unwrap().clone();
+    if pids.is_empty() {
+        return;
+    }
+    for &pid in &pids {
+        send_signal(pid, Signal::Term);
+    }
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < deadline && !OPEN_WINDOWS.lock().unwrap().is_empty() {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    for &pid in OPEN_WINDOWS.lock().unwrap().iter() {
+        send_signal(pid, Signal::Kill);
+    }
+}
+
+enum Signal {
+    Term,
+    Kill,
+}
+
+#[cfg(target_os = "macos")]
+fn send_signal(pid: u32, signal: Signal) {
+    let sig = match signal {
+        Signal::Term => libc::SIGTERM,
+        Signal::Kill => libc::SIGKILL,
+    };
+    // SAFETY: `kill` only reads its two integer arguments.
+    unsafe {
+        libc::kill(pid as libc::pid_t, sig);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn send_signal(_pid: u32, _signal: Signal) {}
 
 // ── Device parsing + tracking ────────────────────────────────────────────
 

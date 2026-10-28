@@ -129,7 +129,12 @@ pub async fn start(app: AppHandle) -> Result<u16, String> {
 pub fn stop(app: &AppHandle) {
     let taken = app.state::<QuickShareState>().running.lock().unwrap().take();
     if let Some(running) = taken {
-        let _ = running.daemon.unregister(&running.fullname);
+        // Wait (briefly) for the goodbye packet to go out. At quit, this is
+        // the last chance; without it the process can end first and phones
+        // keep offering this Mac as a Quick Share target.
+        if let Ok(done) = running.daemon.unregister(&running.fullname) {
+            let _ = done.recv_timeout(std::time::Duration::from_millis(500));
+        }
         let _ = running.daemon.shutdown();
         running.task.abort();
         eprintln!("[quickshare] stopped advertising");

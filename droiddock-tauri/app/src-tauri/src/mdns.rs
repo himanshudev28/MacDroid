@@ -18,8 +18,29 @@
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
+
+/// The running advert, kept where quit cleanup can reach it: the daemon, and
+/// the name currently registered (`None` while offline).
+static ADVERT: Mutex<Option<(ServiceDaemon, Option<String>)>> = Mutex::new(None);
+
+/// Quit cleanup: withdraw the advert and stop the daemon.
+///
+/// Unregistering sends a "goodbye" packet, so phones drop this Mac at once
+/// instead of listing it until the record expires. The packet is sent from the
+/// daemon's own thread, so this waits (briefly) for it to go out before the
+/// process ends.
+pub fn stop_blocking() {
+    let Some((daemon, fullname)) = ADVERT.lock().unwrap().take() else { return };
+    if let Some(name) = fullname {
+        if let Ok(done) = daemon.unregister(&name) {
+            let _ = done.recv_timeout(Duration::from_millis(500));
+        }
+    }
+    let _ = daemon.shutdown();
+}
 
 pub const SERVICE_TYPE: &str = "_droiddock._tcp.local.";
 
@@ -43,13 +64,22 @@ pub async fn run(app: AppHandle, port: u16) {
     let instance = instance_name(&app);
     let mut advertised: Vec<IpAddr> = Vec::new();
     let mut fullname: Option<String> = None;
+    *ADVERT.lock().unwrap() = Some((daemon.clone(), None));
 
     loop {
+        // Quit cleanup has taken the daemon and shut it down; stop here
+        // rather than register again on a dead daemon.
+        if ADVERT.lock().unwrap().is_none() {
+            return;
+        }
         let ips = lan_ipv4s();
 
         if ips != advertised {
             if let Some(old) = fullname.take() {
                 let _ = daemon.unregister(&old);
+                if let Some(advert) = ADVERT.lock().unwrap().as_mut() {
+                    advert.1 = None;
+                }
             }
 
             if ips.is_empty() {
@@ -74,6 +104,9 @@ pub async fn run(app: AppHandle, port: u16) {
                         let name = info.get_fullname().to_string();
                         match daemon.register(info) {
                             Ok(()) => {
+                                if let Some(advert) = ADVERT.lock().unwrap().as_mut() {
+                                    advert.1 = Some(name.clone());
+                                }
                                 fullname = Some(name);
                                 advertised = ips;
                             }
