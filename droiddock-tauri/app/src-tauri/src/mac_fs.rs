@@ -136,7 +136,7 @@ pub fn list_roots(roots: &[String]) -> Vec<Entry> {
 /// owns sending that reply so there's exactly one place that does it for
 /// every failure path.
 pub async fn pull_to_phone(
-    _app: AppHandle,
+    app: AppHandle,
     ws_state: SharedState,
     roots: &[String],
     path: String,
@@ -151,13 +151,46 @@ pub async fn pull_to_phone(
     }
     let size = meta.len();
     let transfer_id = ws_state.transfers.alloc_mac_id();
+    let name = file_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "file".into());
+    // No Cancel: the phone drives this transfer and has no cancel message
+    // for it.
+    let tracked = crate::transfer_log::start(
+        &app,
+        crate::transfer_log::NewTransfer {
+            name,
+            dir: crate::transfer_log::Dir::ToPhone,
+            source: crate::transfer_log::Source::MacFiles,
+            unit: crate::transfer_log::Unit::Bytes,
+            total: size,
+            cancel_id: None,
+        },
+    );
+    let result = send_to_phone(&app, &ws_state, &file_path, size, transfer_id, &req_id, tracked.key()).await;
+    tracked.finish(result.clone().map(|()| None).into());
+    result
+}
+
+/// The streaming half of [`pull_to_phone`], split out so every early return
+/// still reaches the Transfers log's `finish`.
+async fn send_to_phone(
+    app: &AppHandle,
+    ws_state: &SharedState,
+    file_path: &std::path::Path,
+    size: u64,
+    transfer_id: u32,
+    req_id: &str,
+    log_key: u64,
+) -> Result<(), String> {
 
     // Arm the ready-waiter BEFORE announcing the transfer, so a phone that
     // answers instantly can't beat us to the registration.
-    let ready = ws_server::arm_mac_fs_ready(&ws_state, &req_id).await;
+    let ready = ws_server::arm_mac_fs_ready(ws_state, req_id).await;
 
     ws_server::push(
-        &ws_state,
+        ws_state,
         serde_json::json!({
             "type": "mac-fs-pull-begin",
             "reqId": req_id,
@@ -174,11 +207,12 @@ pub async fn pull_to_phone(
     // makes that degrade to the previous (racy) behaviour rather than hanging.
     ready.await;
 
-    let mut file = tokio::fs::File::open(&file_path)
+    let mut file = tokio::fs::File::open(file_path)
         .await
         .map_err(|e| format!("cannot open file: {e}"))?;
     let mut buf = vec![0u8; transfer::CHUNK];
     let mut seq: u32 = 0;
+    let mut sent: u64 = 0;
     loop {
         let n = file
             .read(&mut buf)
@@ -187,14 +221,16 @@ pub async fn pull_to_phone(
         if n == 0 {
             break;
         }
-        if !ws_server::send_binary(&ws_state, transfer::frame(KIND_DATA, transfer_id, seq, &buf[..n])).await {
+        if !ws_server::send_binary(ws_state, transfer::frame(KIND_DATA, transfer_id, seq, &buf[..n])).await {
             return Err("Phone disconnected mid-transfer".to_string());
         }
         seq += 1;
+        sent += n as u64;
+        crate::transfer_log::progress(app, log_key, sent);
     }
 
     ws_server::push(
-        &ws_state,
+        ws_state,
         serde_json::json!({ "type": "mac-fs-pull-done", "reqId": req_id, "transferId": transfer_id }),
     )
     .await;

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { GROUPS, HOME, SETTINGS, type NavItem, type ViewId } from "../lib/nav";
 import { t } from "../lib/i18n";
+import { useActiveTransferCount } from "../lib/transferStore";
 
 /// The navigation rail — fifteen destinations in two widths.
 ///
@@ -41,6 +42,8 @@ export default function Rail({
   // "scroll the rail".
   const scrollRef = useRef<HTMLDivElement>(null);
   const [more, setMore] = useState(false);
+  // Files moving right now, shown as a count on Transfers.
+  const activeTransfers = useActiveTransferCount();
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -113,7 +116,13 @@ export default function Rail({
                   item={item}
                   active={view === item.id}
                   expanded={expanded}
-                  badge={item.id === "notifications" ? notifCount : undefined}
+                  badge={
+                    item.id === "notifications"
+                      ? notifCount
+                      : item.id === "transfers"
+                        ? activeTransfers
+                        : undefined
+                  }
                   onClick={() => setView(item.id)}
                 />
               ))}

@@ -16,6 +16,7 @@ export type ViewId =
   | "calls"
   | "notifications"
   | "clipboard"
+  | "transfers"
   | "media"
   | "mirror"
   | "camera"
@@ -126,6 +127,12 @@ export const GROUPS: { title: string; items: NavItem[] }[] = [
         id: "clipboard",
         label: "Clipboard",
         path: "M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2M9 2h6a1 1 0 011 1v2a1 1 0 01-1 1H9a1 1 0 01-1-1V3a1 1 0 011-1z",
+      },
+      {
+        id: "transfers",
+        label: "Transfers",
+        // An up and a down arrow side by side: both directions at once.
+        path: "M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4",
       },
     ],
   },

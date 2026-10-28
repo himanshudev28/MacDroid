@@ -21,6 +21,7 @@ import CallsView from "./components/views/CallsView";
 import NotificationsView from "./components/views/NotificationsView";
 import ClipboardView from "./components/views/ClipboardView";
 import MediaView from "./components/views/MediaView";
+import TransfersView from "./components/views/TransfersView";
 import MirrorView from "./components/views/MirrorView";
 import CameraView from "./components/views/CameraView";
 import DevicesView from "./components/views/DevicesView";
@@ -930,6 +931,8 @@ export default function App() {
         );
       case "media":
         return <MediaView />;
+      case "transfers":
+        return <TransfersView onToast={toast} />;
       case "settings":
         return (
           <SettingsView

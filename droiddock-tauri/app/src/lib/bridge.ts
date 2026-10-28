@@ -79,6 +79,7 @@ export function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<
     if (cmd === "apps_list") return Promise.resolve([] as unknown as T);
     if (cmd === "photos_list") return Promise.resolve([] as unknown as T);
     if (cmd === "fs_list") return Promise.resolve([] as unknown as T);
+    if (cmd === "transfers_list") return Promise.resolve([] as unknown as T);
     if (cmd === "sms_threads") return Promise.resolve([] as unknown as T);
     if (cmd === "autostart_get") return Promise.resolve(false as unknown as T);
     if (cmd === "adb_paired_info") return Promise.resolve({ guid: null } as unknown as T);
@@ -275,6 +276,40 @@ export type Progress = {
   done: boolean;
   error: string | null;
 };
+
+// ── Transfers page ───────────────────────────────────────────────────────
+
+/// One file (or one Quick Share, or one photo-sync run) moving between the
+/// phone and the Mac, as `transfer_log.rs` records it.
+export type TransferEntry = {
+  key: number;
+  name: string;
+  dir: "toPhone" | "toMac";
+  source: "files" | "share" | "macFiles" | "quickShare" | "photoSync" | "finder";
+  /// Photo sync counts photos; everything else counts bytes.
+  unit: "bytes" | "items";
+  total: number;
+  done: number;
+  status: "active" | "done" | "failed" | "cancelled";
+  /// The failure, or on a finished photo sync, what was skipped.
+  error: string | null;
+  cancelledBy: "mac" | "phone" | null;
+  startedMs: number;
+  updatedMs: number;
+  endedMs: number | null;
+  /// Units per second: live while active, the average once finished.
+  speed: number;
+  etaSecs: number | null;
+  /// Where a received file landed, when there is one to show.
+  path: string | null;
+  cancellable: boolean;
+};
+
+export const transfersList = () => invoke<TransferEntry[]>("transfers_list");
+export const transfersClear = () => invoke<void>("transfers_clear");
+export const transferCancel = (key: number) => invoke<void>("transfer_cancel", { key });
+export const transferReveal = (key: number) => invoke<void>("transfer_reveal", { key });
+export const transferOpen = (key: number) => invoke<void>("transfer_open", { key });
 
 // ── Phase 17: open-in-place with edit-writeback ──────────────────────────
 

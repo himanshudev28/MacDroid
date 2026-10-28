@@ -150,13 +150,28 @@ pub fn is_running(app: &AppHandle) -> bool {
     app.state::<QuickShareState>().running.lock().unwrap().is_some()
 }
 
+/// What the Transfers page calls a share: the file's name, or the first name
+/// and how many more.
+fn share_name(files: &[IncomingFile]) -> String {
+    match files {
+        [] => "Quick Share".into(),
+        [one] => one.name.clone(),
+        [first, rest @ ..] => format!("{} + {} more", first.name, rest.len()),
+    }
+}
+
 /// Translate one connection's events into Tauri events, holding the consent
 /// channel until the UI answers.
 async fn forward_events(app: AppHandle, mut rx: mpsc::UnboundedReceiver<Event>) {
+    // One Transfers entry per share, opened by its first progress (so a
+    // declined share never shows up) and closed by however it ends.
+    let mut offered: Vec<IncomingFile> = Vec::new();
+    let mut tracked: Option<crate::transfer_log::Tracked> = None;
     while let Some(event) = rx.recv().await {
         let state = app.state::<QuickShareState>();
         match event {
             Event::Introduced { peer, pin, files, reply } => {
+                offered = files.clone();
                 let id = state.next_id.fetch_add(1, Ordering::Relaxed);
                 state.pending.lock().unwrap().insert(id, reply);
                 eprintln!(
@@ -166,6 +181,21 @@ async fn forward_events(app: AppHandle, mut rx: mpsc::UnboundedReceiver<Event>) 
                 let _ = app.emit("quickshare-request", RequestPayload { id, peer, pin, files });
             }
             Event::Progress { received, total } => {
+                let key = tracked.get_or_insert_with(|| {
+                    crate::transfer_log::start(
+                        &app,
+                        crate::transfer_log::NewTransfer {
+                            name: share_name(&offered),
+                            dir: crate::transfer_log::Dir::ToMac,
+                            source: crate::transfer_log::Source::QuickShare,
+                            unit: crate::transfer_log::Unit::Bytes,
+                            total: total.max(0) as u64,
+                            cancel_id: None,
+                        },
+                    )
+                })
+                .key();
+                crate::transfer_log::progress(&app, key, received.max(0) as u64);
                 let _ = app.emit(
                     "quickshare-progress",
                     serde_json::json!({ "received": received, "total": total }),
@@ -173,6 +203,15 @@ async fn forward_events(app: AppHandle, mut rx: mpsc::UnboundedReceiver<Event>) 
             }
             Event::Done { paths } => {
                 eprintln!("[quickshare] received {} file(s)", paths.len());
+                if let Some(t) = tracked.take() {
+                    // One file: that file. Several: the folder they landed in.
+                    let path = match paths.as_slice() {
+                        [one] => Some(one.clone()),
+                        [first, ..] => first.parent().map(|p| p.to_path_buf()),
+                        [] => None,
+                    };
+                    t.finish(crate::transfer_log::Outcome::Done { path });
+                }
                 let _ = app.emit(
                     "quickshare-received",
                     serde_json::json!({
@@ -180,14 +219,23 @@ async fn forward_events(app: AppHandle, mut rx: mpsc::UnboundedReceiver<Event>) 
                     }),
                 );
             }
+            // Declined on this Mac before any bytes moved, so there's no
+            // Transfers row to close.
             Event::Rejected => {
                 let _ = app.emit("quickshare-rejected", serde_json::json!({}));
             }
             Event::Failed { error } => {
                 eprintln!("[quickshare] transfer failed: {error}");
+                if let Some(t) = tracked.take() {
+                    t.finish(crate::transfer_log::Outcome::Failed(error.clone()));
+                }
                 let _ = app.emit("quickshare-error", serde_json::json!({ "error": error }));
             }
         }
+    }
+    // The connection closed without saying how the share ended.
+    if let Some(t) = tracked {
+        t.finish(crate::transfer_log::Outcome::Failed("Connection to the sender was lost".into()));
     }
 }
 

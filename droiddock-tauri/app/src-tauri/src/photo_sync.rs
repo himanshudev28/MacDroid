@@ -276,13 +276,29 @@ async fn run_sync(
     }
     emit_progress(&app, 0, total, None, None);
 
+    // One Transfers entry for the whole run, counted in photos. The per-photo
+    // pulls below are untracked so they don't each add a row of their own.
+    let tracked = crate::transfer_log::start(
+        &app,
+        crate::transfer_log::NewTransfer {
+            name: "Photo sync".into(),
+            dir: crate::transfer_log::Dir::ToMac,
+            source: crate::transfer_log::Source::PhotoSync,
+            unit: crate::transfer_log::Unit::Items,
+            total: total as u64,
+            cancel_id: None,
+        },
+    );
+    let mut failed = 0u32;
+    let mut last_error = String::new();
+
     let mut done = 0u32;
     for item in new_items {
         let dest = unique_dest(&dest_dir, &item.name);
         // Record-as-completed happens per item (not batched at the end) so a
         // crash mid-run leaves the ledger reflecting exactly what actually
         // landed on disk — a re-run only re-downloads what's still missing.
-        match transfer::pull(app.clone(), ws_state.clone(), item.path.clone(), dest).await {
+        match transfer::pull(app.clone(), ws_state.clone(), item.path.clone(), dest, None).await {
             Ok(_) => {
                 photo.mark_synced(&device_key, item.id).await;
                 done += 1;
@@ -293,10 +309,25 @@ async fn run_sync(
                 // counted toward `done` so the progress indicator completes
                 // this run instead of stalling on a stuck item.
                 done += 1;
+                failed += 1;
+                last_error = e.clone();
                 emit_progress(&app, done, total, Some(item.name), Some(e));
             }
         }
+        crate::transfer_log::progress(&app, tracked.key(), done as u64);
     }
+    let folder = Some(dest_dir.clone());
+    let outcome = if failed == 0 {
+        crate::transfer_log::Outcome::Done { path: folder }
+    } else if failed == total {
+        crate::transfer_log::Outcome::Failed(last_error)
+    } else {
+        crate::transfer_log::Outcome::Partial {
+            path: folder,
+            note: format!("{failed} of {total} couldn't be copied — they'll be retried next sync"),
+        }
+    };
+    tracked.finish(outcome);
     Ok(())
 }
 

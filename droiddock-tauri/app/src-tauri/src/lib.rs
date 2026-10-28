@@ -27,6 +27,7 @@ mod scrcpy_client;
 mod shutdown;
 mod statusbar;
 mod transfer;
+mod transfer_log;
 mod tray;
 mod updater;
 mod webdav;
@@ -286,7 +287,7 @@ async fn fs_rename(state: State<'_, SharedState>, path: String, new_name: String
 async fn fs_pull(app: AppHandle, state: State<'_, SharedState>, path: String, name: String) -> Result<String, String> {
     let dir = transfer::download_dir(&app).ok_or("no Downloads directory")?;
     let dest = dir.join(sanitize(&name));
-    let saved = transfer::pull(app.clone(), state.inner().clone(), path, dest).await?;
+    let saved = transfer::pull(app.clone(), state.inner().clone(), path, dest, Some(transfer_log::Source::Files)).await?;
     Ok(saved.to_string_lossy().to_string())
 }
 
@@ -295,11 +296,14 @@ async fn fs_pull(app: AppHandle, state: State<'_, SharedState>, path: String, na
 async fn fs_push(app: AppHandle, state: State<'_, SharedState>, local_path: String, dest: String) -> Result<(), String> {
     // Not an overwrite: a user dropping a file into a folder expects the phone's
     // existing same-named file to survive, which is what uniqueDest() gives.
-    transfer::push(app.clone(), state.inner().clone(), local_path, dest, false).await
+    transfer::push(app.clone(), state.inner().clone(), local_path, dest, false, transfer_log::Source::Files).await
 }
 
 #[tauri::command]
-async fn fs_cancel(state: State<'_, SharedState>, transfer_id: u32) -> Result<(), String> {
+async fn fs_cancel(app: AppHandle, state: State<'_, SharedState>, transfer_id: u32) -> Result<(), String> {
+    // Recorded first, so the Transfers page shows "Cancelled", not a lost
+    // connection, when the transfer ends.
+    transfer_log::note_cancel(&app, transfer_id, transfer_log::CancelledBy::Mac);
     transfer::cancel(&state, transfer_id).await;
     Ok(())
 }
@@ -331,7 +335,7 @@ async fn photo_open(app: AppHandle, state: State<'_, SharedState>, path: String,
     let dir = std::env::temp_dir().join("DroidDock");
     let dest = dir.join(sanitize(&name));
     eprintln!("[photo_open] pulling name={name:?} phone_path={path:?} -> {dest:?}");
-    let saved = transfer::pull(app.clone(), state.inner().clone(), path, dest)
+    let saved = transfer::pull(app.clone(), state.inner().clone(), path, dest, Some(transfer_log::Source::Files))
         .await
         .map_err(|e| {
             eprintln!("[photo_open] pull error: {e}");
@@ -741,6 +745,7 @@ pub fn run() {
             app.manage(updater::UpdaterState::default());
             app.manage(webdav::WebdavState::default());
             app.manage(scrcpy_client::ScrcpyState::default());
+            app.manage(transfer_log::TransferLog::default());
 
             // Tidy up after a last run that ended without its quit cleanup.
             shutdown::on_launch();
@@ -992,6 +997,11 @@ pub fn run() {
             updater::update_check,
             updater::update_install,
             updater::app_version,
+            transfer_log::transfers_list,
+            transfer_log::transfers_clear,
+            transfer_log::transfer_cancel,
+            transfer_log::transfer_reveal,
+            transfer_log::transfer_open,
             webdav::webdav_start,
             webdav::webdav_stop,
             webdav::webdav_status,

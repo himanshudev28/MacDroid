@@ -10,6 +10,24 @@ to a generic body.
 
 ## Unreleased
 
+### Added
+
+- **A Transfers page.** Every file moving between the phone and the Mac now
+  shows up in one place, under Library in the sidebar, with a badge counting
+  the ones in flight. While a file moves you see its progress, how much is
+  done, the speed and the time left, with Cancel where cancelling is possible.
+  Once it ends you see how long it took, its average speed, and either a tick
+  or the reason it failed, plus Show in Finder and Open for received files.
+
+  It covers the Files and Photos pages, the phone's Share menu, the phone
+  opening files on the Mac, Quick Share, photo sync (one entry per run,
+  counted in photos) and copies through the "DroidDock Phone" volume in
+  Finder. The list is kept until DroidDock quits. Two limits are worth
+  knowing. Small files Finder reads only to draw previews show while they
+  load but aren't kept in the list. And Open refuses received files that can
+  run code (scripts, apps, installers), because they arrive without macOS's
+  download warning; Show in Finder still works for them.
+
 ### Fixed
 
 - **Quitting DroidDock now stops everything it started.** Before, several

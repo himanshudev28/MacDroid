@@ -15,6 +15,7 @@
 //! back-pressures the file-reader on `send_binary(...).await` exactly when the
 //! socket can't drain fast enough — same external behaviour, no byte counting.
 
+use crate::transfer_log::{self, Dir, NewTransfer, Source, Unit};
 use crate::ws_server::{self, SharedState};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -192,6 +193,9 @@ pub async fn on_control(app: &AppHandle, state: &SharedState, raw: &Value) {
         }
         "fs-cancel" => {
             // The phone cancelled; could be either direction — signal both maps.
+            if let Some(tid) = tid {
+                transfer_log::note_cancel(app, tid, transfer_log::CancelledBy::Phone);
+            }
             send_recv(state, tid, RecvEvent::Cancel).await;
             send_send(state, tid, SendEvent::Cancel).await;
         }
@@ -241,6 +245,7 @@ pub async fn push(
     local_path: String,
     dest: String,
     overwrite: bool,
+    source: Source,
 ) -> Result<(), String> {
     let path = PathBuf::from(&local_path);
     let name = path
@@ -268,8 +273,20 @@ pub async fn push(
     let (tx, mut rx) = mpsc::unbounded_channel::<SendEvent>();
     state.transfers.send.lock().await.insert(transfer_id, tx);
 
-    let result = stream_file(&app, &state, &path, transfer_id, &name, size, &mut rx).await;
+    let tracked = transfer_log::start(
+        &app,
+        NewTransfer {
+            name: name.clone(),
+            dir: Dir::ToPhone,
+            source,
+            unit: Unit::Bytes,
+            total: size,
+            cancel_id: Some(transfer_id),
+        },
+    );
+    let result = stream_file(&app, &state, &path, transfer_id, &name, size, tracked.key(), &mut rx).await;
     state.transfers.send.lock().await.remove(&transfer_id);
+    tracked.finish(result.clone().map(|()| None).into());
     result
 }
 
@@ -280,6 +297,7 @@ async fn stream_file(
     transfer_id: u32,
     name: &str,
     size: u64,
+    log_key: u64,
     rx: &mut mpsc::UnboundedReceiver<SendEvent>,
 ) -> Result<(), String> {
     let mut file = File::open(path)
@@ -322,6 +340,7 @@ async fn stream_file(
         }
         seq += 1;
         sent += n as u64;
+        transfer_log::progress(app, log_key, sent);
         emit_progress_throttled(
             app,
             Progress { transfer_id, name: name.into(), sent, total: size, dir: "push", done: false, error: None },
@@ -359,6 +378,9 @@ pub async fn pull(
     state: SharedState,
     path: String,
     dest_file: PathBuf,
+    // `None` for callers that report the transfer themselves (photo sync
+    // shows one entry for the whole batch, not one per photo).
+    track: Option<Source>,
 ) -> Result<PathBuf, String> {
     let name = dest_file
         .file_name()
@@ -382,8 +404,25 @@ pub async fn pull(
     let (tx, rx) = mpsc::unbounded_channel::<RecvEvent>();
     state.transfers.recv.lock().await.insert(transfer_id, tx);
 
-    let result = receive_to_file(&app, &dest_file, transfer_id, &name, size, "pull", rx).await;
+    let tracked = track.map(|source| {
+        transfer_log::start(
+            &app,
+            NewTransfer {
+                name: name.clone(),
+                dir: Dir::ToMac,
+                source,
+                unit: Unit::Bytes,
+                total: size,
+                cancel_id: Some(transfer_id),
+            },
+        )
+    });
+    let key = tracked.as_ref().map(|t| t.key());
+    let result = receive_to_file(&app, &dest_file, transfer_id, &name, size, "pull", key, rx).await;
     state.transfers.recv.lock().await.remove(&transfer_id);
+    if let Some(t) = tracked {
+        t.finish(result.clone().map(|()| Some(dest_file.clone())).into());
+    }
     result.map(|_| dest_file)
 }
 
@@ -420,12 +459,23 @@ async fn start_phone_push(app: &AppHandle, state: &SharedState, raw: &Value) {
     let (tx, rx) = mpsc::unbounded_channel::<RecvEvent>();
     state.transfers.recv.lock().await.insert(transfer_id, tx);
 
+    let tracked = transfer_log::start(
+        app,
+        NewTransfer {
+            name: name.clone(),
+            dir: Dir::ToMac,
+            source: Source::Share,
+            unit: Unit::Bytes,
+            total: size,
+            cancel_id: Some(transfer_id),
+        },
+    );
     let app = app.clone();
     let state2 = state.clone();
     tokio::spawn(async move {
-        let ok = receive_to_file(&app, &dest, transfer_id, &name, size, "phone", rx)
-            .await
-            .is_ok();
+        let result = receive_to_file(&app, &dest, transfer_id, &name, size, "phone", Some(tracked.key()), rx).await;
+        tracked.finish(result.clone().map(|()| Some(dest.clone())).into());
+        let ok = result.is_ok();
         state2.transfers.recv.lock().await.remove(&transfer_id);
         ws_server::push(
             &state2,
@@ -442,6 +492,7 @@ async fn receive_to_file(
     name: &str,
     size: u64,
     dir: &'static str,
+    log_key: Option<u64>,
     mut rx: mpsc::UnboundedReceiver<RecvEvent>,
 ) -> Result<(), String> {
     if let Some(parent) = dest.parent() {
@@ -461,6 +512,9 @@ async fn receive_to_file(
                     break Err("write error".to_string());
                 }
                 received += bytes.len() as u64;
+                if let Some(key) = log_key {
+                    transfer_log::progress(app, key, received);
+                }
                 emit_progress_throttled(
                     app,
                     Progress { transfer_id, name: name.into(), sent: received, total: size, dir, done: false, error: None },

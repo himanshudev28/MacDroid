@@ -386,7 +386,13 @@ impl DavFileSystem for PhoneFs {
             let name = phone_path.rsplit('/').next().unwrap_or("file").to_string();
             let dest = self.cache.join(cache_name(&phone_path, &name));
             if !dest.exists() {
-                crate::transfer::pull(self.app.clone(), self.ws.clone(), phone_path, dest.clone())
+                crate::transfer::pull(
+                    self.app.clone(),
+                    self.ws.clone(),
+                    phone_path,
+                    dest.clone(),
+                    Some(crate::transfer_log::Source::Finder),
+                )
                     .await
                     .map_err(|_| FsError::NotFound)?;
             }
@@ -647,6 +653,7 @@ impl WriteFile {
             // untouched, while reporting success — the exact failure this flag
             // was added for.
             true,
+            crate::transfer_log::Source::Finder,
         )
         .await
         .map_err(|e| {

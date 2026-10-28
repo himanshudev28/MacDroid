@@ -363,7 +363,7 @@ async fn do_writeback(app: AppHandle, ws_state: SharedState, cache: EditCache, l
     // overwrite: true — this is a writeback of a file the user opened from the
     // phone, so it must replace the original. Without it the phone's
     // uniqueDest() silently forked every save into "name (2).ext".
-    match transfer::push(app.clone(), ws_state, local_str, dest_dir, true).await {
+    match transfer::push(app.clone(), ws_state, local_str, dest_dir, true, crate::transfer_log::Source::Files).await {
         Ok(()) => {
             cache.mark_synced(&local_path).await;
             emit_sync(&app, &local_path, &phone_path, "synced", None);
@@ -411,7 +411,7 @@ pub async fn retry_pending(app: AppHandle, ws_state: SharedState, cache: EditCac
 pub async fn open_in_place(app: AppHandle, ws_state: SharedState, cache: EditCache, path: String) -> Result<(), String> {
     let dest = cache.session_dir.join(cache_relative_path(&path));
 
-    let saved = transfer::pull(app.clone(), ws_state.clone(), path.clone(), dest).await?;
+    let saved = transfer::pull(app.clone(), ws_state.clone(), path.clone(), dest, Some(crate::transfer_log::Source::Files)).await?;
     cache.record_synced(&saved, &path).await;
     cache.enforce_cap(&saved).await?;
     start_watch(app.clone(), ws_state.clone(), cache, saved.clone(), path)?;
