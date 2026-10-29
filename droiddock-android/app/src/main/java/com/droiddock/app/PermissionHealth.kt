@@ -12,6 +12,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import com.droiddock.app.link.ble.BleStack
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -92,7 +93,44 @@ object PermissionHealth {
         return arr
     }
 
-    private fun checks(ctx: Context): List<Check> = listOf(
+    private fun checks(ctx: Context): List<Check> = bleChecks(ctx) + baseChecks(ctx)
+
+    /** Shown only when the user turned Bluetooth fallback on. */
+    private fun bleChecks(ctx: Context): List<Check> {
+        if (Prefs.connectionMode(ctx) != "fallback" || !BleStack.hasBle(ctx)) return emptyList()
+        val perm = BleStack.hasPermission(ctx)
+        val st = BleStack.status.value
+        val ok = perm && st != BleStack.Status.LOCKED && st != BleStack.Status.BUSY && st != BleStack.Status.RADIO_OFF
+        val detail = when {
+            !perm -> "Nearby devices permission is off, so the Bluetooth fallback cannot run."
+            st == BleStack.Status.LOCKED -> "Too many failed Bluetooth attempts; paused for 5 minutes."
+            st == BleStack.Status.BUSY -> "Bluetooth busy: another app is using all advertising slots."
+            st == BleStack.Status.RADIO_OFF -> "Bluetooth is switched off on this phone."
+            else -> "On."
+        }
+        return listOf(Check("ble", ok, WARN, "Bluetooth fallback", detail, fix = "app-details"))
+    }
+
+    /** "Allow Bluetooth to finish setting up Wi-Fi fallback": the Mac turned the mode on and we lack the grant. */
+    fun notifyBleSetup(ctx: Context) {
+        runCatching {
+            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.createNotificationChannel(NotificationChannel(CHANNEL, "Setup", NotificationManager.IMPORTANCE_HIGH))
+            val pi = PendingIntent.getActivity(
+                ctx, 44, Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            nm.notify(
+                NOTIF_ID + 1,
+                Notification.Builder(ctx, CHANNEL)
+                    .setContentTitle(I18n.t("Finish setting up Bluetooth fallback"))
+                    .setContentText(I18n.t("Open DroidDock and allow Bluetooth in Settings \u203a Connection."))
+                    .setSmallIcon(R.drawable.ic_stat).setContentIntent(pi).setAutoCancel(true).build()
+            )
+        }
+    }
+
+    private fun baseChecks(ctx: Context): List<Check> = listOf(
         Check(
             id = "a11y",
             ok = accessibilityOn(ctx),

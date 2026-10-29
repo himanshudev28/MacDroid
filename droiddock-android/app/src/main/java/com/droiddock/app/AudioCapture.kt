@@ -111,6 +111,7 @@ class AudioCapture(private val onStopped: () -> Unit) {
     }
 
     private fun pump(rec: AudioRecord) {
+        runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO) }
         val buf = ByteArray(CHUNK_BYTES)
         // Silence suppression. Playback capture yields a continuous stream of
         // zeroes when nothing is playing, and shipping 192 KB/s of silence
@@ -120,6 +121,12 @@ class AudioCapture(private val onStopped: () -> Unit) {
         var silentRun = 0
         var muted = false
         while (running) {
+            if (!streaming) {
+                // Keep-alive pause: nothing is wanted, so stop the recorder and
+                // park instead of reading PCM just to throw it away.
+                if (!parkUntilResumed(rec)) break
+                continue
+            }
             val n = try {
                 rec.read(buf, 0, buf.size)
             } catch (e: Exception) {
@@ -130,7 +137,7 @@ class AudioCapture(private val onStopped: () -> Unit) {
                 // us; a transient 0 just means no data yet.
                 if (n < 0) break else continue
             }
-            if (!streaming) continue
+            if (!streaming) continue // paused mid-read: the check above parks next loop
 
             if (isSilent(buf, n)) {
                 silentRun++
@@ -158,14 +165,36 @@ class AudioCapture(private val onStopped: () -> Unit) {
         }
     }
 
-    /** Stop transmitting but keep the recorder open (mirrors MirrorService's pause). */
+    private val gate = Object()
+
+    /** Runs on the pump thread. Stops the recorder, waits for resume/stop, then
+     *  restarts it. Returns false if the recorder could not be restarted. */
+    private fun parkUntilResumed(rec: AudioRecord): Boolean {
+        runCatching { rec.stop() }
+        synchronized(gate) {
+            while (running && !streaming) runCatching { gate.wait() }
+        }
+        if (!running) return true // loop condition ends the pump
+        return runCatching { rec.startRecording() }.isSuccess
+    }
+
+    /** Stop transmitting and stop reading (mirrors MirrorService's keep-alive pause).
+     *  The recorder is stopped by the pump thread; the AudioRecord object stays. */
     fun pauseStreaming() { streaming = false }
 
-    fun resumeStreaming() { streaming = true }
+    fun resumeStreaming() {
+        synchronized(gate) {
+            streaming = true
+            gate.notifyAll()
+        }
+    }
 
     fun stop() {
         if (!running && record == null) return
-        running = false
+        synchronized(gate) {
+            running = false
+            gate.notifyAll()
+        }
         runCatching { pump?.join(300) }
         pump = null
         val rec = record
