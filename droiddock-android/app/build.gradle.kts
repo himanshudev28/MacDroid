@@ -2,6 +2,9 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    // Offline screenshot tests (`./gradlew :app:recordPaparazziDebug`). Test-only:
+    // nothing from it ends up in the APK.
+    id("app.cash.paparazzi") version "1.3.5"
 }
 
 // ── Version, derived from the release tag ─────────────────────────────────
@@ -75,7 +78,11 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName(if (hasKeystore) "release" else "debug")
-            isMinifyEnabled = false
+            // R8 + resource shrinking (perf audit). Rules live in proguard-rules.pro.
+            // Mostly drops the unused ~99% of material-icons-extended and
+            // unreachable androidx/okhttp/zxing code.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
@@ -103,13 +110,14 @@ android {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.10.00")
+    val composeBom = platform("androidx.compose:compose-bom:2025.10.01")
     implementation(composeBom)
-    implementation("androidx.activity:activity-compose:1.9.3")
+    implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.4")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
     // FileProvider, for clipboard images (ClipImage.kt). It was already on the
     // classpath transitively through the Compose/lifecycle artifacts, but a
     // compile-time API resolved by accident is one dependency bump away from
@@ -119,6 +127,12 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    // Installs the hand-written src/main/baseline-prof.txt (and the baseline
+    // profiles shipped inside Compose/AndroidX) into ART on first launch, so the
+    // startup path is AOT-compiled without waiting for background dexopt.
+    implementation("androidx.profileinstaller:profileinstaller:1.3.1")
+    // Liquid Glass engine; pinned to the 1.0.x line whose POM matches Compose 1.9.4 / Kotlin 2.2.21.
+    implementation("io.github.kyant0:backdrop:1.0.0")
 
     testImplementation("junit:junit:4.13.2")
     // A real org.json on the unit-test classpath.
