@@ -1,0 +1,2678 @@
+[
+ {
+  "key": "+{n} more",
+  "where": "mac/Sources/DroidDock/Views/Screens/ClipboardScreen.swift:117"
+ },
+ {
+  "key": "1 hour",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:94"
+ },
+ {
+  "key": "8 hours",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:95"
+ },
+ {
+  "key": "A small always-on-top panel with battery and now-playing.",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:50"
+ },
+ {
+  "key": "A virtual display on the phone. “Window layout” decides whether Android serves desktop, tablet or phone layouts.",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:41"
+ },
+ {
+  "key": "ADB Devices",
+  "where": "mac/Sources/DroidDock/Views/Screens/DevicesScreen.swift:50"
+ },
+ {
+  "key": "AES-256-GCM on everything after pairing, keyed off your pairing code. Each side needs a recent enough app; anything unsupported stays as it was.",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:71"
+ },
+ {
+  "key": "Accessibility",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:216"
+ },
+ {
+  "key": "Accessibility permission",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:25"
+ },
+ {
+  "key": "Action",
+  "where": "mac/Sources/DroidDock/Services/NotificationClickActions.swift:94"
+ },
+ {
+  "key": "Add",
+  "where": "mac/Sources/DroidDock/Services/NotificationClickActions.swift:104"
+ },
+ {
+  "key": "Add a rule",
+  "where": "mac/Sources/DroidDock/Services/NotificationClickActions.swift:87"
+ },
+ {
+  "key": "Adds a Mac Files tab to the phone app for the folders below. Nothing outside this list is reachable. Muted while DroidDock is paused.",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:126"
+ },
+ {
+  "key": "Adds a trackpad, keyboard, media, lock, brightness and volume to the phone app. Anyone holding your paired phone gets this, so leave it off unless you want it.",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:17"
+ },
+ {
+  "key": "Add…",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:100"
+ },
+ {
+  "key": "Alert",
+  "where": "mac/Sources/DroidDock/Views/Inbox/InboxSupport.swift:75"
+ },
+ {
+  "key": "Alert shows a banner and lists it. Silent lists it with no banner. Muted drops it entirely.",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:202"
+ },
+ {
+  "key": "All",
+  "where": "mac/Sources/DroidDock/Views/Screens/TransfersScreen.swift:14"
+ },
+ {
+  "key": "All Apps",
+  "where": "mac/Sources/DroidDock/Views/Screens/AppsScreen.swift:81"
+ },
+ {
+  "key": "All caught up",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:92"
+ },
+ {
+  "key": "Allow",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:206"
+ },
+ {
+  "key": "Allow USB debugging on the phone (tap Allow in the dialog), then it will appear as ready.",
+  "where": "mac/Sources/DroidDock/Views/Devices/DeviceCard.swift:107"
+ },
+ {
+  "key": "Allow a few things",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:201"
+ },
+ {
+  "key": "Allowed",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:245"
+ },
+ {
+  "key": "Almost everything that goes wrong with DroidDock goes wrong quietly. The setup check lists each permission both devices need, what breaks without it, and a button that opens the screen to grant it.",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:127"
+ },
+ {
+  "key": "Also raise a macOS banner for each notification.",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:191"
+ },
+ {
+  "key": "Also used by “{name}” — only one will fire.",
+  "where": "mac/Sources/DroidDock/Services/HotKeys.swift:365"
+ },
+ {
+  "key": "Amber",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:157"
+ },
+ {
+  "key": "Android 11+ · Wireless debugging",
+  "where": "mac/Sources/DroidDock/Views/Screens/DevicesScreen.swift:122"
+ },
+ {
+  "key": "Android layout",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:176"
+ },
+ {
+  "key": "Answer  ⏎",
+  "where": "mac/Sources/DroidDock/Call/CallOverlayPanel.swift:192"
+ },
+ {
+  "key": "Applies to Wi-Fi and ADB. Lower the bit rate if the mirror stutters on a busy network.",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:21"
+ },
+ {
+  "key": "Applies to Wi-Fi mirror and mirror-in-app. You can also switch while it is running.",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:135"
+ },
+ {
+  "key": "Applies to the next Wi-Fi mirror or camera session.",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:147"
+ },
+ {
+  "key": "Approve DroidDock in System Settings › General › Login Items.",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:16"
+ },
+ {
+  "key": "Approve the camera on your phone",
+  "where": "mac/Sources/DroidDock/Mirror/MirrorStage.swift:61"
+ },
+ {
+  "key": "Apps",
+  "where": "mac/Sources/DroidDock/Views/Shell/Destination.swift:15"
+ },
+ {
+  "key": "Ask for Touch ID or your password before the pairing QR is shown.",
+  "where": "mac/Sources/DroidDock/Views/Settings/NativeExtrasSettings.swift:29"
+ },
+ {
+  "key": "Auto",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:43"
+ },
+ {
+  "key": "Auto-sync new photos and videos",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:173"
+ },
+ {
+  "key": "Back  ⌘[",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:329"
+ },
+ {
+  "key": "Back Up Now",
+  "where": "mac/Sources/DroidDock/Views/Screens/PhotosScreen.swift:46"
+ },
+ {
+  "key": "Back-fill",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:185"
+ },
+ {
+  "key": "Backdrop",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:48"
+ },
+ {
+  "key": "Backing up photos",
+  "where": "mac/Sources/DroidDock/Views/Screens/PhotosScreen.swift:61"
+ },
+ {
+  "key": "Banner and sound on your Mac",
+  "where": "mac/Sources/DroidDock/Views/Inbox/InboxSupport.swift:89"
+ },
+ {
+  "key": "Banner without sound",
+  "where": "mac/Sources/DroidDock/Views/Inbox/InboxSupport.swift:90"
+ },
+ {
+  "key": "Battery {n} percent",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:262"
+ },
+ {
+  "key": "Bit rate",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:22"
+ },
+ {
+  "key": "Bitrate",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:153"
+ },
+ {
+  "key": "Both devices need the same Wi-Fi network.",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:152"
+ },
+ {
+  "key": "Browse files",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:214"
+ },
+ {
+  "key": "Cable-free ADB over Wi-Fi. Android 11 or newer.",
+  "where": "mac/Sources/DroidDock/Views/Modals/WirelessPairSheet.swift:13"
+ },
+ {
+  "key": "Call",
+  "where": "mac/Sources/DroidDock/Views/Screens/CallsScreen.swift:62"
+ },
+ {
+  "key": "Call  ⏎",
+  "where": "mac/Sources/DroidDock/Views/Screens/CallsScreen.swift:71"
+ },
+ {
+  "key": "Call back",
+  "where": "mac/Sources/DroidDock/Views/Screens/NotificationsScreen.swift:193"
+ },
+ {
+  "key": "Calling {name}…",
+  "where": "mac/Sources/DroidDock/Views/Screens/CallsScreen.swift:140"
+ },
+ {
+  "key": "Calling…",
+  "where": "mac/Sources/DroidDock/Call/CallOverlayPanel.swift:174"
+ },
+ {
+  "key": "Calls",
+  "where": "mac/Sources/DroidDock/Views/Shell/Destination.swift:21"
+ },
+ {
+  "key": "Cancel",
+  "where": "mac/Sources/DroidDock/Views/Modals/WirelessPairSheet.swift:31"
+ },
+ {
+  "key": "Cancel Transfer",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:86"
+ },
+ {
+  "key": "Cancelled on the phone",
+  "where": "mac/Sources/DroidDock/Views/Screens/TransfersScreen.swift:146"
+ },
+ {
+  "key": "Capabilities",
+  "where": "mac/Sources/DroidDock/Views/Devices/ToolsCard.swift:77"
+ },
+ {
+  "key": "Charging",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:84"
+ },
+ {
+  "key": "Check Again",
+  "where": "mac/Sources/DroidDock/Views/Devices/ToolsCard.swift:15"
+ },
+ {
+  "key": "Check for Updates",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:87"
+ },
+ {
+  "key": "Check this PIN on {name}",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:218"
+ },
+ {
+  "key": "Checking…",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:102"
+ },
+ {
+  "key": "Checks the Mac and the linked phone.",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:134"
+ },
+ {
+  "key": "Choose",
+  "where": "mac/Sources/DroidDock/Services/NotificationClickActions.swift:139"
+ },
+ {
+  "key": "Choose Mac app…",
+  "where": "mac/Sources/DroidDock/Services/NotificationClickActions.swift:108"
+ },
+ {
+  "key": "Choose a folder to share",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:143"
+ },
+ {
+  "key": "Choose app",
+  "where": "mac/Sources/DroidDock/Services/NotificationClickActions.swift:91"
+ },
+ {
+  "key": "Choose files to send",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:107"
+ },
+ {
+  "key": "Choose what happens on your Mac when you click a banner from a phone app. Without a rule, DroidDock opens its Notifications page.",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:228"
+ },
+ {
+  "key": "Classic",
+  "where": "mac/Sources/DroidDock/Views/Shell/Destination.swift:85"
+ },
+ {
+  "key": "Clear Finished",
+  "where": "mac/Sources/DroidDock/Views/Screens/TransfersScreen.swift:58"
+ },
+ {
+  "key": "Clear all  ⌘⌫",
+  "where": "mac/Sources/DroidDock/Views/Screens/NotificationsScreen.swift:281"
+ },
+ {
+  "key": "Clear finished transfers",
+  "where": "mac/Sources/DroidDock/Views/Screens/TransfersScreen.swift:59"
+ },
+ {
+  "key": "Clear shortcut",
+  "where": "mac/Sources/DroidDock/Services/HotKeys.swift:311"
+ },
+ {
+  "key": "Clear {app}",
+  "where": "mac/Sources/DroidDock/Views/Screens/NotificationsScreen.swift:117"
+ },
+ {
+  "key": "Clicking an app in Apps opens its own Mac window. Hold Option for the other behaviour.",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:50"
+ },
+ {
+  "key": "Close window",
+  "where": "mac/Sources/DroidDock/Services/HotKeys.swift:76"
+ },
+ {
+  "key": "Code {pin}",
+  "where": "mac/Sources/DroidDock/Views/Modals/QuickShareReceivePrompt.swift:30"
+ },
+ {
+  "key": "Computer",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:199"
+ },
+ {
+  "key": "Confirm PIN {pin} on {name}",
+  "where": "mac/Sources/DroidDock/Views/Screens/TransfersScreen.swift:178"
+ },
+ {
+  "key": "Connect an ADB device to manage these.",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:90"
+ },
+ {
+  "key": "Connect the phone over ADB to mirror this way",
+  "where": "mac/Sources/DroidDock/Views/Shell/ShellSupport.swift:273"
+ },
+ {
+  "key": "Connect the phone over ADB to take a screenshot",
+  "where": "mac/Sources/DroidDock/Services/HotKeys.swift:252"
+ },
+ {
+  "key": "Connect the phone over ADB to use desktop mode",
+  "where": "mac/Sources/DroidDock/Views/Shell/ShellSupport.swift:276"
+ },
+ {
+  "key": "Connected over {t}",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:370"
+ },
+ {
+  "key": "Connected to {name}",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:179"
+ },
+ {
+  "key": "Connecting to {name}…",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:210"
+ },
+ {
+  "key": "Connecting…",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:78"
+ },
+ {
+  "key": "Connection details",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:502"
+ },
+ {
+  "key": "Contacts saved on your phone appear here for quick dialling.",
+  "where": "mac/Sources/DroidDock/Views/Screens/CallsScreen.swift:100"
+ },
+ {
+  "key": "Contacts saved on your phone appear here.",
+  "where": "mac/Sources/DroidDock/Views/Screens/ContactsScreen.swift:44"
+ },
+ {
+  "key": "Continue",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:165"
+ },
+ {
+  "key": "Control Center",
+  "where": "mac/Sources/DroidDock/Views/Settings/NativeExtrasSettings.swift:19"
+ },
+ {
+  "key": "Copied",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:197"
+ },
+ {
+  "key": "Copy",
+  "where": "mac/Sources/DroidDock/Views/Screens/ClipboardScreen.swift:82"
+ },
+ {
+  "key": "Copy Number",
+  "where": "mac/Sources/DroidDock/Views/Screens/ContactsScreen.swift:82"
+ },
+ {
+  "key": "Copy Package Name",
+  "where": "mac/Sources/DroidDock/Views/Screens/AppsScreen.swift:107"
+ },
+ {
+  "key": "Copy Serial",
+  "where": "mac/Sources/DroidDock/Views/Devices/DeviceCard.swift:52"
+ },
+ {
+  "key": "Copy every photo on the phone to your Mac now",
+  "where": "mac/Sources/DroidDock/Views/Screens/PhotosScreen.swift:48"
+ },
+ {
+  "key": "Copy something on either device",
+  "where": "mac/Sources/DroidDock/Views/Screens/ClipboardScreen.swift:104"
+ },
+ {
+  "key": "Copy text on either device and it appears on the other, in both directions. Images go Mac → phone automatically.",
+  "where": "mac/Sources/DroidDock/Views/Screens/ClipboardScreen.swift:58"
+ },
+ {
+  "key": "Copy to the Mac clipboard again",
+  "where": "mac/Sources/DroidDock/Views/Screens/ClipboardScreen.swift:84"
+ },
+ {
+  "key": "Could not open the release page",
+  "where": "mac/Sources/DroidDock/Views/Shell/ShellSupport.swift:235"
+ },
+ {
+  "key": "Couldn't download the file to preview it.",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:412"
+ },
+ {
+  "key": "Couldn't download the files to share.",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:438"
+ },
+ {
+  "key": "Couldn't send",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:237"
+ },
+ {
+  "key": "Couldn't send the reply: {error}",
+  "where": "mac/Sources/DroidDock/Views/Screens/NotificationsScreen.swift:316"
+ },
+ {
+  "key": "Couldn't start",
+  "where": "mac/Sources/DroidDock/Mirror/MirrorStage.swift:54"
+ },
+ {
+  "key": "Crash reports",
+  "where": "mac/Sources/DroidDock/Views/Settings/NativeExtrasSettings.swift:41"
+ },
+ {
+  "key": "Dark",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:150"
+ },
+ {
+  "key": "Dashboard",
+  "where": "mac/Sources/DroidDock/Views/Shell/Destination.swift:14"
+ },
+ {
+  "key": "Date Modified",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:166"
+ },
+ {
+  "key": "Decline  Esc",
+  "where": "mac/Sources/DroidDock/Call/CallOverlayPanel.swift:190"
+ },
+ {
+  "key": "Declined on the other device",
+  "where": "mac/Sources/DroidDock/Store/AppModel.swift:305"
+ },
+ {
+  "key": "Defaults",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:33"
+ },
+ {
+  "key": "Delete",
+  "where": "mac/Sources/DroidDock/Views/Screens/CallsScreen.swift:52"
+ },
+ {
+  "key": "Delete from Phone",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:62"
+ },
+ {
+  "key": "Delete {n} items from your phone?",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:382"
+ },
+ {
+  "key": "Delete “{name}” from your phone?",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:381"
+ },
+ {
+  "key": "Delete…",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:322"
+ },
+ {
+  "key": "Desktop",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:178"
+ },
+ {
+  "key": "Desktop Mode",
+  "where": "mac/Sources/DroidDock/Views/Devices/DeviceCard.swift:168"
+ },
+ {
+  "key": "Desktop mode & app windows",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:41"
+ },
+ {
+  "key": "Desktops",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:45"
+ },
+ {
+  "key": "Discovery port",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:168"
+ },
+ {
+  "key": "Display size",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:42"
+ },
+ {
+  "key": "Document",
+  "where": "mac/Sources/DroidDock/Views/Files/FileFormat.swift:65"
+ },
+ {
+  "key": "Done",
+  "where": "mac/Sources/DroidDock/Views/Modals/HealthSheet.swift:76"
+ },
+ {
+  "key": "Downloaded automatically the first time you use a device.",
+  "where": "mac/Sources/DroidDock/Views/Devices/ToolsCard.swift:23"
+ },
+ {
+  "key": "Download…",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:85"
+ },
+ {
+  "key": "Draggable windows",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:92"
+ },
+ {
+  "key": "DroidDock closed unexpectedly last time. Settings › Crash reports can show the report in Finder.",
+  "where": "mac/Sources/DroidDock/Services/CrashReporter.swift:104"
+ },
+ {
+  "key": "DroidDock lives in your menu bar too. Close the window any time; it keeps running.",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:291"
+ },
+ {
+  "key": "DroidDock updates from GitHub, not the App Store.",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:106"
+ },
+ {
+  "key": "DroidDock uses scrcpy (Apache 2.0) and Android platform tools for ADB features. Quick Share is an independent implementation of the open protocol. Licenses are in the app bundle.",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:170"
+ },
+ {
+  "key": "DroidDock will stop reconnecting to it wirelessly. You can pair it again any time.",
+  "where": "mac/Sources/DroidDock/Views/Screens/DevicesScreen.swift:43"
+ },
+ {
+  "key": "DroidDock {v} is available",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:41"
+ },
+ {
+  "key": "Drop files here, or send some from your Mac.",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:94"
+ },
+ {
+  "key": "Drop to send to phone",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:188"
+ },
+ {
+  "key": "Drop to send to {folder}",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:350"
+ },
+ {
+  "key": "Edited on Mac. Waiting to sync back to the phone.",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:222"
+ },
+ {
+  "key": "Enable",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:94"
+ },
+ {
+  "key": "Enclosing Folder",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:142"
+ },
+ {
+  "key": "Enter a number",
+  "where": "mac/Sources/DroidDock/Views/Screens/CallsScreen.swift:42"
+ },
+ {
+  "key": "Fair connection",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:55"
+ },
+ {
+  "key": "Files & Sharing",
+  "where": "mac/Sources/DroidDock/Views/Settings/SettingsSupport.swift:16"
+ },
+ {
+  "key": "Filter by App",
+  "where": "mac/Sources/DroidDock/Views/Screens/NotificationsScreen.swift:273"
+ },
+ {
+  "key": "Filter by app",
+  "where": "mac/Sources/DroidDock/Views/Screens/NotificationsScreen.swift:276"
+ },
+ {
+  "key": "Filter this folder",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:52"
+ },
+ {
+  "key": "Find the phone again after sleep or a network change.",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:69"
+ },
+ {
+  "key": "Fix",
+  "where": "mac/Sources/DroidDock/Views/Modals/HealthSheet.swift:115"
+ },
+ {
+  "key": "Flex display",
+  "where": "mac/Sources/DroidDock/Views/Devices/ToolsCard.swift:72"
+ },
+ {
+  "key": "Folder",
+  "where": "mac/Sources/DroidDock/Views/Files/FileFormat.swift:64"
+ },
+ {
+  "key": "Folder name",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:194"
+ },
+ {
+  "key": "Folders can't be dragged out yet. Open the folder and drag its files.",
+  "where": "mac/Sources/DroidDock/Views/Files/PhoneFilesModel.swift:18"
+ },
+ {
+  "key": "Forget",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:131"
+ },
+ {
+  "key": "Forget Phone",
+  "where": "mac/Sources/DroidDock/Views/Screens/DevicesScreen.swift:42"
+ },
+ {
+  "key": "Forget this phone?",
+  "where": "mac/Sources/DroidDock/Views/Screens/DevicesScreen.swift:41"
+ },
+ {
+  "key": "Forget wireless pairing",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:130"
+ },
+ {
+  "key": "Forward",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:330"
+ },
+ {
+  "key": "Forward  ⌘]",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:331"
+ },
+ {
+  "key": "Front",
+  "where": "mac/Sources/DroidDock/Mirror/MirrorStage.swift:88"
+ },
+ {
+  "key": "Full-quality camera preview over USB or wireless ADB via scrcpy, in its own window.",
+  "where": "mac/Sources/DroidDock/Views/Screens/CameraScreen.swift:78"
+ },
+ {
+  "key": "Full-quality, low-latency mirroring over USB or wireless ADB via scrcpy, in its own window.",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:96"
+ },
+ {
+  "key": "General",
+  "where": "mac/Sources/DroidDock/Views/Settings/SettingsSupport.swift:11"
+ },
+ {
+  "key": "Get Homebrew",
+  "where": "mac/Sources/DroidDock/Views/Devices/ToolsCard.swift:64"
+ },
+ {
+  "key": "Get Started",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:138"
+ },
+ {
+  "key": "Global shortcuts",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:101"
+ },
+ {
+  "key": "Go",
+  "where": "mac/Sources/DroidDock/App/DroidDockApp.swift:72"
+ },
+ {
+  "key": "Go Wireless",
+  "where": "mac/Sources/DroidDock/Views/Devices/DeviceCard.swift:191"
+ },
+ {
+  "key": "Good connection",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:54"
+ },
+ {
+  "key": "Granted",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:21"
+ },
+ {
+  "key": "Grid",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:128"
+ },
+ {
+  "key": "Group by App",
+  "where": "mac/Sources/DroidDock/Views/Screens/NotificationsScreen.swift:260"
+ },
+ {
+  "key": "Grouped",
+  "where": "mac/Sources/DroidDock/Views/Shell/Destination.swift:86"
+ },
+ {
+  "key": "H.265 is smaller at the same quality; the phone falls back to H.264 if it can't encode it.",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:148"
+ },
+ {
+  "key": "Hands the app back to the phone. scrcpy 3.1 or newer.",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:53"
+ },
+ {
+  "key": "Hang Up",
+  "where": "mac/Sources/DroidDock/Call/CallOverlayPanel.swift:199"
+ },
+ {
+  "key": "Health",
+  "where": "mac/Sources/DroidDock/Views/Settings/SettingsSupport.swift:19"
+ },
+ {
+  "key": "Hidden",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:46"
+ },
+ {
+  "key": "Hide",
+  "where": "mac/Sources/DroidDock/Services/HotKeys.swift:75"
+ },
+ {
+  "key": "Hide Widget",
+  "where": "mac/Sources/DroidDock/MenuBar/StatusWidgetPanel.swift:112"
+ },
+ {
+  "key": "Hold ⌘Q to quit",
+  "where": "mac/Sources/DroidDock/App/QuitHold.swift:121"
+ },
+ {
+  "key": "I'll do this later",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:165"
+ },
+ {
+  "key": "If DroidDock already looks ticked in Privacy & Security › Accessibility, the tick is stale: macOS ties the grant to the exact app binary, and every update replaces it. Reset permission removes the stale row and asks again.",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:33"
+ },
+ {
+  "key": "If it matches, accept the transfer there.",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:218"
+ },
+ {
+  "key": "Image",
+  "where": "mac/Sources/DroidDock/Views/Screens/ClipboardScreen.swift:126"
+ },
+ {
+  "key": "In DroidDock on Android, tap Pair with Mac and scan this code.",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:336"
+ },
+ {
+  "key": "In progress",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:94"
+ },
+ {
+  "key": "Inbox",
+  "where": "mac/Sources/DroidDock/Views/Shell/PhoneTabsShell.swift:14"
+ },
+ {
+  "key": "Include ⌃, ⌥ or ⌘ so it doesn't interfere with typing.",
+  "where": "mac/Sources/DroidDock/Services/HotKeys.swift:357"
+ },
+ {
+  "key": "Incoming calls show a Mac alert with the caller's name. Grant DroidDock's Phone permission on the phone to answer from here.",
+  "where": "mac/Sources/DroidDock/Views/Screens/CallsScreen.swift:78"
+ },
+ {
+  "key": "Incoming calls show a Mac alert. Answer, mute and hang up from here.",
+  "where": "mac/Sources/DroidDock/Views/Screens/CallsScreen.swift:77"
+ },
+ {
+  "key": "Install",
+  "where": "mac/Sources/DroidDock/Views/Devices/ToolsCard.swift:61"
+ },
+ {
+  "key": "Installing…",
+  "where": "mac/Sources/DroidDock/Views/Devices/ToolsCard.swift:59"
+ },
+ {
+  "key": "Keep content",
+  "where": "mac/Sources/DroidDock/Views/Devices/ToolsCard.swift:71"
+ },
+ {
+  "key": "Keep running after quit",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:24"
+ },
+ {
+  "key": "Keep the other device unlocked and nearby.",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:210"
+ },
+ {
+  "key": "Keyboard shortcuts",
+  "where": "mac/Sources/DroidDock/Views/Settings/NativeExtrasSettings.swift:12"
+ },
+ {
+  "key": "Kind",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:169"
+ },
+ {
+  "key": "Latency",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:97"
+ },
+ {
+  "key": "Later",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:45"
+ },
+ {
+  "key": "Lets your Mac and phone find each other.",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:208"
+ },
+ {
+  "key": "Light",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:149"
+ },
+ {
+  "key": "Link",
+  "where": "mac/Sources/DroidDock/Views/Shell/PhoneCard.swift:118"
+ },
+ {
+  "key": "Link port",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:167"
+ },
+ {
+  "key": "Link your phone to see {feature} here.",
+  "where": "mac/Sources/DroidDock/DesignSystem/Components.swift:307"
+ },
+ {
+  "key": "Link your phone to send files",
+  "where": "mac/Sources/DroidDock/Views/Shell/PhoneCard.swift:21"
+ },
+ {
+  "key": "Link your phone to use {name}.",
+  "where": "mac/Sources/DroidDock/Views/Screens/ScreenView.swift:36"
+ },
+ {
+  "key": "Linked",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:85"
+ },
+ {
+  "key": "Linked to {name}",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:53"
+ },
+ {
+  "key": "Links",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:170"
+ },
+ {
+  "key": "List",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:127"
+ },
+ {
+  "key": "Loading",
+  "where": "mac/Sources/DroidDock/DesignSystem/Components.swift:336"
+ },
+ {
+  "key": "Local Network",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:208"
+ },
+ {
+  "key": "Lock the pairing code",
+  "where": "mac/Sources/DroidDock/Views/Settings/NativeExtrasSettings.swift:28"
+ },
+ {
+  "key": "Looking for nearby devices…",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:152"
+ },
+ {
+  "key": "Looking for your phone…",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:361"
+ },
+ {
+  "key": "Looks for a new release shortly after launch, at most once a day. Nothing downloads without your say-so.",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:82"
+ },
+ {
+  "key": "Mac app",
+  "where": "mac/Sources/DroidDock/Services/NotificationClickActions.swift:95"
+ },
+ {
+  "key": "Mac files for the phone",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:125"
+ },
+ {
+  "key": "Mac window",
+  "where": "mac/Sources/DroidDock/Views/Screens/AppsScreen.swift:59"
+ },
+ {
+  "key": "Mac windows need a USB or wireless ADB connection.",
+  "where": "mac/Sources/DroidDock/Views/Screens/AppsScreen.swift:61"
+ },
+ {
+  "key": "Makes this Mac appear in the Quick Share sheet of nearby Android, ChromeOS and Windows devices. Every transfer must be accepted here and the code must match. While on, the Mac is visible to everyone nearby.",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:198"
+ },
+ {
+  "key": "Matches",
+  "where": "mac/Sources/DroidDock/Views/Screens/CallsScreen.swift:110"
+ },
+ {
+  "key": "Maximum length",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:42"
+ },
+ {
+  "key": "Message",
+  "where": "mac/Sources/DroidDock/Views/Screens/CallsScreen.swift:121"
+ },
+ {
+  "key": "Minimal",
+  "where": "mac/Sources/DroidDock/Views/Shell/Destination.swift:87"
+ },
+ {
+  "key": "Mirror Screen",
+  "where": "mac/Sources/DroidDock/App/DroidDockApp.swift:107"
+ },
+ {
+  "key": "Mirror in scrcpy Window",
+  "where": "mac/Sources/DroidDock/Views/Devices/DeviceCard.swift:165"
+ },
+ {
+  "key": "Mirror in this app",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:108"
+ },
+ {
+  "key": "Mirror inside the main window",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:16"
+ },
+ {
+  "key": "Mirror the phone screen  ⌘⇧M",
+  "where": "mac/Sources/DroidDock/Views/Devices/DeviceCard.swift:177"
+ },
+ {
+  "key": "Mirror via ADB",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:99"
+ },
+ {
+  "key": "Mirror your phone",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:294"
+ },
+ {
+  "key": "Mirroring & Media",
+  "where": "mac/Sources/DroidDock/Views/Settings/SettingsSupport.swift:15"
+ },
+ {
+  "key": "Mirrors a second, virtual Android display instead of the phone's own screen. The phone stays usable. Needs Android 11+ and scrcpy 3.0 or newer.",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:117"
+ },
+ {
+  "key": "Model",
+  "where": "mac/Sources/DroidDock/Views/Shell/PhoneCard.swift:124"
+ },
+ {
+  "key": "More",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:153"
+ },
+ {
+  "key": "Mount Phone in Finder",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:149"
+ },
+ {
+  "key": "Mounting…",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:159"
+ },
+ {
+  "key": "Mute phone audio",
+  "where": "mac/Sources/DroidDock/Mirror/MirrorStage.swift:100"
+ },
+ {
+  "key": "Muted",
+  "where": "mac/Sources/DroidDock/Views/Inbox/InboxSupport.swift:77"
+ },
+ {
+  "key": "Mutes notification banners and clipboard sync.",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:155"
+ },
+ {
+  "key": "Name",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:56"
+ },
+ {
+  "key": "Name and battery, so the phone's home screen can show both. Read-only.",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:78"
+ },
+ {
+  "key": "Name or number",
+  "where": "mac/Sources/DroidDock/Views/Screens/MessagesScreen.swift:315"
+ },
+ {
+  "key": "Native banners",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:191"
+ },
+ {
+  "key": "Nearby device",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:199"
+ },
+ {
+  "key": "Nearby devices",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:127"
+ },
+ {
+  "key": "Needed for ADB mirroring and desktop mode. Android 11 or newer.",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:107"
+ },
+ {
+  "key": "New Folder",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:298"
+ },
+ {
+  "key": "New Message",
+  "where": "mac/Sources/DroidDock/Views/Screens/MessagesScreen.swift:37"
+ },
+ {
+  "key": "New folder  ⇧⌘N",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:335"
+ },
+ {
+  "key": "New message",
+  "where": "mac/Sources/DroidDock/Views/Screens/MessagesScreen.swift:90"
+ },
+ {
+  "key": "New message  ⌘N",
+  "where": "mac/Sources/DroidDock/Views/Screens/MessagesScreen.swift:39"
+ },
+ {
+  "key": "New shots land in the folder below automatically.",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:173"
+ },
+ {
+  "key": "Next  ⌘→",
+  "where": "mac/Sources/DroidDock/Views/Media/NowPlayingView.swift:140"
+ },
+ {
+  "key": "No ADB device. Opened {name} on your phone instead.",
+  "where": "mac/Sources/DroidDock/Views/Screens/AppsScreen.swift:150"
+ },
+ {
+  "key": "No ADB devices found.",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:115"
+ },
+ {
+  "key": "No contacts",
+  "where": "mac/Sources/DroidDock/Views/Screens/CallsScreen.swift:99"
+ },
+ {
+  "key": "No conversations",
+  "where": "mac/Sources/DroidDock/Views/Screens/MessagesScreen.swift:74"
+ },
+ {
+  "key": "No crashes recorded.",
+  "where": "mac/Sources/DroidDock/Views/Settings/NativeExtrasSettings.swift:43"
+ },
+ {
+  "key": "No device connected",
+  "where": "mac/Sources/DroidDock/Views/Screens/DevicesScreen.swift:57"
+ },
+ {
+  "key": "No matching contacts",
+  "where": "mac/Sources/DroidDock/Views/Screens/MessagesScreen.swift:337"
+ },
+ {
+  "key": "No messages yet. Say hello.",
+  "where": "mac/Sources/DroidDock/Views/Screens/MessagesScreen.swift:150"
+ },
+ {
+  "key": "No results",
+  "where": "mac/Sources/DroidDock/Views/Inbox/InboxSupport.swift:168"
+ },
+ {
+  "key": "No {kind} transfers yet.",
+  "where": "mac/Sources/DroidDock/Views/Screens/TransfersScreen.swift:79"
+ },
+ {
+  "key": "Not delivered",
+  "where": "mac/Sources/DroidDock/Views/Screens/MessagesScreen.swift:253"
+ },
+ {
+  "key": "Not granted",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:21"
+ },
+ {
+  "key": "Not set",
+  "where": "mac/Sources/DroidDock/Services/HotKeys.swift:309"
+ },
+ {
+  "key": "Nothing",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:29"
+ },
+ {
+  "key": "Nothing here",
+  "where": "mac/Sources/DroidDock/Views/Screens/TransfersScreen.swift:78"
+ },
+ {
+  "key": "Nothing in flight",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:94"
+ },
+ {
+  "key": "Nothing in this folder matches “{q}”.",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:98"
+ },
+ {
+  "key": "Nothing is playing on the phone",
+  "where": "mac/Sources/DroidDock/Services/HotKeys.swift:264"
+ },
+ {
+  "key": "Nothing matches “{query}”.",
+  "where": "mac/Sources/DroidDock/Views/Inbox/InboxSupport.swift:169"
+ },
+ {
+  "key": "Nothing matching “{q}”.",
+  "where": "mac/Sources/DroidDock/Views/Screens/AppsScreen.swift:47"
+ },
+ {
+  "key": "Nothing new on your phone",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:239"
+ },
+ {
+  "key": "Nothing to send",
+  "where": "mac/Sources/DroidDock/Views/Screens/ClipboardScreen.swift:124"
+ },
+ {
+  "key": "Nothing was sent.",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:234"
+ },
+ {
+  "key": "Notification",
+  "where": "mac/Sources/DroidDock/App/MenuBarPanel.swift:157"
+ },
+ {
+  "key": "Notification Level",
+  "where": "mac/Sources/DroidDock/Views/Screens/NotificationsScreen.swift:226"
+ },
+ {
+  "key": "Notification click actions",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:227"
+ },
+ {
+  "key": "Notifications from your phone show up here",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:239"
+ },
+ {
+  "key": "Now playing {t}",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:372"
+ },
+ {
+  "key": "Off",
+  "where": "mac/Sources/DroidDock/Views/Screens/ClipboardScreen.swift:55"
+ },
+ {
+  "key": "Off by default on purpose: a bug on the write path damages files on the phone.",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:153"
+ },
+ {
+  "key": "Off pops the phone out into its own window.",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:16"
+ },
+ {
+  "key": "Offline",
+  "where": "mac/Sources/DroidDock/App/MenuBarPanel.swift:70"
+ },
+ {
+  "key": "On",
+  "where": "mac/Sources/DroidDock/Views/Screens/ClipboardScreen.swift:55"
+ },
+ {
+  "key": "On the other device, open Quick Share and set it to be visible to everyone or your contacts.",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:153"
+ },
+ {
+  "key": "On the phone open Settings › Developer options › Wireless debugging.",
+  "where": "mac/Sources/DroidDock/Views/Modals/WirelessPairSheet.swift:55"
+ },
+ {
+  "key": "On the phone open Wireless debugging › Pair device with pairing code, then type the address and 6-digit code it shows.",
+  "where": "mac/Sources/DroidDock/Views/Modals/WirelessPairSheet.swift:118"
+ },
+ {
+  "key": "On this Mac right now",
+  "where": "mac/Sources/DroidDock/Views/Screens/ClipboardScreen.swift:74"
+ },
+ {
+  "key": "One banner when the phone falls below the threshold while off the charger.",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:193"
+ },
+ {
+  "key": "Only listed here",
+  "where": "mac/Sources/DroidDock/Views/Inbox/InboxSupport.swift:91"
+ },
+ {
+  "key": "Open DroidDock on your Android, on the same Wi-Fi as this Mac.",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:311"
+ },
+ {
+  "key": "Open DroidDock on your Android, tap Pair with Mac, and scan this code. Both devices need the same Wi-Fi network.",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:154"
+ },
+ {
+  "key": "Open DroidDock on your Android, tap Pair with Mac, and scan this code. Both devices need the same Wi-Fi.",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:164"
+ },
+ {
+  "key": "Open DroidDock on your Android.",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:148"
+ },
+ {
+  "key": "Open DroidDock on your phone and scan this code. Both devices need to be on the same Wi-Fi.",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:48"
+ },
+ {
+  "key": "Open DroidDock on your phone, then scan the code in the main window.",
+  "where": "mac/Sources/DroidDock/App/MenuBarPanel.swift:215"
+ },
+ {
+  "key": "Open On",
+  "where": "mac/Sources/DroidDock/Views/Screens/AppsScreen.swift:62"
+ },
+ {
+  "key": "Open Photo",
+  "where": "mac/Sources/DroidDock/Views/Screens/PhotosScreen.swift:134"
+ },
+ {
+  "key": "Open System Settings",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:37"
+ },
+ {
+  "key": "Open Video",
+  "where": "mac/Sources/DroidDock/Views/Screens/PhotosScreen.swift:134"
+ },
+ {
+  "key": "Open apps on",
+  "where": "mac/Sources/DroidDock/Views/Screens/AppsScreen.swift:57"
+ },
+ {
+  "key": "Open at login",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:17"
+ },
+ {
+  "key": "Open in Mac Window",
+  "where": "mac/Sources/DroidDock/Views/Screens/AppsScreen.swift:98"
+ },
+ {
+  "key": "Open menu-bar panel",
+  "where": "mac/Sources/DroidDock/Services/HotKeys.swift:19"
+ },
+ {
+  "key": "Open on Click…",
+  "where": "mac/Sources/DroidDock/Views/Screens/NotificationsScreen.swift:234"
+ },
+ {
+  "key": "Open on Mac",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:305"
+ },
+ {
+  "key": "Open on Phone",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:865"
+ },
+ {
+  "key": "Open {app} on phone",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:862"
+ },
+ {
+  "key": "Opened the release page.",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:104"
+ },
+ {
+  "key": "Opened {name} on your phone",
+  "where": "mac/Sources/DroidDock/Views/Screens/AppsScreen.swift:151"
+ },
+ {
+  "key": "Opening {name} in a Mac window…",
+  "where": "mac/Sources/DroidDock/Views/Screens/AppsScreen.swift:147"
+ },
+ {
+  "key": "Opening {name}. Edits sync back automatically.",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:398"
+ },
+ {
+  "key": "Opening {name}…",
+  "where": "mac/Sources/DroidDock/Views/Screens/PhotosScreen.swift:152"
+ },
+ {
+  "key": "Opening…",
+  "where": "mac/Sources/DroidDock/Views/Modals/HealthSheet.swift:115"
+ },
+ {
+  "key": "Opens a phone-shaped window over Wi-Fi. No ADB, scrcpy, or Developer Options needed.",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:83"
+ },
+ {
+  "key": "Opens {name}",
+  "where": "mac/Sources/DroidDock/Services/NotificationClickActions.swift:122"
+ },
+ {
+  "key": "Optional. Needed to control your Mac from your phone.",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:216"
+ },
+ {
+  "key": "PIN {pin}",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:217"
+ },
+ {
+  "key": "Pair Wirelessly…",
+  "where": "mac/Sources/DroidDock/Views/Screens/DevicesScreen.swift:62"
+ },
+ {
+  "key": "Pair over Wi-Fi",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:108"
+ },
+ {
+  "key": "Pair over Wi-Fi with a QR code or pairing code",
+  "where": "mac/Sources/DroidDock/Views/Screens/DevicesScreen.swift:64"
+ },
+ {
+  "key": "Pair the DroidDock phone app from the Dashboard to mirror over Wi-Fi.",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:86"
+ },
+ {
+  "key": "Pair the DroidDock phone app from the Dashboard to stream over Wi-Fi.",
+  "where": "mac/Sources/DroidDock/Views/Screens/CameraScreen.swift:69"
+ },
+ {
+  "key": "Pair with QR code",
+  "where": "mac/Sources/DroidDock/Views/Screens/DevicesScreen.swift:122"
+ },
+ {
+  "key": "Pair with an IP address instead",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:169"
+ },
+ {
+  "key": "Pair your phone",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:335"
+ },
+ {
+  "key": "Paired and connected over Wi-Fi: {addr}",
+  "where": "mac/Sources/DroidDock/Views/Modals/WirelessPairSheet.swift:146"
+ },
+ {
+  "key": "Paired over Wi-Fi",
+  "where": "mac/Sources/DroidDock/Views/Modals/WirelessPairSheet.swift:86"
+ },
+ {
+  "key": "Pairing QR code",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:344"
+ },
+ {
+  "key": "Pairing…",
+  "where": "mac/Sources/DroidDock/Views/Modals/WirelessPairSheet.swift:133"
+ },
+ {
+  "key": "Pair…",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:111"
+ },
+ {
+  "key": "Pause",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:706"
+ },
+ {
+  "key": "Pause  Space",
+  "where": "mac/Sources/DroidDock/Views/Media/NowPlayingView.swift:137"
+ },
+ {
+  "key": "Pause Notifications",
+  "where": "mac/Sources/DroidDock/App/DockMenu.swift:30"
+ },
+ {
+  "key": "Pause Notifications for 1 Hour",
+  "where": "mac/Sources/DroidDock/App/DroidDockApp.swift:112"
+ },
+ {
+  "key": "Pause for 1 Hour",
+  "where": "mac/Sources/DroidDock/App/MenuBarPanel.swift:229"
+ },
+ {
+  "key": "Paused",
+  "where": "mac/Sources/DroidDock/App/MenuBarPanel.swift:74"
+ },
+ {
+  "key": "Paused until you resume.",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:156"
+ },
+ {
+  "key": "Paused until {time}",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:158"
+ },
+ {
+  "key": "Pausing mutes notification banners and clipboard sync.",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:88"
+ },
+ {
+  "key": "Per-app levels",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:201"
+ },
+ {
+  "key": "Phone",
+  "where": "mac/Sources/DroidDock/App/DroidDockApp.swift:103"
+ },
+ {
+  "key": "Phone App",
+  "where": "mac/Sources/DroidDock/Views/Screens/DevicesScreen.swift:90"
+ },
+ {
+  "key": "Phone app not linked",
+  "where": "mac/Sources/DroidDock/Views/Screens/DevicesScreen.swift:96"
+ },
+ {
+  "key": "Phone apps appear here after they send a notification.",
+  "where": "mac/Sources/DroidDock/Services/NotificationClickActions.swift:88"
+ },
+ {
+  "key": "Phone camera",
+  "where": "mac/Sources/DroidDock/App/MenuBarPanel.swift:98"
+ },
+ {
+  "key": "Phone forgotten",
+  "where": "mac/Sources/DroidDock/Views/Screens/DevicesScreen.swift:168"
+ },
+ {
+  "key": "Phone media in Control Center",
+  "where": "mac/Sources/DroidDock/Views/Settings/NativeExtrasSettings.swift:21"
+ },
+ {
+  "key": "Phone mounted. Look for it in Finder.",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:516"
+ },
+ {
+  "key": "Phone notifications show up here, and as Mac banners you can reply to.",
+  "where": "mac/Sources/DroidDock/Views/Screens/NotificationsScreen.swift:57"
+ },
+ {
+  "key": "Phone notifications show up here. Turn on Mac banners in Settings.",
+  "where": "mac/Sources/DroidDock/Views/Screens/NotificationsScreen.swift:58"
+ },
+ {
+  "key": "Phone screen",
+  "where": "mac/Sources/DroidDock/Mirror/MirrorStage.swift:45"
+ },
+ {
+  "key": "Phone storage as a volume",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:164"
+ },
+ {
+  "key": "Phone tabs",
+  "where": "mac/Sources/DroidDock/Views/Shell/Destination.swift:84"
+ },
+ {
+  "key": "Phone's own",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:27"
+ },
+ {
+  "key": "Photo",
+  "where": "mac/Sources/DroidDock/Views/Screens/PhotosScreen.swift:231"
+ },
+ {
+  "key": "Photo backup",
+  "where": "mac/Sources/DroidDock/Views/Screens/TransfersScreen.swift:200"
+ },
+ {
+  "key": "Photo sync destination",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:180"
+ },
+ {
+  "key": "Pick a thread, or start a new message with ⌘N.",
+  "where": "mac/Sources/DroidDock/Views/Screens/MessagesScreen.swift:130"
+ },
+ {
+  "key": "Pin to Top",
+  "where": "mac/Sources/DroidDock/Views/Screens/AppsScreen.swift:104"
+ },
+ {
+  "key": "Play",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:706"
+ },
+ {
+  "key": "Play  Space",
+  "where": "mac/Sources/DroidDock/Views/Media/NowPlayingView.swift:137"
+ },
+ {
+  "key": "Play or pause phone media",
+  "where": "mac/Sources/DroidDock/Services/HotKeys.swift:18"
+ },
+ {
+  "key": "Play the phone's audio on this Mac while mirroring. Wi-Fi needs Android 10+; some apps block capture.",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:17"
+ },
+ {
+  "key": "Play the phone's audio through this Mac while mirroring (Android 10+).",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:163"
+ },
+ {
+  "key": "Playing",
+  "where": "mac/Sources/DroidDock/Views/Media/NowPlayingView.swift:94"
+ },
+ {
+  "key": "Plug in your phone with a USB cable and allow USB debugging, or pair it wirelessly below.",
+  "where": "mac/Sources/DroidDock/Views/Screens/DevicesScreen.swift:58"
+ },
+ {
+  "key": "Pop out",
+  "where": "mac/Sources/DroidDock/Mirror/MirrorStage.swift:104"
+ },
+ {
+  "key": "Pop-out window",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:138"
+ },
+ {
+  "key": "Press shortcut…",
+  "where": "mac/Sources/DroidDock/Services/HotKeys.swift:327"
+ },
+ {
+  "key": "Prevents quitting by accident. Hold the keys for a moment.",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:23"
+ },
+ {
+  "key": "Previous  ⌘←",
+  "where": "mac/Sources/DroidDock/Views/Media/NowPlayingView.swift:127"
+ },
+ {
+  "key": "Privacy",
+  "where": "mac/Sources/DroidDock/Views/Settings/NativeExtrasSettings.swift:27"
+ },
+ {
+  "key": "Project on GitHub",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:172"
+ },
+ {
+  "key": "Pull everything already on the phone, not just new items.",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:209"
+ },
+ {
+  "key": "Quick Look",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:306"
+ },
+ {
+  "key": "Quick Share failed",
+  "where": "mac/Sources/DroidDock/Store/AppModel.swift:292"
+ },
+ {
+  "key": "Quick Share to {name}",
+  "where": "mac/Sources/DroidDock/Views/Screens/TransfersScreen.swift:186"
+ },
+ {
+  "key": "Quick Share…",
+  "where": "mac/Sources/DroidDock/Views/Screens/TransfersScreen.swift:56"
+ },
+ {
+  "key": "Quick actions",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:207"
+ },
+ {
+  "key": "Quit",
+  "where": "mac/Sources/DroidDock/Services/HotKeys.swift:74"
+ },
+ {
+  "key": "Quit DroidDock",
+  "where": "mac/Sources/DroidDock/App/MenuBarPanel.swift:232"
+ },
+ {
+  "key": "Read-only. Use the Files screen to upload, rename or delete.",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:152"
+ },
+ {
+  "key": "Reads the active browser tab's title, only on known media sites.",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:83"
+ },
+ {
+  "key": "Reads the active browser tab's title, only on known media sites. Other tabs are ignored.",
+  "where": "mac/Sources/DroidDock/Views/Media/NowPlayingView.swift:229"
+ },
+ {
+  "key": "Ready",
+  "where": "mac/Sources/DroidDock/Views/Devices/DeviceCard.swift:95"
+ },
+ {
+  "key": "Received {n} file",
+  "where": "mac/Sources/DroidDock/Store/AppModel.swift:287"
+ },
+ {
+  "key": "Received {n} files",
+  "where": "mac/Sources/DroidDock/Store/AppModel.swift:287"
+ },
+ {
+  "key": "Receiving…",
+  "where": "mac/Sources/DroidDock/Views/Modals/QuickShareReceivePrompt.swift:20"
+ },
+ {
+  "key": "Recent notifications",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:228"
+ },
+ {
+  "key": "Reconnect automatically",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:69"
+ },
+ {
+  "key": "Reconnect saved phone",
+  "where": "mac/Sources/DroidDock/Views/Screens/DevicesScreen.swift:124"
+ },
+ {
+  "key": "Reconnect saved phone  ⌘R",
+  "where": "mac/Sources/DroidDock/Views/Screens/DevicesScreen.swift:37"
+ },
+ {
+  "key": "Reconnecting to {name}…",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:288"
+ },
+ {
+  "key": "Reconnecting…",
+  "where": "mac/Sources/DroidDock/Views/Screens/DevicesScreen.swift:124"
+ },
+ {
+  "key": "Record",
+  "where": "mac/Sources/DroidDock/Services/HotKeys.swift:328"
+ },
+ {
+  "key": "Reduce transparency",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:162"
+ },
+ {
+  "key": "Refresh  ⌘R",
+  "where": "mac/Sources/DroidDock/Views/Screens/ContactsScreen.swift:56"
+ },
+ {
+  "key": "Refresh app list  ⌘R",
+  "where": "mac/Sources/DroidDock/Views/Screens/AppsScreen.swift:65"
+ },
+ {
+  "key": "Release notes",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:175"
+ },
+ {
+  "key": "Remote & Privacy",
+  "where": "mac/Sources/DroidDock/Views/Settings/SettingsSupport.swift:17"
+ },
+ {
+  "key": "Remote control",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:16"
+ },
+ {
+  "key": "Remove from Recents",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:866"
+ },
+ {
+  "key": "Remove {name}",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:167"
+ },
+ {
+  "key": "Rename…",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:310"
+ },
+ {
+  "key": "Reply  ⏎",
+  "where": "mac/Sources/DroidDock/Views/Screens/NotificationsScreen.swift:196"
+ },
+ {
+  "key": "Reply sent",
+  "where": "mac/Sources/DroidDock/App/MenuBarPanel.swift:204"
+ },
+ {
+  "key": "Reply to {name}…",
+  "where": "mac/Sources/DroidDock/Views/Screens/NotificationsScreen.swift:240"
+ },
+ {
+  "key": "Reply with a message",
+  "where": "mac/Sources/DroidDock/Call/CallOverlayPanel.swift:186"
+ },
+ {
+  "key": "Reports",
+  "where": "mac/Sources/DroidDock/Views/Settings/NativeExtrasSettings.swift:43"
+ },
+ {
+  "key": "Results",
+  "where": "mac/Sources/DroidDock/Views/Screens/AppsScreen.swift:81"
+ },
+ {
+  "key": "Resume Notifications",
+  "where": "mac/Sources/DroidDock/App/DockMenu.swift:30"
+ },
+ {
+  "key": "Retry",
+  "where": "mac/Sources/DroidDock/Views/Screens/MessagesScreen.swift:254"
+ },
+ {
+  "key": "Ring Phone",
+  "where": "mac/Sources/DroidDock/App/DockMenu.swift:28"
+ },
+ {
+  "key": "Ring phone",
+  "where": "mac/Sources/DroidDock/App/MenuBarPanel.swift:96"
+ },
+ {
+  "key": "Ringing your phone. It stops by itself after a minute.",
+  "where": "mac/Sources/DroidDock/Views/Shell/ShellSupport.swift:191"
+ },
+ {
+  "key": "Run Setup Check",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:129"
+ },
+ {
+  "key": "Same scrcpy stream, but it plays in DroidDock instead of a separate scrcpy window, and needs no “Allow screen capture” tap on the phone.",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:105"
+ },
+ {
+  "key": "Save",
+  "where": "mac/Sources/DroidDock/Views/Screens/PhotosScreen.swift:43"
+ },
+ {
+  "key": "Save received files to your Downloads folder.",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:213"
+ },
+ {
+  "key": "Save the selected items to Downloads",
+  "where": "mac/Sources/DroidDock/Views/Screens/PhotosScreen.swift:45"
+ },
+ {
+  "key": "Save {n}",
+  "where": "mac/Sources/DroidDock/Views/Screens/PhotosScreen.swift:43"
+ },
+ {
+  "key": "Save {n} Items to Downloads",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:313"
+ },
+ {
+  "key": "Saved on this Mac only, in ~/Library/Logs/DroidDock. Nothing is ever sent anywhere.",
+  "where": "mac/Sources/DroidDock/Views/Settings/NativeExtrasSettings.swift:42"
+ },
+ {
+  "key": "Saved {name}",
+  "where": "mac/Sources/DroidDock/Mirror/MirrorSession.swift:135"
+ },
+ {
+  "key": "Saved {n} file to Downloads",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:426"
+ },
+ {
+  "key": "Saved {n} files to Downloads",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:426"
+ },
+ {
+  "key": "Saved {n} item to Downloads",
+  "where": "mac/Sources/DroidDock/Views/Screens/PhotosScreen.swift:167"
+ },
+ {
+  "key": "Saved {n} items to Downloads",
+  "where": "mac/Sources/DroidDock/Views/Screens/PhotosScreen.swift:167"
+ },
+ {
+  "key": "Saving from any Mac app writes straight to the phone. Takes effect the next time you mount.",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:151"
+ },
+ {
+  "key": "Saving…",
+  "where": "mac/Sources/DroidDock/Views/Devices/DeviceCard.swift:180"
+ },
+ {
+  "key": "Scan the code beside this window.",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:150"
+ },
+ {
+  "key": "Scan with the DroidDock app",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:47"
+ },
+ {
+  "key": "Screen",
+  "where": "mac/Sources/DroidDock/Views/Shell/PhoneTabsShell.swift:18"
+ },
+ {
+  "key": "Screen mirroring engine. Optional: Wi-Fi mirroring works without it.",
+  "where": "mac/Sources/DroidDock/Views/Devices/ToolsCard.swift:27"
+ },
+ {
+  "key": "Screenshot",
+  "where": "mac/Sources/DroidDock/Views/Devices/DeviceCard.swift:180"
+ },
+ {
+  "key": "Screenshot saved",
+  "where": "mac/Sources/DroidDock/Services/HotKeys.swift:257"
+ },
+ {
+  "key": "Search apps",
+  "where": "mac/Sources/DroidDock/Views/Screens/AppsScreen.swift:52"
+ },
+ {
+  "key": "Search messages",
+  "where": "mac/Sources/DroidDock/Views/Screens/MessagesScreen.swift:34"
+ },
+ {
+  "key": "Search notifications",
+  "where": "mac/Sources/DroidDock/Views/Screens/NotificationsScreen.swift:69"
+ },
+ {
+  "key": "Section",
+  "where": "mac/Sources/DroidDock/Views/Shell/TabHosts.swift:12"
+ },
+ {
+  "key": "Select",
+  "where": "mac/Sources/DroidDock/Views/Screens/PhotosScreen.swift:147"
+ },
+ {
+  "key": "Select a conversation",
+  "where": "mac/Sources/DroidDock/Views/Screens/MessagesScreen.swift:129"
+ },
+ {
+  "key": "Send",
+  "where": "mac/Sources/DroidDock/App/MenuBarPanel.swift:192"
+ },
+ {
+  "key": "Send  ⏎",
+  "where": "mac/Sources/DroidDock/Views/Screens/MessagesScreen.swift:213"
+ },
+ {
+  "key": "Send Again",
+  "where": "mac/Sources/DroidDock/Views/Screens/TransfersScreen.swift:191"
+ },
+ {
+  "key": "Send File…",
+  "where": "mac/Sources/DroidDock/App/DockMenu.swift:24"
+ },
+ {
+  "key": "Send Mac Clipboard",
+  "where": "mac/Sources/DroidDock/App/DroidDockApp.swift:105"
+ },
+ {
+  "key": "Send Mac clipboard to phone",
+  "where": "mac/Sources/DroidDock/Services/HotKeys.swift:14"
+ },
+ {
+  "key": "Send Mac clipboard to phone  ⌘⇧V",
+  "where": "mac/Sources/DroidDock/Views/Screens/ClipboardScreen.swift:34"
+ },
+ {
+  "key": "Send a file",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:295"
+ },
+ {
+  "key": "Send clipboard",
+  "where": "mac/Sources/DroidDock/App/MenuBarPanel.swift:94"
+ },
+ {
+  "key": "Send file",
+  "where": "mac/Sources/DroidDock/App/MenuBarPanel.swift:95"
+ },
+ {
+  "key": "Send files from this Mac to a nearby Android device",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:61"
+ },
+ {
+  "key": "Send files to a nearby device with Quick Share",
+  "where": "mac/Sources/DroidDock/Views/Screens/TransfersScreen.swift:57"
+ },
+ {
+  "key": "Send files to this folder  ⌘U",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:337"
+ },
+ {
+  "key": "Send to Phone",
+  "where": "mac/Sources/DroidDock/Views/Screens/ClipboardScreen.swift:32"
+ },
+ {
+  "key": "Send to Phone…",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:95"
+ },
+ {
+  "key": "Send to {number}",
+  "where": "mac/Sources/DroidDock/Views/Screens/MessagesScreen.swift:325"
+ },
+ {
+  "key": "Send with Quick Share…",
+  "where": "mac/Sources/DroidDock/Views/Screens/TransfersScreen.swift:69"
+ },
+ {
+  "key": "Sending to {name}",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:228"
+ },
+ {
+  "key": "Sending…",
+  "where": "mac/Sources/DroidDock/Views/Screens/MessagesScreen.swift:247"
+ },
+ {
+  "key": "Sends keys as a virtual USB keyboard. Fixes non-Latin layouts and games. scrcpy 2.4 or newer.",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:58"
+ },
+ {
+  "key": "Sent",
+  "where": "mac/Sources/DroidDock/Views/Screens/ClipboardScreen.swift:86"
+ },
+ {
+  "key": "Sent to your phone",
+  "where": "mac/Sources/DroidDock/Views/Screens/ClipboardScreen.swift:147"
+ },
+ {
+  "key": "Sent to {name}",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:231"
+ },
+ {
+  "key": "Sent with Quick Share",
+  "where": "mac/Sources/DroidDock/Store/AppModel.swift:304"
+ },
+ {
+  "key": "Sent {name} to Downloads",
+  "where": "mac/Sources/DroidDock/Views/Shell/ShellSupport.swift:175"
+ },
+ {
+  "key": "Sent {n} file to Downloads",
+  "where": "mac/Sources/DroidDock/Views/Shell/ShellSupport.swift:176"
+ },
+ {
+  "key": "Sent {n} files to Downloads",
+  "where": "mac/Sources/DroidDock/Views/Shell/ShellSupport.swift:176"
+ },
+ {
+  "key": "Settings",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:296"
+ },
+ {
+  "key": "Settings…",
+  "where": "mac/Sources/DroidDock/App/MenuBarPanel.swift:231"
+ },
+ {
+  "key": "Share from this Mac",
+  "where": "mac/Sources/DroidDock/Views/Media/NowPlayingView.swift:220"
+ },
+ {
+  "key": "Share what you copy both ways. Off stops all clipboard traffic.",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:73"
+ },
+ {
+  "key": "Share with Quick Share…",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:144"
+ },
+ {
+  "key": "Share with the phone",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:77"
+ },
+ {
+  "key": "Shortcut {keys} is taken by another app",
+  "where": "mac/Sources/DroidDock/Services/HotKeys.swift:217"
+ },
+ {
+  "key": "Shortcuts",
+  "where": "mac/Sources/DroidDock/Views/Settings/SettingsSupport.swift:18"
+ },
+ {
+  "key": "Show Downloads in Finder",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:147"
+ },
+ {
+  "key": "Show Pairing Code",
+  "where": "mac/Sources/DroidDock/App/MenuBarPanel.swift:218"
+ },
+ {
+  "key": "Show all",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:265"
+ },
+ {
+  "key": "Show all ({n})",
+  "where": "mac/Sources/DroidDock/App/MenuBarPanel.swift:176"
+ },
+ {
+  "key": "Show as One List",
+  "where": "mac/Sources/DroidDock/Views/Screens/NotificationsScreen.swift:260"
+ },
+ {
+  "key": "Show here",
+  "where": "mac/Sources/DroidDock/Views/Screens/CameraScreen.swift:41"
+ },
+ {
+  "key": "Show in the main window",
+  "where": "mac/Sources/DroidDock/Mirror/MirrorStage.swift:104"
+ },
+ {
+  "key": "Show less",
+  "where": "mac/Sources/DroidDock/Views/Screens/NotificationsScreen.swift:111"
+ },
+ {
+  "key": "Show or hide DroidDock",
+  "where": "mac/Sources/DroidDock/Services/HotKeys.swift:13"
+ },
+ {
+  "key": "Show the mirror in",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:136"
+ },
+ {
+  "key": "Show the pairing code for your phone",
+  "where": "mac/Sources/DroidDock/Services/PairingLock.swift:59"
+ },
+ {
+  "key": "Show your phone's notifications as Mac banners.",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:205"
+ },
+ {
+  "key": "Show your phone's notifications on the Mac.",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:189"
+ },
+ {
+  "key": "Show {n} more",
+  "where": "mac/Sources/DroidDock/Views/Screens/NotificationsScreen.swift:111"
+ },
+ {
+  "key": "Showing what was here when the phone left.",
+  "where": "mac/Sources/DroidDock/Views/Inbox/InboxSupport.swift:156"
+ },
+ {
+  "key": "Shows the current track on the phone's home screen. Works for Music, Spotify and media websites.",
+  "where": "mac/Sources/DroidDock/Views/Media/NowPlayingView.swift:224"
+ },
+ {
+  "key": "Shows the current track on the phone. Play, pause and skip already work for every app.",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:80"
+ },
+ {
+  "key": "Shows what the phone is playing in Control Center and lets your Mac's media keys control it.",
+  "where": "mac/Sources/DroidDock/Views/Settings/NativeExtrasSettings.swift:20"
+ },
+ {
+  "key": "Silent",
+  "where": "mac/Sources/DroidDock/Views/Inbox/InboxSupport.swift:76"
+ },
+ {
+  "key": "Size",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:163"
+ },
+ {
+  "key": "Solid panels instead of translucent ones. Also follows the macOS accessibility setting.",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:162"
+ },
+ {
+  "key": "Something went wrong. Try again.",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:237"
+ },
+ {
+  "key": "Start DroidDock in the menu bar when you log in.",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:17"
+ },
+ {
+  "key": "Start Using DroidDock",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:292"
+ },
+ {
+  "key": "Start camera",
+  "where": "mac/Sources/DroidDock/Views/Screens/CameraScreen.swift:70"
+ },
+ {
+  "key": "Start desktop",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:120"
+ },
+ {
+  "key": "Start mirroring",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:87"
+ },
+ {
+  "key": "Start or stop screen mirror",
+  "where": "mac/Sources/DroidDock/Services/HotKeys.swift:15"
+ },
+ {
+  "key": "Starting…",
+  "where": "mac/Sources/DroidDock/Views/Devices/DeviceCard.swift:171"
+ },
+ {
+  "key": "Stay on the Wireless debugging screen until it connects.",
+  "where": "mac/Sources/DroidDock/Views/Modals/WirelessPairSheet.swift:57"
+ },
+ {
+  "key": "Step {n} of {m}",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:74"
+ },
+ {
+  "key": "Stop Mirror",
+  "where": "mac/Sources/DroidDock/App/DockMenu.swift:25"
+ },
+ {
+  "key": "Stop mirror",
+  "where": "mac/Sources/DroidDock/App/MenuBarPanel.swift:99"
+ },
+ {
+  "key": "Stop reconnecting wirelessly",
+  "where": "mac/Sources/DroidDock/Views/Screens/DevicesScreen.swift:128"
+ },
+ {
+  "key": "Stream via ADB",
+  "where": "mac/Sources/DroidDock/Views/Screens/CameraScreen.swift:83"
+ },
+ {
+  "key": "Streams the phone's back camera over Wi-Fi. Flip to the front camera once it's running.",
+  "where": "mac/Sources/DroidDock/Views/Screens/CameraScreen.swift:66"
+ },
+ {
+  "key": "Switch this phone to Wi-Fi ADB so you can unplug it",
+  "where": "mac/Sources/DroidDock/Views/Devices/DeviceCard.swift:193"
+ },
+ {
+  "key": "Switches immediately. Phone tabs keeps the phone beside five tabs; Classic is a plain sidebar of every screen.",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:137"
+ },
+ {
+  "key": "Switching…",
+  "where": "mac/Sources/DroidDock/Views/Devices/DeviceCard.swift:191"
+ },
+ {
+  "key": "Syncing your edits back to the phone…",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:222"
+ },
+ {
+  "key": "Syncing {done} of {total}",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:207"
+ },
+ {
+  "key": "System follows your Mac's language. Anything not translated shows in English.",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:57"
+ },
+ {
+  "key": "Tablet",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:199"
+ },
+ {
+  "key": "Take Screenshot",
+  "where": "mac/Sources/DroidDock/App/DroidDockApp.swift:109"
+ },
+ {
+  "key": "Take phone screenshot",
+  "where": "mac/Sources/DroidDock/Services/HotKeys.swift:17"
+ },
+ {
+  "key": "Tap Accept on the other device.",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:221"
+ },
+ {
+  "key": "Tap Pair with Mac.",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:149"
+ },
+ {
+  "key": "Tap “Pair device with QR code” and scan this code.",
+  "where": "mac/Sources/DroidDock/Views/Modals/WirelessPairSheet.swift:56"
+ },
+ {
+  "key": "Technical",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:166"
+ },
+ {
+  "key": "Text messages from your phone appear here.",
+  "where": "mac/Sources/DroidDock/Views/Screens/MessagesScreen.swift:75"
+ },
+ {
+  "key": "That Mac app is no longer installed",
+  "where": "mac/Sources/DroidDock/Services/NotificationClickActions.swift:41"
+ },
+ {
+  "key": "That didn't take. Right-click DroidDock in the Dock › Options › Assign To › None.",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:45"
+ },
+ {
+  "key": "The Dock's Assign To setting puts its windows on whichever desktop you switch to.",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:56"
+ },
+ {
+  "key": "The phone didn't answer. Check that it's nearby and try again.",
+  "where": "mac/Sources/DroidDock/Views/Inbox/ContactsStore.swift:32"
+ },
+ {
+  "key": "The phone isn't responding. Unplug and reconnect it, or tap Reconnect.",
+  "where": "mac/Sources/DroidDock/Views/Devices/DeviceCard.swift:108"
+ },
+ {
+  "key": "The phone still responds; it just isn't showing anything.",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:61"
+ },
+ {
+  "key": "The stream ended unexpectedly.",
+  "where": "mac/Sources/DroidDock/Mirror/MirrorSession.swift:190"
+ },
+ {
+  "key": "The transfer failed.",
+  "where": "mac/Sources/DroidDock/Views/Screens/TransfersScreen.swift:149"
+ },
+ {
+  "key": "Them",
+  "where": "mac/Sources/DroidDock/Views/Screens/MessagesScreen.swift:292"
+ },
+ {
+  "key": "These are Android developer settings on your phone; they stay if you uninstall DroidDock. Revert restores what was there before.",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:78"
+ },
+ {
+  "key": "These switch on live as you grant them. You can change any of them later in System Settings.",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:202"
+ },
+ {
+  "key": "This Mac's status",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:78"
+ },
+ {
+  "key": "This can't be undone.",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:64"
+ },
+ {
+  "key": "This folder is empty",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:93"
+ },
+ {
+  "key": "This is a system shortcut ({name}).",
+  "where": "mac/Sources/DroidDock/Services/HotKeys.swift:368"
+ },
+ {
+  "key": "This screen is being rebuilt in native SwiftUI.",
+  "where": "mac/Sources/DroidDock/Views/Screens/ScreenView.swift:35"
+ },
+ {
+  "key": "This window",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:139"
+ },
+ {
+  "key": "Thumbnail",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:47"
+ },
+ {
+  "key": "To Mac",
+  "where": "mac/Sources/DroidDock/Views/Screens/TransfersScreen.swift:16"
+ },
+ {
+  "key": "To Phone",
+  "where": "mac/Sources/DroidDock/Views/Screens/TransfersScreen.swift:15"
+ },
+ {
+  "key": "To:",
+  "where": "mac/Sources/DroidDock/Views/Screens/MessagesScreen.swift:314"
+ },
+ {
+  "key": "Today",
+  "where": "mac/Sources/DroidDock/Views/Inbox/InboxSupport.swift:26"
+ },
+ {
+  "key": "Transfers in flight",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:264"
+ },
+ {
+  "key": "Tries the last wireless address again",
+  "where": "mac/Sources/DroidDock/Views/Screens/DevicesScreen.swift:125"
+ },
+ {
+  "key": "Try Again",
+  "where": "mac/Sources/DroidDock/DesignSystem/Components.swift:317"
+ },
+ {
+  "key": "Turn on photo sync in Settings to back up automatically",
+  "where": "mac/Sources/DroidDock/Views/Screens/PhotosScreen.swift:48"
+ },
+ {
+  "key": "UHID keyboard",
+  "where": "mac/Sources/DroidDock/Views/Devices/ToolsCard.swift:72"
+ },
+ {
+  "key": "URL",
+  "where": "mac/Sources/DroidDock/Services/NotificationClickActions.swift:96"
+ },
+ {
+  "key": "USB",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:25"
+ },
+ {
+  "key": "Unauthorized",
+  "where": "mac/Sources/DroidDock/Views/Devices/DeviceCard.swift:96"
+ },
+ {
+  "key": "Unknown caller",
+  "where": "mac/Sources/DroidDock/App/MenuBarPanel.swift:106"
+ },
+ {
+  "key": "Unknown track",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:650"
+ },
+ {
+  "key": "Unlock to show",
+  "where": "mac/Sources/DroidDock/Services/PairingLock.swift:45"
+ },
+ {
+  "key": "Unmute",
+  "where": "mac/Sources/DroidDock/Call/CallOverlayPanel.swift:198"
+ },
+ {
+  "key": "Unmute phone audio",
+  "where": "mac/Sources/DroidDock/Mirror/MirrorStage.swift:100"
+ },
+ {
+  "key": "Unpin",
+  "where": "mac/Sources/DroidDock/Views/Screens/AppsScreen.swift:102"
+ },
+ {
+  "key": "Until granted, macOS silently discards every synthesised click and key.",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:27"
+ },
+ {
+  "key": "Until resumed",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:96"
+ },
+ {
+  "key": "Update",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:46"
+ },
+ {
+  "key": "Update to {v}",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:91"
+ },
+ {
+  "key": "Use Number",
+  "where": "mac/Sources/DroidDock/Views/Screens/CallsScreen.swift:122"
+ },
+ {
+  "key": "Use suggested shortcut",
+  "where": "mac/Sources/DroidDock/Services/HotKeys.swift:315"
+ },
+ {
+  "key": "Use the port from the pairing dialog. It differs from the main port on the Wireless debugging screen.",
+  "where": "mac/Sources/DroidDock/Views/Modals/WirelessPairSheet.swift:128"
+ },
+ {
+  "key": "Version {v}",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:91"
+ },
+ {
+  "key": "Video",
+  "where": "mac/Sources/DroidDock/Views/Screens/PhotosScreen.swift:231"
+ },
+ {
+  "key": "View",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:126"
+ },
+ {
+  "key": "View as list or grid",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:131"
+ },
+ {
+  "key": "Virtual display",
+  "where": "mac/Sources/DroidDock/Views/Devices/ToolsCard.swift:71"
+ },
+ {
+  "key": "Virtual displays need scrcpy 3.0 or newer. Run `brew upgrade scrcpy`, then reopen DroidDock.",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:201"
+ },
+ {
+  "key": "Waiting",
+  "where": "mac/Sources/DroidDock/DesignSystem/Rows.swift:348"
+ },
+ {
+  "key": "Waiting for a phone",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:53"
+ },
+ {
+  "key": "Waiting for phone",
+  "where": "mac/Sources/DroidDock/Views/Shell/ClassicShell.swift:48"
+ },
+ {
+  "key": "Waiting for you",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:92"
+ },
+ {
+  "key": "Waiting for your phone…",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:184"
+ },
+ {
+  "key": "Waiting for {name} to accept",
+  "where": "mac/Sources/DroidDock/Views/Screens/TransfersScreen.swift:179"
+ },
+ {
+  "key": "Waiting for {name} to accept…",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:221"
+ },
+ {
+  "key": "Waiting to sync",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:223"
+ },
+ {
+  "key": "Weak connection",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:56"
+ },
+ {
+  "key": "Welcome to DroidDock…",
+  "where": "mac/Sources/DroidDock/App/DroidDockApp.swift:94"
+ },
+ {
+  "key": "What the menu bar shows beside the icon while a phone is linked.",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:27"
+ },
+ {
+  "key": "What's playing",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:80"
+ },
+ {
+  "key": "Where it appears",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:135"
+ },
+ {
+  "key": "Which layout Android serves on the virtual display. Takes effect the next time you start desktop mode or open an app on this Mac.",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:175"
+ },
+ {
+  "key": "Wi-Fi",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:24"
+ },
+ {
+  "key": "Wi-Fi + USB",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:26"
+ },
+ {
+  "key": "Wi-Fi needs no ADB. ADB and Desktop need scrcpy.",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:12"
+ },
+ {
+  "key": "Will retry sync — {error}",
+  "where": "mac/Sources/DroidDock/Store/AppModel.swift:268"
+ },
+ {
+  "key": "Wireless",
+  "where": "mac/Sources/DroidDock/Views/Screens/DevicesScreen.swift:115"
+ },
+ {
+  "key": "Wireless ADB",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:107"
+ },
+ {
+  "key": "Wireless ADB on at {addr}",
+  "where": "mac/Sources/DroidDock/Views/Devices/DeviceCard.swift:189"
+ },
+ {
+  "key": "Wireless pairing removed",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:131"
+ },
+ {
+  "key": "Work from any app. Nothing is set until you record a shortcut. Esc cancels, ⌫ clears.",
+  "where": "mac/Sources/DroidDock/Views/Settings/NativeExtrasSettings.swift:13"
+ },
+ {
+  "key": "Yesterday",
+  "where": "mac/Sources/DroidDock/Views/Inbox/InboxSupport.swift:17"
+ },
+ {
+  "key": "You",
+  "where": "mac/Sources/DroidDock/Views/Screens/MessagesScreen.swift:292"
+ },
+ {
+  "key": "You have {v}.",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:42"
+ },
+ {
+  "key": "You're all set",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:290"
+ },
+ {
+  "key": "You're on the latest release.",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:103"
+ },
+ {
+  "key": "Your Android phone, on your Mac.",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:160"
+ },
+ {
+  "key": "Your Android phone, right on your Mac. Notifications, messages, files, and your screen, over your own Wi-Fi.",
+  "where": "mac/Sources/DroidDock/Views/Onboarding/OnboardingView.swift:137"
+ },
+ {
+  "key": "and {n} more",
+  "where": "mac/Sources/DroidDock/Views/Modals/QuickShareReceivePrompt.swift:44"
+ },
+ {
+  "key": "brew install scrcpy",
+  "where": "mac/Sources/DroidDock/Views/Devices/ToolsCard.swift:62"
+ },
+ {
+  "key": "calls",
+  "where": "mac/Sources/DroidDock/Views/Screens/CallsScreen.swift:21"
+ },
+ {
+  "key": "charging",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:262"
+ },
+ {
+  "key": "clipboard sync",
+  "where": "mac/Sources/DroidDock/Views/Screens/ClipboardScreen.swift:17"
+ },
+ {
+  "key": "contacts",
+  "where": "mac/Sources/DroidDock/Views/Screens/ContactsScreen.swift:32"
+ },
+ {
+  "key": "macOS lets DroidDock click and type for the phone.",
+  "where": "mac/Sources/DroidDock/Views/Settings/PrivacyShortcutsAboutPanes.swift:26"
+ },
+ {
+  "key": "media",
+  "where": "mac/Sources/DroidDock/Views/Screens/MediaScreen.swift:12"
+ },
+ {
+  "key": "messages",
+  "where": "mac/Sources/DroidDock/Views/Screens/MessagesScreen.swift:23"
+ },
+ {
+  "key": "needs Android 15 or newer",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:85"
+ },
+ {
+  "key": "notifications",
+  "where": "mac/Sources/DroidDock/Views/Screens/NotificationsScreen.swift:60"
+ },
+ {
+  "key": "now",
+  "where": "mac/Sources/DroidDock/Views/Inbox/InboxSupport.swift:13"
+ },
+ {
+  "key": "of",
+  "where": "mac/Sources/DroidDock/Views/Screens/DashboardScreen.swift:282"
+ },
+ {
+  "key": "phone",
+  "where": "mac/Sources/DroidDock/Views/Settings/ConnectionNotificationsPanes.swift:53"
+ },
+ {
+  "key": "scrcpy",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:57"
+ },
+ {
+  "key": "scrcpy 4.0 or newer.",
+  "where": "mac/Sources/DroidDock/Views/Settings/MirroringFilesPanes.swift:49"
+ },
+ {
+  "key": "scrcpy installed",
+  "where": "mac/Sources/DroidDock/Views/Devices/ToolsCard.swift:93"
+ },
+ {
+  "key": "scrcpy installs through Homebrew",
+  "where": "mac/Sources/DroidDock/Views/Devices/ToolsCard.swift:65"
+ },
+ {
+  "key": "scrcpy {v} can't create virtual displays; this applies from 3.0 onward.",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:174"
+ },
+ {
+  "key": "scrcpy {v} is too old",
+  "where": "mac/Sources/DroidDock/Views/Screens/MirrorScreen.swift:196"
+ },
+ {
+  "key": "the app switcher",
+  "where": "mac/Sources/DroidDock/Services/HotKeys.swift:73"
+ },
+ {
+  "key": "the other device",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:205"
+ },
+ {
+  "key": "untitled folder",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:464"
+ },
+ {
+  "key": "your apps",
+  "where": "mac/Sources/DroidDock/Views/Screens/AppsScreen.swift:39"
+ },
+ {
+  "key": "your phone's files",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:43"
+ },
+ {
+  "key": "your photos",
+  "where": "mac/Sources/DroidDock/Views/Screens/PhotosScreen.swift:22"
+ },
+ {
+  "key": "{name} declined",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:234"
+ },
+ {
+  "key": "{name} is offline",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:309"
+ },
+ {
+  "key": "{name} saved to Downloads",
+  "where": "mac/Sources/DroidDock/Store/AppModel.swift:262"
+ },
+ {
+  "key": "{n} character",
+  "where": "mac/Sources/DroidDock/Views/Screens/ClipboardScreen.swift:125"
+ },
+ {
+  "key": "{n} characters",
+  "where": "mac/Sources/DroidDock/Views/Screens/ClipboardScreen.swift:125"
+ },
+ {
+  "key": "{n} check passed across both devices.",
+  "where": "mac/Sources/DroidDock/Views/Modals/HealthSheet.swift:43"
+ },
+ {
+  "key": "{n} checks passed across both devices.",
+  "where": "mac/Sources/DroidDock/Views/Modals/HealthSheet.swift:43"
+ },
+ {
+  "key": "{n} file",
+  "where": "mac/Sources/DroidDock/Views/Screens/ClipboardScreen.swift:127"
+ },
+ {
+  "key": "{n} file delivered",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:231"
+ },
+ {
+  "key": "{n} files",
+  "where": "mac/Sources/DroidDock/Views/Screens/ClipboardScreen.swift:127"
+ },
+ {
+  "key": "{n} files delivered",
+  "where": "mac/Sources/DroidDock/Views/QuickShare/QuickShareSendSheet.swift:231"
+ },
+ {
+  "key": "{n} fine",
+  "where": "mac/Sources/DroidDock/Views/Modals/HealthSheet.swift:57"
+ },
+ {
+  "key": "{n} item",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:124"
+ },
+ {
+  "key": "{n} items",
+  "where": "mac/Sources/DroidDock/Views/Screens/FilesScreen.swift:124"
+ },
+ {
+  "key": "{n} report",
+  "where": "mac/Sources/DroidDock/Views/Settings/NativeExtrasSettings.swift:43"
+ },
+ {
+  "key": "{n} reports",
+  "where": "mac/Sources/DroidDock/Views/Settings/NativeExtrasSettings.swift:43"
+ },
+ {
+  "key": "{n} thing needs attention",
+  "where": "mac/Sources/DroidDock/Views/Modals/HealthSheet.swift:51"
+ },
+ {
+  "key": "{n} things need attention",
+  "where": "mac/Sources/DroidDock/Views/Modals/HealthSheet.swift:51"
+ },
+ {
+  "key": "{n}% — charging",
+  "where": "mac/Sources/DroidDock/DesignSystem/PhoneCardKit.swift:260"
+ },
+ {
+  "key": "{peer} wants to send you {n} file",
+  "where": "mac/Sources/DroidDock/Views/Modals/QuickShareReceivePrompt.swift:18"
+ },
+ {
+  "key": "{peer} wants to send you {n} files",
+  "where": "mac/Sources/DroidDock/Views/Modals/QuickShareReceivePrompt.swift:18"
+ },
+ {
+  "key": "{size} total",
+  "where": "mac/Sources/DroidDock/Views/Modals/QuickShareReceivePrompt.swift:47"
+ },
+ {
+  "key": "⌘Q closes the windows but DroidDock stays in the menu bar. Quit from its menu.",
+  "where": "mac/Sources/DroidDock/Views/Settings/GeneralAppearancePanes.swift:24"
+ }
+]

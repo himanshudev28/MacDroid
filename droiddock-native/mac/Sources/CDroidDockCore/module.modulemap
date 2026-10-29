@@ -1,0 +1,4 @@
+module CDroidDockCore {
+    header "shim.h"
+    export *
+}

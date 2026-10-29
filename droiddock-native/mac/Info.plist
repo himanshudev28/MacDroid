@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>com.droiddock.mac</string>
+  <key>CFBundleName</key><string>DroidDock</string>
+  <key>CFBundleDisplayName</key><string>DroidDock</string>
+  <key>CFBundleExecutable</key><string>DroidDock</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleShortVersionString</key><string>__VERSION__</string>
+  <key>CFBundleVersion</key><string>__VERSION__</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleLocalizations</key>
+  <array>
+    <string>en</string><string>ar</string><string>bn</string><string>de</string><string>es</string>
+    <string>fr</string><string>hi</string><string>id</string><string>it</string><string>ja</string>
+    <string>ko</string><string>pt</string><string>ru</string><string>tr</string><string>vi</string>
+    <string>zh-Hans</string><string>zh-Hant</string>
+  </array>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
+  <key>LSUIElement</key><false/>
+  <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key><string>com.droiddock.mac</string>
+      <key>CFBundleURLSchemes</key><array><string>droiddock</string></array>
+    </dict>
+  </array>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>DroidDock finds and talks to your phone on your local network.</string>
+  <key>NSBonjourServices</key>
+  <array><string>_droiddock._tcp</string><string>_FC9F5ED42C8A._tcp</string></array>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>DroidDock asks other apps (for example your music player) what is playing so it can show it on your phone.</string>
+  <key>NSDesktopFolderUsageDescription</key>
+  <string>DroidDock reads this folder so your paired phone can browse and download from the folders you shared in Settings › Mac files.</string>
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>DroidDock reads this folder so your paired phone can browse and download from the folders you shared in Settings › Mac files.</string>
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>DroidDock reads this folder so your paired phone can browse and download from the folders you shared in Settings › Mac files, and saves files your phone sends here.</string>
+  <key>NSRemovableVolumesUsageDescription</key>
+  <string>DroidDock reads external drives only if you add one to the shared folder list in Settings › Mac files.</string>
+  <key>NSNetworkVolumesUsageDescription</key>
+  <string>DroidDock reads network volumes only if you add one to the shared folder list in Settings › Mac files.</string>
+  <key>NSBluetoothAlwaysUsageDescription</key>
+  <string>DroidDock uses Bluetooth to stay connected to your phone when Wi-Fi isn't available.</string>
+</dict>
+</plist>

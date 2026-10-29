@@ -1,0 +1,15 @@
+/* English: the keys are the English text, so this file is intentionally empty. */
+"Keep in Notification Center" = "Keep in Notification Center";
+"When DroidDock shows its own banner, also keep the notification in macOS Notification Center." = "When DroidDock shows its own banner, also keep the notification in macOS Notification Center.";
+"Clear History" = "Clear History";
+"Drop files here, or click to choose" = "Drop files here, or click to choose";
+"Release to send" = "Release to send";
+"Remove finished, failed and cancelled transfers from this list. Files stay where they are." = "Remove finished, failed and cancelled transfers from this list. Files stay where they are.";
+"Send to a nearby Android device" = "Send to a nearby Android device";
+"A separate phone screen with its own home screen and apps, in a Mac window. Your phone's own screen is never shown or touched, and apps opened there close with the window." = "A separate phone screen with its own home screen and apps, in a Mac window. Your phone's own screen is never shown or touched, and apps opened there close with the window.";
+"Banner duration" = "Banner duration";
+"No apps open" = "No apps open";
+"Open second screen" = "Open second screen";
+"Recent apps" = "Recent apps";
+"Second screen" = "Second screen";
+"Missed call" = "Missed call";
