@@ -72,12 +72,13 @@ class BridgeService : Service() {
         }
 
         scope.launch {
-            combine(ConnectionManager.connected, ConnectionManager.pausedUntil) { linked, until ->
-                linked to until
-            }.collect { (linked, until) ->
+            combine(
+                ConnectionManager.connected, ConnectionManager.pausedUntil, ConnectionManager.transport,
+            ) { linked, until, tr -> Triple(linked, until, tr) }.collect { (linked, until, tr) ->
                 val mac = ConnectionManager.macName.value ?: "Mac"
                 val text = when {
                     until != 0L -> "Paused"
+                    linked && tr == com.droiddock.app.link.Transport.BLE -> "Linked to $mac · Bluetooth"
                     linked -> "Linked to $mac"
                     else -> "Waiting for Mac…"
                 }
