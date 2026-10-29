@@ -11,7 +11,7 @@
          so the Mac can type into it). Consent text has to match what the
          service actually asks for. -->
     <string name="a11y_label">DroidDock — Clipboard &amp; Screen Control</string>
-    <string name="a11y_desc">Powers three things for your paired Mac: sending text you copy on this phone, letting the Mac tap, swipe and type on this screen while mirroring, and the Mac\'s Lock button. To type from the Mac it reads the text field you have focused. Everything else — mirroring, file transfer, notifications, photos, calls — keeps working with this off.</string>
+    <string name="a11y_desc">Powers four things for your paired Mac: sending text you copy on this phone, letting the Mac tap, swipe and type on this screen while mirroring, the Mac\'s Lock button, and screenshots you ask the Mac for. To type from the Mac it reads the text field you have focused. Everything else — mirroring, file transfer, notifications, photos, calls — keeps working with this off.</string>
     <string name="admin_label">DroidDock screen lock</string>
     <string name="admin_desc">Lets your Mac lock this phone\'s screen without accessibility access being on. Screen lock is the only admin power DroidDock requests.</string>
     <string name="conn_tile_label">DroidDock</string>
@@ -56,4 +56,19 @@
     <string name="widget_action_clip">Clipboard</string>
     <string name="widget_action_mirror">Mirror</string>
     <string name="widget_action_stop">Stop</string>
+
+    <!-- Bluetooth fallback (optional; off by default). Mirrors the English keys in i18n-extra/*.json. -->
+    <string name="ble_title">Bluetooth fallback</string>
+    <string name="ble_summary">Uses Bluetooth only when Wi-Fi to your Mac is unavailable, and switches back automatically.</string>
+    <string name="ble_auto_return">Switch back automatically</string>
+    <string name="ble_use_wifi">Use Wi-Fi now</string>
+    <string name="ble_use_ble">Use Bluetooth now</string>
+    <string name="ble_wifi_available">Wi-Fi available, switch now</string>
+    <string name="ble_perm_title">Allow Nearby devices?</string>
+    <string name="ble_perm_denied">Nearby devices permission was denied, so Bluetooth fallback stays off. Allow it in the app\'s settings to use it.</string>
+    <string name="ble_needs_wifi">Needs Wi-Fi</string>
+    <string name="ble_needs_wifi_body">Your Mac is connected over Bluetooth. This comes back when Wi-Fi does.</string>
+    <string name="ble_connected">Connected · Bluetooth</string>
+    <string name="ble_setup_title">Finish setting up Bluetooth fallback</string>
+    <string name="ble_too_large">Too large for Bluetooth</string>
 </resources>

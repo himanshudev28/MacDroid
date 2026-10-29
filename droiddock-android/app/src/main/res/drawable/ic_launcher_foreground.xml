@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive icon foreground: Mac display + Android phone overlapping (glass panes, bright shared area), Dock 'running' dot. Inside the 66 dp safe zone.
+     Generated from docs/logo-concepts/render.swift (concept 2 · Overlap). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#52FFFFFF"
+        android:pathData="M55.23 65.73L56.59 65.73C57.33 65.73 57.93 66.29 58.01 67L58.01 67.15C58.01 67.93 57.38 68.57 56.59 68.57L47.09 68.57C46.35 68.57 45.75 68.01 45.67 67.29L45.67 67.15C45.67 66.36 46.30 65.73 47.09 65.73L48.44 65.73L48.44 62.02L55.23 62.02Z"/>
+    <path android:pathData="M74.68 35.73L74.68 42.90C74.60 42.89 74.52 42.89 74.43 42.89L64.43 42.89C61.91 42.89 59.86 44.93 59.86 47.46L59.86 60.17L34.19 60.17C31.32 60.17 29 57.85 29 54.99L29 35.73C29 32.86 31.32 30.54 34.19 30.54L69.49 30.54C72.36 30.54 74.68 32.86 74.68 35.73Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="26.53" android:startY="30.54" android:endX="26.53" android:endY="60.17">
+                <item android:offset="0" android:color="#6BFFFFFF"/>
+                <item android:offset="1" android:color="#42FFFFFF"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:fillColor="#99FFFFFF"
+        android:pathData="M69.49 30.98L34.19 30.98C31.32 30.98 29 33.30 29 36.16L29 35.73C29 32.86 31.32 30.54 34.19 30.54L69.49 30.54C72.36 30.54 74.68 32.86 74.68 35.73L74.68 36.16C74.68 33.30 72.36 30.98 69.49 30.98Z"/>
+    <path android:pathData="M79 47.46L79 72.89C79 75.41 76.95 77.46 74.43 77.46L64.43 77.46C61.91 77.46 59.86 75.41 59.86 72.89L59.86 60.17L69.49 60.17C72.36 60.17 74.68 57.85 74.68 54.99L74.68 42.90C77.09 43.02 79 45.02 79 47.46Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="26.53" android:startY="60.17" android:endX="26.53" android:endY="77.46">
+                <item android:offset="0" android:color="#94FFFFFF"/>
+                <item android:offset="1" android:color="#70FFFFFF"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M74.68 42.90L74.68 54.99C74.68 57.85 72.36 60.17 69.49 60.17L59.86 60.17L59.86 47.46C59.86 44.93 61.91 42.89 64.43 42.89L74.43 42.89C74.52 42.89 74.60 42.89 74.68 42.90Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="59.86" android:startY="42.89" android:endX="74.68" android:endY="60.17">
+                <item android:offset="0" android:color="#FFFFFFFF"/>
+                <item android:offset="1" android:color="#FFF3F0FF"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:fillColor="#B34B44D6"
+        android:pathData="M70.48 46.35C70.48 46.93 70.01 47.40 69.43 47.40C68.85 47.40 68.38 46.93 68.38 46.35C68.38 45.77 68.85 45.30 69.43 45.30C70.01 45.30 70.48 45.77 70.48 46.35Z"/>
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M53.44 72.52C53.44 73.40 52.73 74.12 51.84 74.12C50.95 74.12 50.23 73.40 50.23 72.52C50.23 71.63 50.95 70.91 51.84 70.91C52.73 70.91 53.44 71.63 53.44 72.52Z"/>
+</vector>

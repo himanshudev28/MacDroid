@@ -8,14 +8,17 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.HelpOutline
-import androidx.compose.material.icons.filled.Keyboard
-import androidx.compose.material.icons.filled.PhoneAndroid
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.HelpOutline
+import androidx.compose.material.icons.rounded.Keyboard
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.droiddock.app.ui.components.ButtonKind
+import com.droiddock.app.ui.components.DockButton
+import com.droiddock.app.ui.components.DockCard
+import com.droiddock.app.ui.components.DockIconButton
+import com.droiddock.app.ui.components.DockStatusPill
+import com.droiddock.app.ui.theme.DockTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,12 +44,8 @@ import com.journeyapps.barcodescanner.BarcodeView
 import com.journeyapps.barcodescanner.DefaultDecoderFactory
 import java.util.concurrent.atomic.AtomicBoolean
 
-private val ScanInk    = Color(0xFF0D0D12)
-private val ScanPanel  = Color(0xFF14141B)
-private val ScanFg     = Color(0xFFF0EFE9)
-private val ScanDim    = Color(0xFF72728A)
-private val ScanOk     = Color(0xFF34C759)
-private val BracketAmber = Color(0xFFF5A623)
+/** The camera view stays dark whatever the style; only the chrome around it is themed. */
+private val CameraScrim = Color.Black.copy(alpha = 0.62f)
 
 @Composable
 fun ScanScreen(
@@ -74,7 +73,8 @@ fun ScanScreen(
         }
     }
 
-    Box(Modifier.fillMaxSize().background(ScanInk)) {
+    val signal = MaterialTheme.colorScheme.primary
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
 
         // ── Camera preview ──
         AndroidView(
@@ -103,113 +103,61 @@ fun ScanScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // ── Dark overlay + glowing corner brackets ──
-        ScannerOverlay()
+        // ── Dim overlay + corner brackets in the style's accent ──
+        ScannerOverlay(signal)
 
         // ── Top bar ──
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(horizontal = 4.dp, vertical = 6.dp),
+                .padding(horizontal = DockTheme.spacing.s, vertical = DockTheme.spacing.xs),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, contentDescription = t("Back"), tint = ScanFg)
-            }
+            DockIconButton(Icons.AutoMirrored.Rounded.ArrowBack, t("Back"), onBack)
             Spacer(Modifier.weight(1f))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    imageVector        = Icons.Default.PhoneAndroid,
-                    contentDescription = null,
-                    tint               = BracketAmber,
-                    modifier           = Modifier.size(20.dp)
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    t("DroidDock"),
-                    color      = ScanFg,
-                    fontSize   = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.3).sp
-                )
-            }
-            Spacer(Modifier.weight(1f))
-            IconButton(onClick = onHelp) {
-                Icon(Icons.Default.HelpOutline, contentDescription = t("Help"),
-                    tint = ScanFg.copy(alpha = 0.55f), modifier = Modifier.size(22.dp))
-            }
+            DockIconButton(Icons.AutoMirrored.Rounded.HelpOutline, t("Help"), onHelp)
         }
 
-        // ── Bottom: title + subtitle + status pill ──
+        // ── Bottom: themed card with title, status, manual fallback ──
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(start = 28.dp, end = 28.dp, bottom = 36.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(DockTheme.spacing.gutter)
         ) {
-            Text(
-                t("Scan to Connect"),
-                color      = ScanFg,
-                fontSize   = 26.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = (-0.5).sp
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                "Point your camera at the DroidDock QR code on\nyour Mac to pair instantly.",
-                color     = ScanDim,
-                fontSize  = 14.sp,
-                textAlign = TextAlign.Center,
-                lineHeight = 21.sp
-            )
-            Spacer(Modifier.height(28.dp))
-
-            // Status pill
-            Box(
-                modifier = Modifier
-                    .background(ScanPanel, RoundedCornerShape(50.dp))
-                    .padding(horizontal = 24.dp, vertical = 14.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        PulsingDot()
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            t("Looking for QR code"),
-                            color      = ScanFg,
-                            fontSize   = 14.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    TextButton(
-                        onClick        = onManual,
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                    ) {
-                        Icon(
-                            imageVector        = Icons.Default.Keyboard,
-                            contentDescription = null,
-                            tint               = ScanDim,
-                            modifier           = Modifier.size(14.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(t("Pair manually"), color = ScanDim, fontSize = 13.sp)
-                    }
-                }
+            DockCard {
+              Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    t("Scan to Connect"),
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    t("Point your camera at the DroidDock QR code on your Mac to pair instantly."),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = DockTheme.spacing.s),
+                )
+                DockStatusPill(
+                    t("Looking for QR code"),
+                    modifier = Modifier.padding(top = DockTheme.spacing.l),
+                )
+                DockButton(
+                    text = t("Pair manually"), onClick = onManual,
+                    kind = ButtonKind.GHOST, icon = Icons.Rounded.Keyboard,
+                    modifier = Modifier.padding(top = DockTheme.spacing.xs),
+                )
+              }
             }
         }
     }
 }
 
 @Composable
-private fun ScannerOverlay() {
+private fun ScannerOverlay(signal: Color) {
     val density = LocalDensity.current
     Canvas(Modifier.fillMaxSize()) {
         val scanW   = size.width * 0.76f
@@ -220,7 +168,7 @@ private fun ScannerOverlay() {
         val cR      = with(density) { 20.dp.toPx() }
         val arm     = with(density) { 34.dp.toPx() }
         val thin    = with(density) { 2.8.dp.toPx() }
-        val overlay = Color(0xCC0D0D12)
+        val overlay = CameraScrim
 
         // mask panels around viewfinder
         drawRect(overlay, Offset.Zero, Size(size.width, top))
@@ -237,14 +185,14 @@ private fun ScannerOverlay() {
         for ((dpW, a) in glowLayers) {
             val px = with(density) { dpW.dp.toPx() }
             paths.forEach { path ->
-                drawPath(path, BracketAmber.copy(alpha = a),
+                drawPath(path, signal.copy(alpha = a),
                     style = Stroke(width = px, cap = StrokeCap.Round))
             }
         }
 
         // sharp bracket lines
         paths.forEach { path ->
-            drawPath(path, BracketAmber, style = Stroke(width = thin, cap = StrokeCap.Round))
+            drawPath(path, signal, style = Stroke(width = thin, cap = StrokeCap.Round))
         }
     }
 }
@@ -278,18 +226,3 @@ private fun cornerPaths(
         lineTo(right, bottom - arm)
     }
 )
-
-@Composable
-private fun PulsingDot() {
-    val inf = rememberInfiniteTransition(label = "dot")
-    val alpha by inf.animateFloat(
-        initialValue  = 0.45f,
-        targetValue   = 1f,
-        animationSpec = infiniteRepeatable(tween(800, easing = LinearEasing), RepeatMode.Reverse),
-        label         = "alpha"
-    )
-    Box(Modifier.size(10.dp), contentAlignment = Alignment.Center) {
-        Box(Modifier.size(10.dp).background(ScanOk.copy(alpha = alpha * 0.30f), CircleShape))
-        Box(Modifier.size(7.dp).background(ScanOk.copy(alpha = alpha), CircleShape))
-    }
-}

@@ -9,16 +9,15 @@
      readable on exactly the photo the user picked. -->
 <resources>
     <color name="widget_bg">#FFFFFFFF</color>
-    <color name="widget_chip">#FFEDEFF3</color>
+    <color name="widget_chip">#FFEEEDF3</color>
     <color name="widget_text">#FF14171C</color>
     <color name="widget_subtext">#FF5C6470</color>
     <color name="widget_icon">#FF3A414D</color>
-    <!-- Amber darkened from the launcher icon's #FFB454, which fails contrast
-         on white. -->
-    <color name="widget_accent">#FFC97C10</color>
+    <!-- DroidDock brand violet-indigo (primary, tone 40): AA on white. -->
+    <color name="widget_accent">#FF5549D0</color>
 
     <!-- Link status dot. -->
     <color name="widget_dot_on">#FF16A34A</color>
-    <color name="widget_dot_wait">#FFC97C10</color>
+    <color name="widget_dot_wait">#FF7C6FF0</color>
     <color name="widget_dot_off">#FF9AA1AC</color>
 </resources>
