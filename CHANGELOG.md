@@ -8,6 +8,65 @@ to a generic body.
 
 ---
 
+## v3.0.0
+
+A new Mac app. DroidDock for macOS is rebuilt as a native SwiftUI app on a
+Rust core, replacing the Tauri app, and the Android app is redesigned to
+match.
+
+> **Coming from v2.x on the Mac?** The old app's updater can't install the new
+> one. Download `DroidDock-3.0.0.dmg` below once, drag it to Applications and
+> replace the old copy. Your phone pairing is kept. The Android app updates
+> itself as usual.
+
+### Added
+
+- **A native Mac app.** Built with SwiftUI and Apple's design guidelines:
+  system materials, SF Symbols, light and dark mode, a dashboard or classic
+  sidebar layout, and a menu bar panel. It starts fast and stays light,
+  around 100 MB of memory with the window open and almost no CPU when idle.
+- **Bluetooth fallback.** When Wi-Fi drops, the phone and Mac switch to a
+  Bluetooth LE link, so notifications, calls and messages keep arriving, and
+  switch back when Wi-Fi returns (about 30 s and 25 s on a Galaxy S21 FE).
+  Settings › Connection offers Wi-Fi only, automatic fallback, or Bluetooth
+  now.
+- **Second screen.** Mirror › Second screen opens a separate, phone-shaped
+  Android screen with its own home screen and apps in a Mac window. Your
+  phone's own screen is never touched.
+- **Notifications open as Mac windows.** Clicking a notification, or its Open
+  button, opens that app in its own Mac window on a virtual display, with a
+  Back · Home · Recent bar under it. Closing the window closes the app; it no
+  longer jumps onto the phone. Needs ADB and scrcpy 3.0 or newer.
+- **Keep in Notification Center.** Banners can also be filed in macOS
+  Notification Center, quietly, without a second popup. Banner duration is
+  adjustable (5 seconds by default).
+- **WhatsApp and internet calls.** The call pop-up shows the caller's name and
+  the app instead of a nameless ring. Decline and Hang up work from the Mac,
+  and Answer taps the real button on the phone through the accessibility
+  service.
+- **Transfers page.** Drop files on Send to Phone, send to a nearby Android
+  device with Quick Share, and clear the list with Clear History.
+- **A redesigned Android app,** with switchable visual styles, themed and
+  adaptive icons, and a splash screen.
+
+### Fixed
+
+- The call pop-up's close button is no longer cut off, and an answered call
+  no longer leaves a stale "Incoming call" card behind.
+- "Use Bluetooth now" now connects straight away and keeps Bluetooth until
+  you switch back.
+- The Android app no longer polls permissions or searches for Macs while it
+  is in the background, which saves battery.
+
+### Known limits
+
+- Talking and listening on phone calls through the Mac is not available yet.
+  macOS blocks Bluetooth hands-free audio for apps; another route is being
+  explored.
+- The Mac app is ad-hoc signed: right-click › Open the first time.
+
+---
+
 ## v2.4.0
 
 ### Added
