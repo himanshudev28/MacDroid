@@ -17,8 +17,16 @@ struct DashboardScreen: View {
         if layout == .grouped, chrome.isCollapsed(.grouped) { return false }
         return true
     }
-    /// The full card (not grouped's compact one) already shows the pairing QR: don't show a second one.
-    private var cardShowsQR: Bool { phoneCardVisible && layout != .grouped }
+    /// A phone has paired before (the card then shows "Reconnecting…", not the QR).
+    private var isPaired: Bool {
+        (model.config?.deviceName?.isEmpty == false) || model.config?.deviceGuid != nil
+    }
+    /// Only when the card itself is showing the pairing QR (never-paired, or "Pair a phone" tapped):
+    /// while a known phone reconnects the card shows that instead, so the QR goes here, straight away,
+    /// for anyone who wants to pair a new phone meanwhile.
+    private var cardShowsQR: Bool {
+        phoneCardVisible && layout != .grouped && (!isPaired || shell.forcePairing)
+    }
     /// A visible card already shows name, battery and link: no second hero.
     private var cardShowsPhone: Bool { phoneCardVisible }
 
@@ -162,12 +170,12 @@ struct DashboardScreen: View {
                         .ddHairline(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     }
                     VStack(alignment: .leading, spacing: DD.Space.md) {
-                        Text(tr("Dock your phone")).font(DD.Font.largeTitle).foregroundStyle(DD.fg)
+                        Text(isPaired ? tr("Pair a phone") : tr("Dock your phone")).font(DD.Font.largeTitle).foregroundStyle(DD.fg)
                         Text(tr("Open DroidDock on your Android, tap Pair with Mac, and scan this code. Both devices need the same Wi-Fi network."))
                             .font(DD.Font.body).foregroundStyle(DD.dim).fixedSize(horizontal: false, vertical: true)
                         HStack(spacing: 6) {
                             ProgressView().controlSize(.mini)
-                            Text(tr("Looking for your phone…")).font(DD.Font.callout).foregroundStyle(DD.dim)
+                            Text(reconnectLine).font(DD.Font.callout).foregroundStyle(DD.dim)
                         }
                         manualPairing
                     }
@@ -175,6 +183,15 @@ struct DashboardScreen: View {
                 }
             }
         }
+    }
+
+    /// While a known phone is being reconnected, say so beside the QR (which is for a new phone).
+    private var reconnectLine: String {
+        guard isPaired else { return tr("Looking for your phone…") }
+        if let name = model.wifi.phoneName ?? model.config?.deviceName, !name.isEmpty {
+            return tr("Reconnecting to {name}…", ["name": name])
+        }
+        return tr("Reconnecting…")
     }
 
     /// The token pairs a phone just like the QR does, so it sits behind the same Touch ID lock.
