@@ -52,6 +52,7 @@ class MirrorService : Service() {
     private var drainThread: Thread? = null
     @Volatile private var running = false
     @Volatile private var streaming = true // gated off while paused (Auto-mode keep-alive)
+    @Volatile private var videoPaused = false // Mac viewer hidden (`mirror-pause`): video only, independent of [streaming]
     /** True while [drain] is skipping predicted frames because the socket is
      *  backed up. Latched so the "give me a keyframe" request is made once per
      *  gap rather than once per dropped frame. */
@@ -157,6 +158,7 @@ class MirrorService : Service() {
         encoder = enc
         running = true
         streaming = true
+        videoPaused = false
         this.source = source
         drainThread = thread(name = "mirror-drain") { drain(enc, w, h, source, mime) }
         return surface
@@ -318,6 +320,8 @@ class MirrorService : Service() {
     }
 
     private fun drain(enc: MediaCodec, w: Int, h: Int, source: String, mime: String) {
+        // Output drain feeds a live stream: don't let it queue behind background work.
+        runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DISPLAY) }
         val info = MediaCodec.BufferInfo()
         var announced = false
         while (running) {
@@ -339,15 +343,17 @@ class MirrorService : Service() {
                 // reason to copy a frame out of the codec buffer just to drop
                 // it. Config packets are still read: they are what the Mac
                 // needs to reconfigure its decoder on resume.
-                if (!streaming && !isConfig) {
+                if ((!streaming || videoPaused) && !isConfig) {
                     enc.releaseOutputBuffer(idx, false)
                     continue
                 }
                 buf.position(info.offset)
                 buf.limit(info.offset + info.size)
-                val bytes = ByteArray(info.size)
-                buf.get(bytes)
                 if (isConfig) {
+                    // Config is small and retained (re-sent with every
+                    // keyframe), so it keeps its own array.
+                    val bytes = ByteArray(info.size)
+                    buf.get(bytes)
                     configBytes = bytes
                     if (!announced) {
                         val started = JSONObject().put("type", "mirror-started")
@@ -362,7 +368,7 @@ class MirrorService : Service() {
                         if (streaming) ConnectionManager.send(started)
                         announced = true
                     }
-                } else if (streaming) {
+                } else if (streaming && !videoPaused) {
                     // Backpressure. The video path used to push into OkHttp's
                     // outbound queue unconditionally, so a Wi-Fi dip meant
                     // frames piling up in RAM and the Mac rendering seconds
@@ -395,7 +401,7 @@ class MirrorService : Service() {
                         ConnectionManager.sendVideoParts(
                             if (isKey) 1 else 0,
                             if (isKey) configBytes else null,
-                            bytes,
+                            buf, // position/limit already set to this frame
                         )
                     }
                 }
@@ -487,8 +493,28 @@ class MirrorService : Service() {
     /** Resume transmitting: re-announce so the Mac reconfigures, and force a keyframe. */
     fun resumeStreaming() {
         streaming = true
+        videoPaused = false
         audio?.resumeStreaming()
         startedJson?.let { ConnectionManager.send(it) }
+        droppingVideo = false
+        encoder?.let { requestSyncFrame(it) }
+    }
+
+    /**
+     * Viewer hidden on the Mac (`mirror-pause`): stop sending *video* only. The
+     * encoder and projection stay alive (no re-consent) and phone audio keeps
+     * playing — unlike [pauseStreaming], which is the Auto-mode keep-alive and
+     * silences both.
+     */
+    fun pauseVideo() {
+        if (encoder != null) videoPaused = true
+    }
+
+    /** Viewer visible again (`mirror-resume`): resume video and force a keyframe
+     *  (config is prepended to it) so the Mac decoder can restart immediately. */
+    fun resumeVideo() {
+        if (encoder == null) return
+        videoPaused = false
         droppingVideo = false
         encoder?.let { requestSyncFrame(it) }
     }

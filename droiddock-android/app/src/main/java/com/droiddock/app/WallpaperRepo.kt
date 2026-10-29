@@ -48,8 +48,21 @@ object WallpaperRepo {
         // home one is the right answer anyway.
         val lock = if (Build.VERSION.SDK_INT >= 24) {
             runCatching {
+                // Bounds first, then a power-of-two subsampled decode: a
+                // 1440x3200 lock wallpaper is ~18 MB as ARGB_8888 and was
+                // decoded in full just to be shrunk to 720px afterwards.
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 wm.getWallpaperFile(WallpaperManager.FLAG_LOCK)?.use { pfd ->
-                    BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor)
+                    BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, bounds)
+                }
+                var sample = 1
+                val longest = max(bounds.outWidth, bounds.outHeight)
+                while (longest / (sample * 2) >= MAX_PX) sample *= 2
+                wm.getWallpaperFile(WallpaperManager.FLAG_LOCK)?.use { pfd ->
+                    BitmapFactory.decodeFileDescriptor(
+                        pfd.fileDescriptor, null,
+                        BitmapFactory.Options().apply { inSampleSize = sample }
+                    )
                 }
             }.getOrNull()
         } else null

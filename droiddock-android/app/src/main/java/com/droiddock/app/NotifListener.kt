@@ -28,6 +28,15 @@ class NotifListener : NotificationListenerService() {
 
     /** Send one notification to the Mac. `force` bypasses the re-post dedupe (used for backfill). */
     fun forward(sbn: StatusBarNotification, force: Boolean) {
+        // Nobody to send to: skip the extras parsing, JSON and label lookup.
+        // Link-up replays every active notification with force = true, so
+        // nothing posted while offline is lost.
+        // Internet calls (WhatsApp…) become the Mac's call pop-up, not a notification (VoipCalls).
+        if (VoipCalls.isVoipCall(sbn)) {
+            if (!force || ConnectionManager.connected.value) VoipCalls.onPosted(this, sbn, appLabel(sbn.packageName))
+            return
+        }
+        if (!ConnectionManager.connected.value) return
         if (!shouldMirror(sbn)) return
 
         val extras = sbn.notification.extras
@@ -66,6 +75,8 @@ class NotifListener : NotificationListenerService() {
             ?.take(3)
             ?: emptyList()
         NotifStore.putButtons(sbn.key, buttons)
+        // The notification's own tap action (opens the exact chat/screen) for `notif-open`.
+        NotifStore.putOpen(sbn.key, sbn.notification.contentIntent, sbn.packageName)
 
         ConnectionManager.send(
             JSONObject()
@@ -99,6 +110,7 @@ class NotifListener : NotificationListenerService() {
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
+        VoipCalls.onRemoved(sbn.key)
         synchronized(lastSent) { lastSent.remove(sbn.key) }
         NotifStore.remove(sbn.key)
         ConnectionManager.send(
@@ -118,6 +130,12 @@ class NotifListener : NotificationListenerService() {
         if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return false
         // music players spam progress updates — skip them
         if (n.extras.getString(Notification.EXTRA_TEMPLATE)?.contains("MediaStyle") == true) return false
+        // One UI's Now Bar mirrors the music player as a System UI "ongoing activity" on channel
+        // MediaOngoingActivity (flags=0, so the ongoing check above misses it). It duplicates the
+        // now-playing card on the Mac — seen as a "MediaOngoingActivity" notification on a Galaxy S21 FE.
+        if (sbn.packageName == "com.android.systemui" &&
+            (n.channelId == "MediaOngoingActivity" || n.extras.containsKey("android.ongoingActivityNoti.style"))
+        ) return false
         return true
     }
 
@@ -137,9 +155,14 @@ class NotifListener : NotificationListenerService() {
     private fun findReplyAction(n: Notification): Notification.Action? =
         n.actions?.firstOrNull { a -> a.remoteInputs?.isNotEmpty() == true }
 
-    private fun appLabel(pkg: String): String = runCatching {
-        packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
-    }.getOrDefault(pkg)
+    // Label lookup is a PackageManager binder call; apps re-post often.
+    private val labelCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private fun appLabel(pkg: String): String = labelCache.getOrPut(pkg) {
+        runCatching {
+            packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
+        }.getOrDefault(pkg)
+    }
 
     companion object {
         @Volatile
@@ -147,10 +170,12 @@ class NotifListener : NotificationListenerService() {
         private val lastSent = LinkedHashMap<String, String>()
 
         /** Replay every currently-active notification — called when the Mac links up. */
-        fun pushActive() {
+        fun pushActive(limit: Int = Int.MAX_VALUE) {
             val svc = instance ?: return
             runCatching {
-                svc.activeNotifications?.sortedBy { it.postTime }?.forEach { svc.forward(it, force = true) }
+                // Over Bluetooth only the newest `limit` are replayed (oldest of those first).
+                svc.activeNotifications?.sortedByDescending { it.postTime }?.take(limit)?.asReversed()
+                    ?.forEach { svc.forward(it, force = true) }
             }
         }
     }
@@ -183,10 +208,56 @@ object NotifStore {
         return runCatching { action.actionIntent.send(); true }.getOrDefault(false)
     }
 
+    /** A notification's tap action plus its package (for the launcher fallback). */
+    private class OpenTarget(val intent: android.app.PendingIntent?, val pkg: String)
+    private val opens = LinkedHashMap<String, OpenTarget>()
+
+    @Synchronized
+    fun putOpen(key: String, intent: android.app.PendingIntent?, pkg: String) {
+        opens[key] = OpenTarget(intent, pkg)
+        if (opens.size > 100) opens.remove(opens.keys.first())
+    }
+
+    /** Result of [open]: null = unknown key (nothing was fired). */
+    class OpenResult(val ok: Boolean, val locked: Boolean)
+
+    /** Fire the notification's contentIntent (the tap action); fall back to the app's launcher
+     *  activity when there is none or it was cancelled. Never fires for a key we don't hold. If the
+     *  phone is locked the intent is still sent; Android shows it after unlock. */
+    @Synchronized
+    fun open(ctx: Context, key: String, displayId: Int = -1): OpenResult? {
+        val t = opens[key] ?: return null
+        val locked = runCatching {
+            (ctx.getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager).isKeyguardLocked
+        }.getOrDefault(false)
+        var ok = false
+        t.intent?.let { pi ->
+            ok = runCatching {
+                val opts = android.app.ActivityOptions.makeBasic()
+                if (android.os.Build.VERSION.SDK_INT >= 34) {
+                    opts.setPendingIntentBackgroundActivityStartMode(
+                        android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                    )
+                }
+                if (displayId > 0) {
+                    // "notifopendisplay": open on the Mac's virtual display. The Mac verifies where it
+                    // landed and moves the task if Android ignored this.
+                    opts.setLaunchDisplayId(displayId)
+                    pi.send(ctx, 0, null, null, null, null, opts.toBundle())
+                } else if (android.os.Build.VERSION.SDK_INT >= 34) pi.send(opts.toBundle())
+                else pi.send()
+                true
+            }.getOrDefault(false)
+        }
+        if (!ok) ok = AppsRepo.launch(ctx, t.pkg)
+        return OpenResult(ok, locked)
+    }
+
     @Synchronized
     fun remove(key: String) {
         actions.remove(key)
         buttons.remove(key)
+        opens.remove(key)
     }
 
     @Synchronized

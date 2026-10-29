@@ -3,6 +3,7 @@ package com.droiddock.app
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.droiddock.app.i18n.extraCatalog
 import java.util.Locale
 
 /**
@@ -54,26 +55,50 @@ object I18n {
      * private val CATALOGS = mapOf("de" to mapOf("Connected" to "Verbunden"))
      * ```
      */
-    private val CATALOGS: Map<String, Catalog> = mapOf(
+    private val SOURCES: Map<String, Any> = mapOf(
         // <locale-list>
-        "ar" to catalog_ar,
-        "bn" to catalog_bn,
-        "de" to catalog_de,
-        "es" to catalog_es,
-        "fr" to catalog_fr,
-        "hi" to catalog_hi,
-        "id" to catalog_id,
-        "it" to catalog_it,
-        "ja" to catalog_ja,
-        "ko" to catalog_ko,
-        "pt" to catalog_pt,
-        "ru" to catalog_ru,
-        "tr" to catalog_tr,
-        "vi" to catalog_vi,
-        "zh" to catalog_zh,
-        "zh-Hant" to catalog_zh_Hant,
+        "ar" to { catalog_ar },
+        "bn" to { catalog_bn },
+        "de" to { catalog_de },
+        "es" to { catalog_es },
+        "fr" to { catalog_fr },
+        "hi" to { catalog_hi },
+        "id" to { catalog_id },
+        "it" to { catalog_it },
+        "ja" to { catalog_ja },
+        "ko" to { catalog_ko },
+        "pt" to { catalog_pt },
+        "ru" to { catalog_ru },
+        "tr" to { catalog_tr },
+        "vi" to { catalog_vi },
+        "zh" to { catalog_zh },
+        "zh-Hant" to { catalog_zh_Hant },
         // </locale-list>
     )
+
+    /** Tag → catalog. A source is a `() -> Catalog` thunk (the generator's form,
+     *  so a language's file class is only initialised when it is first used) or,
+     *  for older hand-written entries, a plain [Catalog]. Resolved once. */
+    private val CATALOGS = object {
+        private val resolved = java.util.concurrent.ConcurrentHashMap<String, Catalog>()
+        val keys: Set<String> get() = SOURCES.keys
+        fun isEmpty() = SOURCES.isEmpty()
+        fun containsKey(tag: String) = SOURCES.containsKey(tag)
+        @Suppress("UNCHECKED_CAST")
+        operator fun get(tag: String): Catalog? {
+            resolved[tag]?.let { return it }
+            val src = SOURCES[tag] ?: return null
+            val cat = if (src is Function0<*>) src.invoke() as Catalog else src as Catalog
+            resolved[tag] = cat
+            return cat
+        }
+    }
+
+    /** Hand-maintained overrides/additions (i18n-extra/<code>.json), checked before
+     *  the generated catalog. Lazy per locale, like [CATALOGS]. */
+    private val EXTRAS = java.util.concurrent.ConcurrentHashMap<String, Catalog>()
+    private fun extras(tag: String): Catalog =
+        EXTRAS.getOrPut(tag) { extraCatalog(tag) }
 
     /** Tag → label, for the picker. English first, then whatever exists. */
     fun available(): List<Pair<String, String>> =
@@ -114,10 +139,21 @@ object I18n {
     fun isRtl(): Boolean = RTL.contains(activeTag())
 
     /** The language actually in use, resolving `""` against the system. */
-    fun activeTag(): String {
-        val wanted = locale.ifEmpty { Locale.getDefault().language }
-        val primary = wanted.substringBefore('-').lowercase(Locale.ROOT)
-        return if (CATALOGS.containsKey(primary)) primary else "en"
+    fun activeTag(): String = resolve(locale)
+
+    /**
+     * The catalog key for a chosen tag ("" = follow the system). Reducing a tag to its primary
+     * subtag sent Traditional Chinese (zh-Hant / zh-TW / zh-HK / zh-MO) to the Simplified catalog;
+     * the script and region decide that here.
+     */
+    private fun resolve(chosen: String): String {
+        if (chosen.isNotEmpty() && CATALOGS.containsKey(chosen)) return chosen
+        val l = if (chosen.isEmpty()) Locale.getDefault() else Locale.forLanguageTag(chosen.replace('_', '-'))
+        val lang = l.language.lowercase(Locale.ROOT)
+        if (lang == "zh" && (l.script.equals("Hant", ignoreCase = true) || l.country in setOf("TW", "HK", "MO"))) {
+            return "zh-Hant"
+        }
+        return if (CATALOGS.containsKey(lang)) lang else "en"
     }
 
     /**
@@ -129,8 +165,8 @@ object I18n {
     fun t(en: String, vararg args: Pair<String, Any?>): String {
         // Read through `locale` rather than a cached catalog so composables that
         // call this are registered as readers and recompose on a change.
-        val tag = locale.ifEmpty { Locale.getDefault().language }.substringBefore('-').lowercase(Locale.ROOT)
-        var out = CATALOGS[tag]?.get(en) ?: en
+        val tag = resolve(locale)
+        var out = extras(tag)[en] ?: CATALOGS[tag]?.get(en) ?: en
         for ((name, value) in args) out = out.replace("{$name}", value.toString())
         return out
     }

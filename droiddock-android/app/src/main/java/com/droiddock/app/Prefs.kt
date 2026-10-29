@@ -353,6 +353,29 @@ object Prefs {
             .putBoolean("expandNetworking", v).apply()
     }
 
+    /** "network" (Wi-Fi only, default) or "fallback" (Wi-Fi + Bluetooth fallback). Reading this
+     *  touches no Bluetooth API. */
+    fun connectionMode(ctx: Context): String =
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString("connectionMode", "network")
+            .let { if (it == "fallback") it else "network" }
+
+    fun connectionModeAt(ctx: Context): Long =
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).getLong("connectionModeAt", 0L)
+
+    fun setConnectionMode(ctx: Context, mode: String, at: Long) {
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
+            .putString("connectionMode", if (mode == "fallback") mode else "network")
+            .putLong("connectionModeAt", at).apply()
+    }
+
+    /** "Switch back automatically" while on Bluetooth. On by default. */
+    fun bleAutoReturn(ctx: Context): Boolean =
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).getBoolean("bleAutoReturn", true)
+
+    fun setBleAutoReturn(ctx: Context, v: Boolean) {
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putBoolean("bleAutoReturn", v).apply()
+    }
+
     /** Light / Dark / System. Defaults to SYSTEM, so an install that never opens
      *  the setting follows the phone instead of being pinned to the old
      *  dark-only look. */

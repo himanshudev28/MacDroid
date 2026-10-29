@@ -7,12 +7,12 @@
 Clipboard · notifications · files · photos · messages · calls · screen mirror · camera —
 flowing seamlessly between your phone and your Mac over your local Wi‑Fi.
 
-**Made with [Tauri 2](https://tauri.app)** — the Mac app is a native Rust binary in a
-~6 MB `.dmg`, not a bundled browser. *(It was an Electron app until v1.0.0; that client
-is retired and kept only as a protocol reference.)*
+**A truly native Mac app** — SwiftUI on a Rust core, built to Apple's Human Interface
+Guidelines, in a small `.dmg` with no bundled browser. *(Earlier releases shipped an
+Electron and then a Tauri client; both are kept in the repo for reference.)*
 
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Android-1f6feb?style=for-the-badge)
-![Mac app](https://img.shields.io/badge/Mac-Tauri%202%20%2B%20React-24C8DB?style=for-the-badge&logo=tauri&logoColor=white)
+![Mac app](https://img.shields.io/badge/Mac-SwiftUI%20%2B%20Rust-F05138?style=for-the-badge&logo=swift&logoColor=white)
 ![Android app](https://img.shields.io/badge/Android-Kotlin%20%2B%20Compose-3DDC84?style=for-the-badge&logo=android&logoColor=white)
 ![Link](https://img.shields.io/badge/link-LAN%20WebSocket-FFB454?style=for-the-badge)
 
@@ -36,7 +36,7 @@ It's two apps that talk to each other:
 
 | | App | Built with |
 |---|---|---|
-| 🖥️ | **Mac client** — [`droiddock-tauri/`](droiddock-tauri/) | Tauri 2 · Rust · React · Tailwind |
+| 🖥️ | **Mac client** — [`droiddock-native/`](droiddock-native/) | SwiftUI · Rust core (C ABI) |
 | 📱 | **Android companion** — [`droiddock-android/`](droiddock-android/) | Kotlin · Jetpack Compose |
 
 ---
@@ -100,7 +100,7 @@ It's two apps that talk to each other:
 | | Feature | What it does |
 |:--:|---|---|
 | 📋 | **Clipboard sync** | Mac → phone automatically; phone → Mac automatically or manually — **Auto / Manual** toggle. Works on Android 13+ / Samsung (uses accessibility events, not clipboard reads). **Images** cross too: Mac → phone automatically, phone → Mac from the tile, widget or share sheet. |
-| 🔔 | **Notification mirroring** | Phone notifications on your Mac as native macOS alerts with **inline reply** and dismiss. Incoming calls shown with caller ID. |
+| 🔔 | **Notification mirroring** | Phone notifications on your Mac as floating banners with **inline reply** and dismiss — kept in macOS **Notification Center** too if you like, with an adjustable on-screen time (5 s by default). Incoming calls shown with caller ID. |
 | 📁 | **File transfer & browser** | Drag-and-drop both ways with live progress; browse, download, upload, **rename**, **delete** and **search** phone storage. Android Files tab shows an **upload queue** with real-time progress bar, transfer speed, and a **recent transfers** history with colored file-type badges. |
 | 🖼️ | **Photos & Videos** | Browse thumbnails, open full-res in Preview / QuickTime, download originals. |
 | 💬 | **Messages** | Polished 2-pane SMS chat — conversation list with avatar initials, search, day dividers, composer. Threads sync live. |
@@ -116,9 +116,14 @@ It's two apps that talk to each other:
 | 🤖 | **Auto Mirror mode** | Grant "Display over other apps" once — after that the Mac can start screen/camera instantly with no per-session tap on the phone. |
 | 🔌 | **Smart pairing** | **Custom QR scan screen** (glowing amber corner brackets, animated status pill) or manual IP entry; auto-reconnect; "Forget this Mac"; **Pause** mode (1h / 8h / until resume). |
 | 🖥️ | **Your Mac, on your phone** | The phone's Home screen shows the Mac's **name, battery and charging state**, plus what it's playing — with working transport keys, **volume**, **brightness**, **screensaver** and **lock**. Off unless you enable remote control. |
+| 📶 | **Bluetooth fallback** | When Wi-Fi drops, the link moves to Bluetooth LE so notifications, calls and messages keep arriving, and moves back when Wi-Fi returns. Choose *Wi-Fi only*, *automatic fallback*, or *Use Bluetooth now*. |
+| 🖥️ | **Second screen** | Mirror a separate, phone-shaped Android screen with its own home screen and apps in a Mac window — your phone's own screen is never touched. |
+| 🪟 | **Notifications open as Mac windows** | Click a notification and its app opens in its own Mac window on a virtual display, with a **Back · Home · Recent** bar underneath. Closing the window closes the app; it never jumps onto the phone. |
+| 📞 | **WhatsApp & internet calls** | WhatsApp (and other app) calls show the caller's name in the Mac pop-up; **Decline** and **Hang up** work from the Mac, and **Answer** taps the real button on the phone. |
+| 🗂️ | **Transfers page** | Every file moving either way, with live speed — drop files on **Send to Phone**, send to a nearby Android with **Quick Share**, and **Clear History** when you're done. |
 | 🌐 | **Sixteen languages** | English · العربية · বাংলা · Deutsch · Español · Français · हिन्दी · Bahasa Indonesia · Italiano · 日本語 · 한국어 · Português · Русский · Türkçe · Tiếng Việt · 简体中文 · 繁體中文. Follows your system language or pick one in Settings; the layout mirrors right-to-left for Arabic. |
 | 🌗 | **Light & dark themes** | Both apps follow the system theme or pin one, with a warm palette and adjustable glass on the Mac. The Android light palette is contrast-measured, not eyeballed. |
-| ⬆️ | **Self-updating** | The Mac app updates in place; the Android APK is signed with a stable release key so it can too. |
+| ⬆️ | **Update alerts** | The Mac app checks GitHub once a day and opens the new release for you; the Android APK is signed with a stable release key so it updates in place. |
 | 📱 | **Device management** | Remembered Macs, Quick Connect, Disconnect, and switching between Macs — discovered over mDNS. |
 | 📜 | **Clipboard history** | This session's clips, both directions. Memory-only and capped on purpose — persisting it would be a plaintext log of passwords and OTPs. |
 | ⚡ | **Quick Settings tiles** | Toggle the connection and the accessibility service straight from the Android shade. |
@@ -127,16 +132,15 @@ It's two apps that talk to each other:
 
 ## 🎨 Design
 
-### Mac app — Apple HIG + Liquid Glass
+### Mac app — native SwiftUI, Apple HIG
 
-The Mac client follows **Apple Human Interface Guidelines** and the latest **Liquid Glass**
-design language:
+The Mac client is written in **SwiftUI** and follows the **Apple Human Interface Guidelines**:
 
-- Deep graphite palette (`#0D0D12` ink, `#14141B` panels) with Geist + JetBrains Mono typography
-- Glassmorphism toasts and modals with `backdrop-filter: blur(20px)` and translucent tints
-- Layered depth via inner-highlight box shadows and elevation classes (`.luminous`, `.float-md`)
-- Traffic-light drag region with `hiddenInset` title bar; amber LED status indicator
-- Spring-animated tab indicator, content-first layout, macOS-native thin scrollbar
+- System materials, colours and SF Symbols, so it matches macOS in light and dark mode
+- Your choice of layout: a dashboard with the phone card, or a classic sidebar
+- A menu bar panel, floating banners and a call pop-up that never steal focus
+- Respects Reduce Motion, Dynamic Type sizes and VoiceOver labels
+- Light on resources: images are downsampled and freed when the window closes
 
 ### Android app — Material Design 3
 
@@ -156,14 +160,15 @@ The Android companion follows **Material Design 3** throughout:
 The apps speak over a **token-gated WebSocket on your LAN** — request/response messages
 keyed by `reqId`, plus a compact binary frame protocol for file, thumbnail and video
 transfers. Screen capture uses **MediaProjection + MediaCodec H.264** on the phone;
-the Mac decodes with the browser's **WebCodecs VideoDecoder** and paints to a canvas.
-Touch/input is injected back through the **AccessibilityService**.
+the Mac decodes it in hardware with **VideoToolbox**. Touch/input is injected back
+through the **AccessibilityService**. When Wi-Fi is gone, the same messages travel over a
+**Bluetooth LE** link instead.
 
 ```mermaid
 flowchart LR
-    subgraph MAC["🖥️  Mac app · Tauri 2 + React"]
-        UI["React UI\n(Files · Photos · Messages · Mirror …)"]
-        SRV["WebSocket server\n:48484"]
+    subgraph MAC["🖥️  Mac app · SwiftUI + Rust core"]
+        UI["SwiftUI app\n(Files · Photos · Messages · Mirror …)"]
+        SRV["Rust core\nWebSocket server :48484\n+ Bluetooth LE central"]
         ADB["ADB (fallback)"]
     end
     subgraph PHONE["📱  Android app · Kotlin + Compose"]
@@ -174,6 +179,7 @@ flowchart LR
     end
     UI --- SRV
     CM <==>|"token-gated LAN WebSocket\nJSON + binary frames"| SRV
+    CM -.->|"Bluetooth LE fallback"| SRV
     ADB -.->|"optional USB / Wi-Fi ADB"| PHONE
     BS --- CM --- MP
     A11Y --- CM
@@ -187,8 +193,8 @@ Pair once — they auto-reconnect whenever both apps are open on the same networ
 
 Grab the prebuilt apps from the [**Releases**](../../releases) page:
 
-1. **Mac** — download `DroidDock_<version>_aarch64.dmg` (Apple Silicon), open it and
-   drag **DroidDock.app** to Applications. Then **right-click the app → Open** →
+1. **Mac** — download `DroidDock-<version>.dmg` (Apple Silicon, macOS 14 or later), open
+   it and drag **DroidDock.app** to Applications. Then **right-click the app → Open** →
    **Open** for the first launch only.
 
    > The app is ad-hoc signed, not notarized (that needs a paid Apple Developer
@@ -201,8 +207,9 @@ Grab the prebuilt apps from the [**Releases**](../../releases) page:
 2. **Android** — download `DroidDock-Android.apk` and sideload it (allow "install unknown apps").
 3. Open the Mac app → **Pair Device** → scan the QR with the phone app. Done.
 
-> ⬆️ **Both apps update themselves from v2.0.0 onward** — the Mac in place, and the
-> Android APK too, now that it ships signed with a stable release key.
+> ⬆️ **Coming from the Tauri app?** Its built-in updater can't install the native app,
+> so download the new `.dmg` once by hand. From then on the native app tells you when a
+> new version is out. The Android APK keeps updating itself, as it has since v2.0.0.
 >
 > ⚠️ **Upgrading from v1.0.0 or earlier needs one manual uninstall + reinstall of the
 > Android app.** Releases up to v1.0.0 shipped a *debug-signed* APK whose key changed
@@ -261,31 +268,33 @@ Phone notifications appear as native macOS alerts. To enable:
 
 ## 🧑‍💻 Build from source
 
-Needs [Rust](https://rustup.rs) (stable) and Node 22+ for the Mac app, JDK 17 for Android.
+Needs the Xcode 16 command-line tools (Swift 6) and [Rust](https://rustup.rs) stable with the
+`aarch64-apple-darwin` target for the Mac app, and JDK 17 for Android. No Xcode project and
+no Node.
 
 ```bash
-# Mac app  (Tauri 2 — Rust backend + React frontend)
-cd droiddock-tauri/app
-npm install
-npm run tauri dev      # dev build, hot-reloads the frontend
-npm run tauri build    # .app + .dmg → src-tauri/target/release/bundle/
+# Mac app  (Rust core + SwiftUI)
+rustup target add aarch64-apple-darwin
+droiddock-native/scripts/build.sh   # → droiddock-native/build/DroidDock.app (ad-hoc signed)
+droiddock-native/scripts/dmg.sh     # → droiddock-native/build/DroidDock-<version>.dmg
+droiddock-native/scripts/run.sh     # development run with a throwaway data folder
 
 # Android app
 cd droiddock-android
 ./gradlew installDebug   # or open in Android Studio → Run
 ```
 
-> 💡 The first `npm run tauri dev` compiles the whole Rust dependency tree and
-> takes a few minutes. Later runs are incremental. If the app starts but no
-> phone can connect, check nothing else is holding port `48484` — a second copy
-> of DroidDock will do it.
+> 💡 The first build compiles the whole Rust dependency tree and takes a few
+> minutes; later builds are incremental. If the app starts but no phone can
+> connect, check nothing else is holding port `48484` — a second copy of
+> DroidDock (or the old Tauri app) will do it.
 
 Releases are built automatically by
 [`.github/workflows/release.yml`](.github/workflows/release.yml) — push a tag
-(`git tag v1.0.0 && git push origin v1.0.0`) and the `.dmg` + `.apk` are built
-and attached to a GitHub Release. The version in the artifact filenames comes
-from `droiddock-tauri/app/src-tauri/tauri.conf.json`, so bump that to match the
-tag before releasing.
+(`git tag v2.5.0 && git push origin v2.5.0`) and the `.dmg`, a zipped `.app` and the
+`.apk` are built and attached to a GitHub Release, with notes taken from that tag's
+section in `CHANGELOG.md`. The version is stamped from the tag, so there is nothing to
+bump by hand.
 
 ### First-run Android permissions
 
@@ -328,9 +337,12 @@ reconnect attempts for 1h / 8h / indefinitely without unpairing.
 
 ```
 DroidDock/
-├─ droiddock-tauri/           🖥️  Mac app  (Tauri 2 · Rust + React)
-│  ├─ app/src-tauri/src/      ·  ws_server · transfer · adb · mirror · tray
-│  ├─ app/src/                ·  React UI + all components
+├─ droiddock-native/          🖥️  Mac app  (SwiftUI · Rust core)
+│  ├─ core/                   ·  Rust: phone link, Bluetooth LE, ADB/scrcpy,
+│  │                          ·  notifications, transfers, Quick Share (C ABI + JSON)
+│  ├─ mac/                    ·  SwiftUI app, 17 languages (SwiftPM, no Xcode project)
+│  └─ scripts/                ·  build · dmg · dev run · i18n checks
+├─ droiddock-tauri/           🗄️  previous Mac app (Tauri 2) — no longer released
 │  └─ tools/fake_mac.py       ·  test harness: drives Mac→phone messages
 ├─ droiddock-android/         📱  Android app  (Kotlin + Compose)
 │  └─ app/src/main/java/      ·  services · repos · Compose screens
@@ -443,6 +455,11 @@ DroidDock/
 - [x] **Writable Finder mount** — opt-in, with Finder's `.DS_Store` litter filtered out
 - [x] **Sixteen languages** in both apps, with a **Language** setting — Arabic included,
       and the layout mirrors for it. Adding another is one file plus one line
+- [x] **Native Mac app** — SwiftUI on a Rust core, replacing the Tauri client
+- [x] **Bluetooth LE fallback** when Wi-Fi drops, with automatic return
+- [x] **Second screen** and **notification app windows** with Back / Home / Recent
+- [x] **WhatsApp & internet calls** — caller name, decline and hang up from the Mac
+- [ ] Talk and listen on phone calls through the Mac (proof of concept in progress)
 - [ ] TLS on the LAN link
 - [ ] Audio streaming (Mac → phone; phone → Mac shipped in v2.2.0)
 - [ ] Second language shipped (the machinery is in place, no catalog yet)

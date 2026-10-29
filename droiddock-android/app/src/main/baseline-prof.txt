@@ -1,0 +1,26 @@
+# Hand-written baseline profile (no device/emulator available to record one).
+# Covers the cold-start path: process start -> MainActivity -> first Compose
+# frame, plus the always-on bridge. Wildcards are expanded by profgen at build
+# time. H = hot, S = startup, P = post-startup. Replace with a recorded profile
+# (Macrobenchmark BaselineProfileRule) when a device is available.
+HSPLcom/droiddock/app/MainActivity;->**(**)**
+HSPLcom/droiddock/app/MainActivity$*;->**(**)**
+HSPLcom/droiddock/app/Prefs;->**(**)**
+HSPLcom/droiddock/app/I18n;->**(**)**
+HSPLcom/droiddock/app/ThemeKt;->**(**)**
+HSPLcom/droiddock/app/ConnectionManager;->**(**)**
+HSPLcom/droiddock/app/NetworkWatch;->**(**)**
+HSPLcom/droiddock/app/BridgeService;->**(**)**
+HSPLcom/droiddock/app/ui/**;->**(**)**
+HSPLcom/droiddock/app/ComposableSingletons*;->**(**)**
+Lcom/droiddock/app/MainActivity;
+Lcom/droiddock/app/Prefs;
+Lcom/droiddock/app/I18n;
+Lcom/droiddock/app/ConnectionManager;
+Lcom/droiddock/app/NetworkWatch;
+Lcom/droiddock/app/BridgeService;
+Lcom/droiddock/app/ui/**;
+PLcom/droiddock/app/NotifListener;->**(**)**
+PLcom/droiddock/app/MediaRemote;->**(**)**
+PLcom/droiddock/app/DeviceInfo;->**(**)**
+PLcom/droiddock/app/TransferManager;->**(**)**

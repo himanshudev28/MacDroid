@@ -1,11 +1,10 @@
-<!-- The launcher icon's "D", without its plate: at 20dp on an arbitrary
-     wallpaper the rounded square reads as a smudge, and the glyph alone is what
-     makes the widget recognisably DroidDock. Tinted by the layout. -->
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Widget mark: the launcher glyph without its plate (at 20 dp on any wallpaper the plate reads as a smudge). Tinted by the layout.
+     Generated from docs/logo-concepts/render.swift (concept 2 · Overlap). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="24dp" android:height="24dp"
-    android:viewportWidth="108" android:viewportHeight="108">
+    android:viewportWidth="24" android:viewportHeight="24">
     <path android:fillColor="#FFFFFFFF"
-        android:pathData="M38,30h14a22,24 0 0 1 0,48H38zM48,40v28h4a12,14 0 0 0 0,-28z"/>
-    <path android:fillColor="#FFFFFFFF"
-        android:pathData="M70,50h8v8h-8z"/>
+        android:pathData="M22 9.38L22 19.56C22 20.56 21.18 21.38 20.17 21.38L16.17 21.38C15.16 21.38 14.35 20.56 14.35 19.56L14.35 14.84L18.20 14.84C19.55 14.84 20.64 13.75 20.64 12.40L20.64 7.62C21.42 7.82 22 8.54 22 9.38ZM12.49 16.69L13.04 16.69C13.33 16.69 13.57 16.91 13.60 17.20L13.60 17.26C13.60 17.57 13.35 17.83 13.04 17.83L9.23 17.83C8.94 17.83 8.70 17.60 8.67 17.32L8.67 17.26C8.67 16.95 8.92 16.69 9.23 16.69L9.78 16.69L9.78 15.21L12.49 15.21ZM20.27 4.69L20.27 7.56L20.27 7.56L20.27 7.19C20.24 7.19 20.21 7.19 20.17 7.19L16.17 7.19C14.96 7.19 13.98 8.17 13.98 9.38L13.98 14.47L4.07 14.47C2.93 14.47 2 13.54 2 12.40L2 4.69C2 3.55 2.93 2.62 4.07 2.62L18.20 2.62C19.34 2.62 20.27 3.55 20.27 4.69ZM19.90 7.93L19.90 12.40C19.90 13.34 19.14 14.10 18.20 14.10L14.72 14.10L14.72 9.38C14.72 8.58 15.37 7.93 16.17 7.93ZM20.64 7.62L20.61 7.61C20.62 7.61 20.63 7.61 20.64 7.62Z"/>
 </vector>

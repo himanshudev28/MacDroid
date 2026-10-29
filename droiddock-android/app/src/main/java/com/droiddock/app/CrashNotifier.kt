@@ -29,9 +29,26 @@ object CrashNotifier {
 
     @Volatile private var installed = false
 
+    /** Debug builds only: log (never crash on) disk/network work on the main
+     *  thread and leaked closeables/receivers. Filter logcat for "StrictMode". */
+    private fun enableStrictMode() {
+        android.os.StrictMode.setThreadPolicy(
+            android.os.StrictMode.ThreadPolicy.Builder()
+                .detectDiskReads().detectDiskWrites().detectNetwork().detectCustomSlowCalls()
+                .penaltyLog().build()
+        )
+        android.os.StrictMode.setVmPolicy(
+            android.os.StrictMode.VmPolicy.Builder()
+                .detectLeakedClosableObjects().detectLeakedRegistrationObjects()
+                .detectActivityLeaks().detectLeakedSqlLiteObjects()
+                .penaltyLog().build()
+        )
+    }
+
     fun install(ctx: Context) {
         if (installed) return
         installed = true
+        if (BuildConfig.DEBUG) enableStrictMode()
         val app = ctx.applicationContext
         val previous = Thread.getDefaultUncaughtExceptionHandler()
 

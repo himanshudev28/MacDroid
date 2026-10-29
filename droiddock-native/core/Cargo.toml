@@ -1,0 +1,111 @@
+[package]
+name = "droiddock_core"
+version = "2.3.0"
+description = "DroidDock native core (Rust): protocol, transfer, ADB, mirror, Quick Share"
+edition = "2021"
+
+[lib]
+name = "droiddock_core"
+crate-type = ["staticlib", "rlib"]
+
+[build-dependencies]
+prost-build = "0.14"
+protox = "0.9"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+tokio-tungstenite = "0.29.0"
+tokio = { version = "1.52.3", features = ["rt", "rt-multi-thread", "net", "time", "sync", "macros", "fs", "io-util", "process"] }
+futures-util = "0.3.32"
+if-addrs = "0.15.0"
+gethostname = "1.1.0"
+notify = "8"
+mdns-sd = { version = "0.20.3", default-features = false, features = ["async"] }
+aes-gcm = "0.11.0"
+hkdf = "0.13.0"
+sha2 = "0.11.0"
+getrandom = "0.4.3"
+dav-server = { version = "0.11", default-features = false, features = ["hyper"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+bytes = "1"
+hmac = "0.13"
+aes = "0.9"
+cbc = { version = "0.2", features = ["alloc"] }
+base64 = "0.23"
+miniz_oxide = "0.8"
+prost = "0.14"
+p256 = { version = "0.14", features = ["ecdh"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# `localtime_r` for the tray's "Paused until HH:MM" — already in the tree
+# transitively, and cheaper than pulling a whole date crate for one label.
+libc = "0.2"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    # NSWindow::setAppearance — the window's vibrancy material has to follow
+    # the app's theme, not the Mac's (see appearance::window_theme_set).
+    "NSAppearance",
+    "NSColor",
+    "NSColorSpace",
+    "NSWorkspace",
+    "NSAccessibility",
+    "NSPasteboard",
+    # Clipboard images. macOS routinely leaves only TIFF on the pasteboard —
+    # Preview and Safari copies do — and Android's BitmapFactory cannot decode
+    # TIFF, so NSBitmapImageRep re-encodes it as PNG before it goes on the wire.
+    "NSBitmapImageRep",
+    "NSImageRep",
+    # Media keys (NX_KEYTYPE_PLAY etc.) can only be posted as an NSSystemDefined
+    # event — see mac_remote::imp::media_key. NSGraphicsContext comes along
+    # because the NSEvent constructor's signature names it (we pass nil).
+    "NSEvent",
+    "NSGraphicsContext",
+    # NSWindow::setCollectionBehavior — keeps the main window on one Space.
+    "NSWindow",
+    # NSRunningApplication::activateWithOptions — activating without the
+    # "bring every window forward" clause that drags windows between desktops.
+    "NSRunningApplication",
+    "objc2-core-foundation",
+    # NSEvent::CGEvent() — the bridge from the AppKit event we build to the
+    # CGEvent we can actually post.
+    "objc2-core-graphics",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    # NSArray of NSNumber, bridged to the CFArrayRef the CoreGraphics Spaces
+    # API takes — see appearance::confine_to_one_space.
+    "NSArray",
+    # The options dictionary for AXIsProcessTrustedWithOptions — NSDictionary
+    # is toll-free bridged to CFDictionaryRef, so this saves building one by
+    # hand (mac_remote::imp::reset_accessibility).
+    "NSDictionary",
+    "NSString",
+    # NSData — reading pasteboard image bytes out, and handing them back in.
+    "NSData",
+    "NSValue",
+] }
+# Tier D: synthesising input events for the phone→Mac remote (mac_remote.rs).
+objc2-core-graphics = { version = "0.3", default-features = false, features = [
+    "std",
+    "CGEvent",
+    "CGEventSource",
+    "CGEventTypes",
+    # new_keyboard_event is gated behind this one.
+    "CGRemoteOperation",
+] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "CFCGTypes",
+] }
+
+
+[profile.release]
+# panic must stay "unwind": the FFI boundary wraps every call in catch_unwind.
+panic = "unwind"
+opt-level = 3
+lto = "fat"
+codegen-units = 1

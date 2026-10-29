@@ -10,27 +10,33 @@ permissions:
   contents: write
 
 jobs:
-  # Builds the Tauri rewrite (droiddock-tauri/app) — the Electron app
-  # (droiddock 2/) is retired from this job once Phase 16 parity validation
-  # passes; until then it stays buildable locally, just not in CI.
-  # Named "DroidDock Tauri" throughout: the macOS client has been both an
-  # Electron and a Tauri app, and once a build is a bare .dmg in a release
-  # there is nothing left to say which stack produced it.
+  # Builds the native Mac app (droiddock-native/: Rust core + SwiftUI). The
+  # Tauri app (droiddock-tauri/) is the previous client and no longer ships from
+  # CI; it stays in the repo and builds locally.
+  #
+  # The native app's update check reads GitHub's "latest release" and opens its
+  # page, so all this job has to do is publish a release with the downloads.
   mac:
-    name: Build DroidDock Tauri (macOS)
-    runs-on: macos-14
+    name: Build DroidDock (macOS, native)
+    # Swift tools 6.0 needs Xcode 16; Apple Silicon matches the arm64-only build.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: droiddock-tauri/app/src-tauri -> target
-      - name: Install frontend dependencies
-        working-directory: droiddock-tauri/app
-        run: npm ci
+          workspaces: droiddock-native/core -> target
+
+      # The app reports the version in core/Cargo.toml (Info.plist and the DMG
+      # name are stamped from it), and its update check compares that against
+      # the newest tag. Stamp the tag's version so the two can never disagree.
+      - name: Stamp the version from the tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          perl -0pi -e 's/^version = "[^"]*"/version = "'"$VERSION"'"/m' droiddock-native/core/Cargo.toml
+          grep -m1 '^version' droiddock-native/core/Cargo.toml
 
       # Release notes come from CHANGELOG.md, not from this file — otherwise
       # every release needs a workflow edit, and the notes end up written by
@@ -49,51 +55,45 @@ jobs:
           ' CHANGELOG.md)
           if [ -z "$(echo "$BODY" | tr -d '[:space:]')" ]; then
             echo "::warning::No '## $TAG' section in CHANGELOG.md — using a generic body."
-            BODY=$(printf 'DroidDock %s\n\n* **macOS** — DroidDock Tauri (`.dmg` / `.app`), built from `droiddock-tauri/`.\n* **Android** — `DroidDock-Android.apk`, built from `droiddock-android/`.' "$TAG")
+            BODY=$(printf 'DroidDock %s\n\n* **macOS** — `DroidDock-%s.dmg` (native app), built from `droiddock-native/`.\n* **Android** — `DroidDock-Android.apk`, built from `droiddock-android/`.' "$TAG" "${TAG#v}")
           fi
           {
             echo "body<<CHANGELOG_EOF"
             echo "$BODY"
             echo "CHANGELOG_EOF"
           } >> "$GITHUB_OUTPUT"
-      # Unsigned/ad-hoc, right-click-to-open — matches the Electron job's
-      # `-c.mac.identity=null` precedent; notarization is a paid decision,
-      # not made yet (see checkpoint.md's open questions).
-      - name: Build & publish via tauri-action
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Signs the `.app.tar.gz` the in-app updater downloads. This is
-          # minisign, not Apple code signing — the app is still ad-hoc/unsigned
-          # for Gatekeeper.
-          #
-          # REQUIRED, not optional. `createUpdaterArtifacts` is on in
-          # tauri.conf.json and a pubkey is configured, so a missing private key
-          # FAILS the build outright:
-          #   "A public key has been found, but no private key."
-          # (Verified locally by building with the variable unset — an earlier
-          # comment here claimed the build merely went unsigned. It does not.)
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      # Ad-hoc signed (right-click → Open the first time). Developer ID signing
+      # and notarization are a paid decision, not made yet; set CODESIGN_ID to
+      # a Developer ID identity here once there is one.
+      - name: Build the app
+        run: droiddock-native/scripts/build.sh
+
+      - name: Package the DMG and a zipped .app
+        run: |
+          droiddock-native/scripts/dmg.sh
+          VERSION="${GITHUB_REF_NAME#v}"
+          cp "droiddock-native/build/DroidDock-$VERSION.dmg" "$GITHUB_WORKSPACE/"
+          ditto -c -k --keepParent droiddock-native/build/DroidDock.app "$GITHUB_WORKSPACE/DroidDock-$VERSION-mac.zip"
+
+      # Crash symbols for this exact build (the shipped binary is stripped).
+      - name: Keep the dSYM
+        uses: actions/upload-artifact@v4
         with:
-          projectPath: droiddock-tauri/app
-          tagName: ${{ github.ref_name }}
-          releaseName: 'DroidDock Tauri ${{ github.ref_name }}'
-          # `latest.json` — the manifest the updater in `updater.rs` polls.
-          #
-          # It is fetched from `releases/latest/download/latest.json`, which
-          # only resolves for a PUBLISHED release. Now that this job publishes
-          # directly, the update endpoint goes live the moment the run finishes
-          # and every existing install is offered the build on its next poll.
-          # The review gate has moved to the tag: pushing `v*` ships, so don't
-          # push one you aren't ready to hand to users.
-          includeUpdaterJson: true
-          releaseBody: ${{ steps.notes.outputs.body }}
-          # Published straight away, no manual step. Drafting was the
-          # training-wheels setting while the pipeline was unproven; v2.0.1 ran
-          # clean end to end — correct notes, all five assets, updater manifest
-          # resolving on publish — so the hand-publish is gone.
-          releaseDraft: false
+          name: DroidDock-dSYM-${{ github.ref_name }}
+          path: droiddock-native/build/DroidDock.dSYM
+
+      # Creates the release for this tag; the android job adds its APK to it.
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: DroidDock ${{ github.ref_name }}
+          body: ${{ steps.notes.outputs.body }}
+          files: |
+            DroidDock-*.dmg
+            DroidDock-*-mac.zip
+          # MUST match the android job's `draft`: both jobs write this release.
+          draft: false
           prerelease: false
 
   android:
@@ -108,9 +108,9 @@ jobs:
     #   v1.0.0 — mac created the draft, softprops (default `draft: false`)
     #            updated it and published it, overriding the review gate.
     #   v2.0.0 — softprops got there first and created the release with an EMPTY
-    #            body; tauri-action then found it existing and only uploaded
-    #            assets, because `releaseBody` applies at creation. The release
-    #            shipped with no notes at all.
+    #            body; the mac job (then tauri-action) found it existing and only
+    #            uploaded assets, because the body applies at creation. The
+    #            release shipped with no notes at all.
     #
     # `needs` makes ownership explicit rather than incidental: the mac job
     # always creates the release, with the notes and the draft flag, and this
@@ -166,15 +166,25 @@ jobs:
           chmod +x gradlew
           ./gradlew testDebugUnitTest assembleRelease -PversionTag=${{ github.ref_name }}
 
-      # Named to sit unambiguously beside the macOS "DroidDock Tauri" assets —
+      # Named to sit unambiguously beside the macOS DMG and zip —
       # and matched exactly by UpdateChecker.kt's APK_ASSET, which finds the
       # download by this filename.
       - run: cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/DroidDock-Android.apk"
+      # R8 mapping, for decoding crash traces (release is shrunk; names are kept
+      # today via -dontobfuscate, but the mapping stays the source of truth if
+      # that ever changes).
+      - run: cp app/build/outputs/mapping/release/mapping.txt "$GITHUB_WORKSPACE/mapping-${{ github.ref_name }}.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-mapping-${{ github.ref_name }}
+          path: mapping-${{ github.ref_name }}.txt
       - name: Publish APK to the release
         uses: softprops/action-gh-release@v2
         with:
-          files: DroidDock-Android.apk
-          # MUST match the mac job's `releaseDraft`. Both jobs write the same
+          files: |
+            DroidDock-Android.apk
+            mapping-${{ github.ref_name }}.txt
+          # MUST match the mac job's `draft`. Both jobs write the same
           # release for this tag and whichever finishes last decides the flag —
           # on the v1.0.0 run this action's `draft: false` took the draft the
           # mac job had just created and published it, overriding the intent.

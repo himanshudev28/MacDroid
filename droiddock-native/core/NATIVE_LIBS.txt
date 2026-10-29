@@ -1,0 +1,5 @@
+# cargo rustc --release --lib --target aarch64-apple-darwin --crate-type staticlib -- --print native-static-libs
+# raw (as printed):
+-framework CoreFoundation -framework CoreServices -framework AppKit -framework CoreGraphics -framework Foundation -framework CoreFoundation -lobjc -framework Foundation -liconv -lSystem -lc -lm -framework CoreGraphics -framework CoreAudio -framework ApplicationServices
+# deduplicated:
+-framework CoreFoundation -framework CoreServices -framework AppKit -framework CoreGraphics -framework Foundation -lobjc -liconv -lSystem -lc -lm -framework CoreAudio -framework ApplicationServices

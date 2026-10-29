@@ -33,6 +33,9 @@ class CallReceiver : BroadcastReceiver() {
         val app = ctx.applicationContext
         ConnectionManager.ensureLoop(app)
 
+        // An internet call's notification already drives the Mac (VoipCalls): don't announce it twice,
+        // and never with an empty "?" caller.
+        if (VoipCalls.active && !announced) return
         when (intent.getStringExtra(TelephonyManager.EXTRA_STATE)) {
             TelephonyManager.EXTRA_STATE_RINGING -> {
                 // on API 28+ this broadcast fires twice: first without the number,
@@ -40,6 +43,18 @@ class CallReceiver : BroadcastReceiver() {
                 val number = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER).orEmpty()
                 if (number.isEmpty() && announced) return
                 if (number.isNotEmpty() && number == lastNumber) return
+                if (number.isEmpty()) {
+                    // No number yet: a carrier call gets it in a second broadcast, an internet call never
+                    // does but posts its call notification. Wait a moment before showing a nameless call.
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                        if (!VoipCalls.active && !announced) {
+                            announced = true
+                            lastState = TelephonyManager.EXTRA_STATE_RINGING
+                            ConnectionManager.send(payload(app, "ringing"))
+                        }
+                    }, 1200)
+                    return
+                }
                 announced = true
                 lastState = TelephonyManager.EXTRA_STATE_RINGING
                 if (number.isNotEmpty()) {
