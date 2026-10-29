@@ -1,0 +1,46 @@
+{
+  "l1": {
+    "fragmentSize": 182,
+    "frame": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fa000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fa000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f6061",
+    "packets": [
+      "80000258000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1",
+      "01b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fa000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b",
+      "026c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fa000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425",
+      "43262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f6061"
+    ],
+    "startSeq": 0
+  },
+  "nonceM": "101112131415161718191a1b1c1d1e1f",
+  "nonceP": "000102030405060708090a0b0c0d0e0f",
+  "notes": "dir P=0x50 phone->Mac, M=0x4D Mac->phone. nonce=[dir][0 0 0][u64be ctr]. AAD=[flags][ctr u32be][dir]. Deflate bytes are miniz_oxide level 6; verify by opening and inflating, do not compare compressor output.",
+  "sealedCtlPing": {
+    "ctr": 0,
+    "dir": "P",
+    "flags": "80",
+    "frame": "8000000000b85266be2112d0360adc05aa17d0ea8f2e61405143",
+    "plaintext": "10000003e8"
+  },
+  "sealedCtlPingMac": {
+    "ctr": 0,
+    "dir": "M",
+    "flags": "80",
+    "frame": "8000000000220e013daf40602b9620c3dc9fbc4b767ca78a51b0",
+    "plaintext": "10000003e8"
+  },
+  "sealedDeflateJson": {
+    "ctr": 2,
+    "dir": "P",
+    "flags": "01",
+    "frame": "0100000002fa15f97f82c88d0eb279839e110121f1c5339b43d456c489df4578d554958dcfbdbce8a56e463bfada9b12a40f9baaec7dce4562b5946e00ebfc8ec983ab417b5a5c27141b0053e76376d54d69b93cc36271913c723455717b252d5535f09c8d468f12a8fbbee1259b60077d9c449cd08ac10206c87f65dac3879848addc0f59664e83b736bfdaab57f3f8872e366113f492b65cb5771c4f0e0e1026f1719d77db657c8b3ac11a73afd8c12e3de78e3272fb956c866f",
+    "json": "{\"items\":[{\"body\":\"hello hello hello hello\",\"id\":0},{\"body\":\"hello hello hello hello\",\"id\":1},{\"body\":\"hello hello hello hello\",\"id\":2},{\"body\":\"hello hello hello hello\",\"id\":3},{\"body\":\"hello hello hello hello\",\"id\":4},{\"body\":\"hello hello hello hello\",\"id\":5},{\"body\":\"hello hello hello hello\",\"id\":6},{\"body\":\"hello hello hello hello\",\"id\":7},{\"body\":\"hello hello hello hello\",\"id\":8},{\"body\":\"hello hello hello hello\",\"id\":9},{\"body\":\"hello hello hello hello\",\"id\":10},{\"body\":\"hello hello hello hello\",\"id\":11},{\"body\":\"hello hello hello hello\",\"id\":12},{\"body\":\"hello hello hello hello\",\"id\":13},{\"body\":\"hello hello hello hello\",\"id\":14},{\"body\":\"hello hello hello hello\",\"id\":15},{\"body\":\"hello hello hello hello\",\"id\":16},{\"body\":\"hello hello hello hello\",\"id\":17},{\"body\":\"hello hello hello hello\",\"id\":18},{\"body\":\"hello hello hello hello\",\"id\":19},{\"body\":\"hello hello hello hello\",\"id\":20},{\"body\":\"hello hello hello hello\",\"id\":21},{\"body\":\"hello hello hello hello\",\"id\":22},{\"body\":\"hello hello hello hello\",\"id\":23},{\"body\":\"hello hello hello hello\",\"id\":24},{\"body\":\"hello hello hello hello\",\"id\":25},{\"body\":\"hello hello hello hello\",\"id\":26},{\"body\":\"hello hello hello hello\",\"id\":27},{\"body\":\"hello hello hello hello\",\"id\":28},{\"body\":\"hello hello hello hello\",\"id\":29},{\"body\":\"hello hello hello hello\",\"id\":30},{\"body\":\"hello hello hello hello\",\"id\":31},{\"body\":\"hello hello hello hello\",\"id\":32},{\"body\":\"hello hello hello hello\",\"id\":33},{\"body\":\"hello hello hello hello\",\"id\":34},{\"body\":\"hello hello hello hello\",\"id\":35},{\"body\":\"hello hello hello hello\",\"id\":36},{\"body\":\"hello hello hello hello\",\"id\":37},{\"body\":\"hello hello hello hello\",\"id\":38},{\"body\":\"hello hello hello hello\",\"id\":39}],\"type\":\"sms-threads\"}"
+  },
+  "sealedJson": {
+    "ctr": 1,
+    "dir": "P",
+    "flags": "00",
+    "frame": "00000000012a7e30b4423a735be35ca6b5293682ec497d856863f4efe003d08f832d8312fd6284b69ea2bcece97d46384eebe7add6b6",
+    "plaintext": "7b2274797065223a2270696e67222c2274223a313733303230303030303030307d"
+  },
+  "sessionKey": "7c7e1b811fdf9464357a83402df82cd83a4e9b4779820957ab437ca225cf3ad1",
+  "token": "acad86c1-6041-408c-bce7-2495dd338711"
+}
