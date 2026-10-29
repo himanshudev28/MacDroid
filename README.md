@@ -50,22 +50,22 @@ It's two apps that talk to each other:
 <table>
 <tr>
 <td width="50%" align="center">
-  <img src="docs/shots/mac-dashboard.webp" alt="DroidDock Dashboard on macOS — the paired phone in the side rail, with battery, Android version and shortcuts to Files, Messages and Mirror" width="100%" />
-  <br><strong>Dashboard</strong><br><sub>The phone lives in the rail — battery, Android version, one tap to anything</sub>
+  <img src="docs/shots/mac-dashboard.webp" alt="DroidDock Dashboard on macOS — the phone card with clock, Now Playing and battery beside quick actions and recent notifications" width="100%" />
+  <br><strong>Dashboard</strong><br><sub>Your phone at a glance — what's playing, battery, quick actions, latest notifications</sub>
 </td>
 <td width="50%" align="center">
-  <img src="docs/shots/mac-notifications.webp" alt="Phone notifications mirrored on the Mac, grouped by app, with a Show on Mac toggle" width="100%" />
-  <br><strong>Notifications</strong><br><sub>Grouped by app, dismissible, with inline reply — or off with one toggle</sub>
+  <img src="docs/shots/mac-notifications.webp" alt="Phone notifications on the Mac, grouped by app, beside Messages and Calls" width="100%" />
+  <br><strong>Notifications</strong><br><sub>Grouped by app, with reply and dismiss — Messages and Calls one click away</sub>
 </td>
 </tr>
 <tr>
 <td width="50%" align="center">
-  <img src="docs/shots/mac-mirror.webp" alt="The phone screen mirrored in its own resizable macOS window over Wi-Fi" width="100%" />
-  <br><strong>Screen mirror</strong><br><sub>Its own window — move it, resize it, pin it on top</sub>
+  <img src="docs/shots/mac-mirror.webp" alt="The Mirror page listing Wi-Fi mirror, ADB mirror, mirror in this app and desktop mode" width="100%" />
+  <br><strong>Mirror</strong><br><sub>Over Wi-Fi with no setup, or ADB for full quality — plus desktop mode and a second screen</sub>
 </td>
 <td width="50%" align="center">
-  <img src="docs/shots/mac-apps.webp" alt="A searchable grid of every app installed on the phone, launchable from the Mac" width="100%" />
-  <br><strong>Apps</strong><br><sub>Every phone app, searchable, launched from your keyboard</sub>
+  <img src="docs/shots/mac-files.webp" alt="The phone's storage browsed in a Finder-style list on the Mac, with Photos and Transfers tabs" width="100%" />
+  <br><strong>Files</strong><br><sub>Browse phone storage like Finder — drag files in or out, track every transfer</sub>
 </td>
 </tr>
 </table>
@@ -75,12 +75,12 @@ It's two apps that talk to each other:
 <table>
 <tr>
 <td width="33%" align="center">
-  <img src="docs/shots/phone-home.webp" alt="The DroidDock Android home screen showing the connected Mac, its battery and Mac media controls" width="100%" />
-  <br><strong>Home</strong><br><sub>Which Mac, how full its battery is, what it's playing</sub>
+  <img src="docs/shots/phone-home.webp" alt="The DroidDock Android home screen showing the connected Mac, its battery, Now Playing and Mac controls" width="100%" />
+  <br><strong>Home</strong><br><sub>Which Mac, its battery, what it's playing — and controls for it</sub>
 </td>
 <td width="33%" align="center">
-  <img src="docs/shots/phone-control.webp" alt="The Mac Remote tab on Android — a trackpad, arrow keys and a field for typing on the Mac" width="100%" />
-  <br><strong>Mac Remote</strong><br><sub>Trackpad, arrow keys, and a keyboard for the Mac</sub>
+  <img src="docs/shots/phone-files.webp" alt="The Android Files tab with today's transfer total, a file sending with live speed, and recent transfers" width="100%" />
+  <br><strong>Files</strong><br><sub>Send to the Mac with live speed, and a history of every transfer</sub>
 </td>
 <td width="33%" align="center">
   <img src="docs/shots/phone-clipboard.webp" alt="The Android clipboard tab, with a history toggle and a box for sending text to the Mac" width="100%" />

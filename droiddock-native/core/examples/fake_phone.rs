@@ -33,6 +33,9 @@ async fn main() {
     let brightness: Option<f64> = all.iter().position(|a| a == "--brightness").and_then(|i| all.get(i + 1)).and_then(|s| s.parse().ok());
     let volume: Option<f64> = all.iter().position(|a| a == "--volume").and_then(|i| all.get(i + 1)).and_then(|s| s.parse().ok());
     let demo_data = all.iter().any(|a| a == "--demo-data");
+    // `--showcase`: believable demo content (phone name, a few everyday notifications, a healthy
+    // battery) for README screenshots, instead of the obviously-fake defaults.
+    let showcase = all.iter().any(|a| a == "--showcase");
     let ring_after: Option<u64> = all.iter().position(|a| a == "--ring").and_then(|i| all.get(i + 1)).and_then(|s| s.parse().ok());
 
     let url = format!("ws://127.0.0.1:{port}");
@@ -44,7 +47,7 @@ async fn main() {
     let hello = json!({
         "type": "hello",
         "token": token,
-        "name": "Fake Pixel",
+        "name": if showcase { "Pixel 9" } else { "Fake Pixel" },
         "caps": ["info", "fs", "photos", "apps", "health", "fsmkdir", "macinfo"],
         "deviceId": "fake-phone-0000-0000-0000",
     });
@@ -82,8 +85,25 @@ async fn main() {
         "ongoing": false,
         "actions": ["Mark as read"],
     });
-    tx.send(Message::text(notification.to_string())).await.unwrap();
-    println!("sent notification");
+    if showcase {
+        let demo = [
+            ("0|com.google.android.calendar|7|demo|10002", "Calendar", "com.google.android.calendar", "Design review", "In 15 minutes · Room 4B", false),
+            ("0|com.google.android.gm|3|demo|10003", "Gmail", "com.google.android.gm", "Ravi Kumar", "Slides for Friday — attached the final deck", true),
+            ("0|com.whatsapp|2|demo|10001", "WhatsApp", "com.whatsapp", "Ada", "Dinner at 8? I'll book the place 🍝", true),
+        ];
+        for (i, (key, app, pkg, title, text, reply)) in demo.iter().enumerate() {
+            let n = json!({
+                "type": "notification", "key": key, "app": app, "pkg": pkg, "title": title, "text": text,
+                "replyable": reply, "when": now_ms - (2 - i as u64) * 240_000, "backfill": false,
+                "priority": "high", "ongoing": false,
+            });
+            tx.send(Message::text(n.to_string())).await.unwrap();
+        }
+        println!("sent showcase notifications");
+    } else {
+        tx.send(Message::text(notification.to_string())).await.unwrap();
+        println!("sent notification");
+    }
 
     // DeviceInfo.kt
     let info = json!({
@@ -91,7 +111,7 @@ async fn main() {
         "model": "Google Pixel 8",
         "android": "15",
         "sdk": 35,
-        "battery": 17,
+        "battery": if showcase { 82 } else { 17 },
         "charging": false,
     });
     tx.send(Message::text(info.to_string())).await.unwrap();
