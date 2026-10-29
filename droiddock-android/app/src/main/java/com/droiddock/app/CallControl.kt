@@ -122,6 +122,8 @@ object CallControl {
         if ((action == "mute" || action == "speaker") && on == null) {
             return Outcome(false, "$action needs an on/off value")
         }
+        // An internet call (WhatsApp…) answers / hangs up through its own notification actions.
+        VoipCalls.perform(action)?.let { return it }
         return when (action) {
             "answer" -> answer(ctx)
             "end" -> end(ctx)

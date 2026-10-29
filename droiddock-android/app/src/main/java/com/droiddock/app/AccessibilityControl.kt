@@ -25,6 +25,8 @@ object AccessibilityControl {
 
     @Volatile var service: AccessibilityService? = null
     private val main = Handler(Looper.getMainLooper())
+    /** One reusable thread for screenshot callbacks (a new executor per request leaked a thread each time). */
+    private val shotExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
 
     /**
      * Whether Mac-side screen control can actually do anything right now.
@@ -61,6 +63,58 @@ object AccessibilityControl {
      * right now, without digging through Settings" is the direction that needs
      * to be quick. Re-enabling is a deliberate act and can afford the trip.
      */
+    /**
+     * Tap the on-screen button labelled [labels] (exact text or description, any case) in any window:
+     * an incoming-call heads-up, the notification shade, or an app's full-screen call screen.
+     * With [openShade], an unseen button is looked for again with the notification shade pulled down.
+     *
+     * Used for an internet call's Answer: its action starts the app's call screen, which Android blocks
+     * when it comes from a background app, but a tap on the button counts as the user's own.
+     * Blocks the caller (never the main thread) for up to ~2 s; returns whether a tap was made.
+     */
+    fun clickLabel(labels: List<String>, openShade: Boolean): Boolean {
+        val svc = service ?: return false
+        val wanted = labels.map { it.trim().lowercase() }.filter { it.isNotEmpty() }.distinct()
+        if (wanted.isEmpty()) return false
+        fun attempt(): Boolean {
+            val latch = java.util.concurrent.CountDownLatch(1)
+            var done = false
+            main.post {
+                done = runCatching { clickIn(svc, wanted) }.getOrDefault(false)
+                latch.countDown()
+            }
+            latch.await(1500, java.util.concurrent.TimeUnit.MILLISECONDS)
+            return done
+        }
+        if (attempt()) return true
+        if (!openShade) return false
+        main.post { svc.performGlobalAction(AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS) }
+        Thread.sleep(700)
+        val ok = attempt()
+        if (!ok && Build.VERSION.SDK_INT >= 31) {
+            main.post { svc.performGlobalAction(AccessibilityService.GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE) }
+        }
+        return ok
+    }
+
+    private fun clickIn(svc: AccessibilityService, wanted: List<String>): Boolean {
+        val roots = buildList {
+            svc.windows?.forEach { w -> w.root?.let { add(it) } }
+            svc.rootInActiveWindow?.let { add(it) }
+        }
+        for (label in wanted) for (root in roots) {
+            val hits = root.findAccessibilityNodeInfosByText(label) ?: continue
+            for (n in hits) {
+                val text = (n.text ?: n.contentDescription)?.toString()?.trim()?.lowercase() ?: continue
+                if (text != label) continue   // never "Answer with message" for "Answer"
+                var target: AccessibilityNodeInfo? = n
+                while (target != null && !target.isClickable) target = target.parent
+                if (target != null && target.isVisibleToUser && target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+            }
+        }
+        return false
+    }
+
     fun disableSelf(): Boolean {
         val svc = service ?: return false
         return runCatching { svc.disableSelf(); true }.getOrDefault(false)
@@ -163,5 +217,56 @@ object AccessibilityControl {
             else -> return@post
         }
         runCatching { svc.performGlobalAction(action) }
+    }
+
+    /**
+     * Capture the screen with the accessibility service (API 30+, needs
+     * `canTakeScreenshot`). No consent dialog: the user already granted the
+     * service. Calls [onDone] with PNG bytes or an error message, on the main
+     * executor. The Mac asks for this when you press "Screenshot".
+     */
+    fun takeScreenshot(onDone: (ByteArray?, String?) -> Unit) {
+        val svc = service
+        if (Build.VERSION.SDK_INT < 30) return onDone(null, "Needs Android 11 or newer")
+        if (svc == null || !enabled) {
+            return onDone(null, "Turn on the DroidDock accessibility service on the phone")
+        }
+        main.post {
+            runCatching {
+                svc.takeScreenshot(
+                    android.view.Display.DEFAULT_DISPLAY,
+                    shotExecutor,
+                    object : AccessibilityService.TakeScreenshotCallback {
+                        override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
+                            try {
+                                val hw = result.hardwareBuffer
+                                val bmp = try {
+                                    android.graphics.Bitmap.wrapHardwareBuffer(hw, result.colorSpace)
+                                        ?.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                                } finally { hw.close() }
+                                if (bmp == null) return onDone(null, "Screenshot failed")
+                                val out = java.io.ByteArrayOutputStream()
+                                bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+                                bmp.recycle()
+                                onDone(out.toByteArray(), null)
+                            } catch (e: Exception) {
+                                onDone(null, e.message ?: "Screenshot failed")
+                            }
+                        }
+
+                        override fun onFailure(errorCode: Int) {
+                            onDone(
+                                null,
+                                if (errorCode == AccessibilityService.ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT) {
+                                    "Try again in a second"
+                                } else {
+                                    "The phone refused the screenshot (secure screen?)"
+                                }
+                            )
+                        }
+                    }
+                )
+            }.onFailure { onDone(null, it.message ?: "Screenshot failed") }
+        }
     }
 }
