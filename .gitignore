@@ -57,3 +57,15 @@ future update /
 # Local release-APK output. `assembleRelease` drops an 11 MB APK here; CI
 # builds and uploads its own, so this is never worth committing.
 droiddock-android/artifacts/
+
+# ---- DroidDock native (Rust core + SwiftUI) ----
+droiddock-native/core/target/
+droiddock-native/mac/.build/
+droiddock-native/build/
+
+# Working notes written while building the native app (design research, reviews,
+# playbooks, logs): kept on the developer's machine, not published.
+docs/PLAYBOOK-*.md
+docs/PROJECT-LOG-*.md
+docs/logo-concepts/
+droiddock-native/**/*.md
