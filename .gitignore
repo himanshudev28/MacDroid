@@ -69,3 +69,4 @@ docs/PLAYBOOK-*.md
 docs/PROJECT-LOG-*.md
 docs/logo-concepts/
 droiddock-native/**/*.md
+droiddock-native/core/M1_READY
