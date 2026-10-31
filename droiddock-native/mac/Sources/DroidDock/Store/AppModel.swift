@@ -27,6 +27,8 @@ final class AppModel {
     /// Files, photos, mirror, camera, Mac Files, wallpaper... need the Wi-Fi socket (BLE fallback §2).
     var wifiFeaturesAvailable: Bool { wifi.connected && (wifi.transport != "ble" || bleStatus.wifiAvailable) }
     private(set) var lastWifiEvent: WifiEvent?
+    /// Set when the core blocked an older phone's unencrypted connection; cleared by Allow or when a phone links.
+    private(set) var blockedPlain: BlockedPlain?
     var isConnected: Bool { wifi.connected }
     /// While set (and not connected) the phone card says "Reconnecting…". Armed at launch and whenever an
     /// established link drops; the phone is the one dialling in, so this is a bounded grace period, not a promise.
@@ -117,6 +119,8 @@ final class AppModel {
     // Updates
     private(set) var updateInfo: UpdateInfo?
     private(set) var updateProgress: UpdateProgress?
+    enum UpdateInstallState: Equatable { case idle, installing, updated, failed(String) }
+    private(set) var updateInstallState = UpdateInstallState.idle
 
     // Shell
     private(set) var menubarTitle: String?
@@ -272,18 +276,120 @@ final class AppModel {
         }
     }
 
+    // MARK: Blocked unencrypted phone
+    static let allowPlainBannerID = "tls-allow-plain"
+    @ObservationIgnored private var blockedSheetUp = false
+    @ObservationIgnored private var blockedAnswered = false
+
+    private func blockedPlainEvent(deviceId: String, name: String) {
+        blockedPlain = BlockedPlain(deviceId: deviceId, name: name)
+        blockedAnswered = false
+        // Settings › Connection always shows the Allow row. In front of the app: a sheet. Otherwise a banner whose click opens the sheet.
+        if NSApp.isActive, let win = NSApp.keyWindow, !blockedSheetUp {
+            presentBlockedSheet(on: win, name: name)
+            return
+        }
+        BannerCenter.shared.show(NativeNotification(
+            id: Self.allowPlainBannerID,
+            title: tr("Allow {name} without encryption?", ["name": name]),
+            body: tr("{name} is running an older DroidDock that can't connect securely. Allow it until you update the app on the phone, or keep it blocked.", ["name": name]),
+            replyKey: nil, sound: nil, hidePreview: nil))
+    }
+
+    /// Banner click (routed from `NotificationClickActions.handleBannerClick`): bring the app forward and ask once.
+    func blockedPlainBannerClicked() {
+        guard blockedPlain != nil else { return }   // already answered "Allow"
+        WindowControl.showMain()
+        NSApp.activate(ignoringOtherApps: true)
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))   // let the window come up
+            guard let b = self.blockedPlain else { return }
+            if !self.blockedAnswered, !self.blockedSheetUp, let win = NSApp.keyWindow {
+                self.presentBlockedSheet(on: win, name: b.name)
+            } else if !self.blockedSheetUp {
+                ShellActions.showSettings()   // already answered "Keep blocked", or no window: the Allow row is in Settings
+            }
+        }
+    }
+
+    private func presentBlockedSheet(on win: NSWindow, name: String) {
+        guard !blockedSheetUp else { return }
+        blockedSheetUp = true
+        let alert = NSAlert()
+        alert.messageText = tr("Allow {name} without encryption?", ["name": name])
+        alert.informativeText = tr("{name} is running an older DroidDock that can't connect securely. Allow it until you update the app on the phone, or keep it blocked.", ["name": name])
+        alert.addButton(withTitle: tr("Allow"))
+        alert.addButton(withTitle: tr("Keep blocked"))
+        alert.beginSheetModal(for: win) { [weak self] response in
+            Task { @MainActor in
+                guard let self else { return }
+                self.blockedSheetUp = false
+                if response == .alertFirstButtonReturn { await self.allowPlain() } else { self.blockedAnswered = true }
+            }
+        }
+    }
+
+    func allowPlain() async {
+        guard let b = blockedPlain else { return }
+        do {
+            try await Core.shared.tlsAllowPlain(deviceId: b.deviceId)
+            blockedPlain = nil
+            BannerCenter.shared.dismiss(id: Self.allowPlainBannerID)
+            toast(.ok, tr("Allowed. {name} will connect without encryption until it's updated.", ["name": b.name]))
+        } catch {
+            toast(.bad, error.localizedDescription)
+        }
+    }
+
     // MARK: Toasts
 
     func toast(_ kind: Toast.Kind, _ text: String) {
-        let t = Toast(kind: kind, text: text)
-        toasts.append(t)
-        if toasts.count > 3 { toasts.removeFirst() }
-        Task { [weak self] in
+        // An identical toast already on screen is one message, not two (a repeated failure shouldn't stack).
+        // A repeat refreshes its dismiss timer instead of being dropped, so it stays up for a full interval.
+        let t: Toast
+        if let existing = toasts.first(where: { $0.kind == kind && $0.text == text }) {
+            t = existing
+            toastTimers[t.id]?.cancel()
+        } else {
+            t = Toast(kind: kind, text: text)
+            toasts.append(t)
+            if toasts.count > 3 { let old = toasts.removeFirst(); toastTimers[old.id]?.cancel(); toastTimers[old.id] = nil }
+        }
+        toastTimers[t.id] = Task { [weak self] in
             try? await Task.sleep(for: .seconds(kind == .bad ? 6 : 4), tolerance: .seconds(1))
+            guard !Task.isCancelled else { return }
             self?.toasts.removeAll { $0.id == t.id }
+            self?.toastTimers[t.id] = nil
         }
     }
+    @ObservationIgnored private var toastTimers: [UUID: Task<Void, Never>] = [:]
     func dismissToast(_ id: UUID) { toasts.removeAll { $0.id == id } }
+
+    /// Where each Mac file was last sent on the phone (local path to remote folder), so Retry can reuse it.
+    /// Several sends of one file can go to different folders, so each is kept with the time it started.
+    @ObservationIgnored private var pushRecords: [String: [(ms: Double, dest: String)]] = [:]
+    func notePush(path: String, dest: String) {
+        var list = pushRecords[path] ?? []
+        list.append((Date().timeIntervalSince1970 * 1000, dest))
+        pushRecords[path] = Array(list.suffix(20))
+    }
+    /// The folder for the send that began at `startedMs`: the latest one recorded at or just before it.
+    func pushDestination(path: String, startedMs: Double) -> String? {
+        let list = pushRecords[path] ?? []
+        return (list.last { $0.ms <= startedMs + 3000 } ?? list.last)?.dest
+    }
+
+    /// Run a phone action; if it throws, say so in a `.bad` toast ("label: reason") instead of failing silently.
+    /// Returns true when it succeeded.
+    @discardableResult
+    func run(_ label: String, _ op: () async throws -> Void) async -> Bool {
+        do { try await op(); return true }
+        catch is CancellationError { return false }
+        catch {
+            toast(.bad, "\(label): \(error.localizedDescription)")
+            return false
+        }
+    }
 
     /// Dismissing here also dismisses on the phone, unless "Sync notification dismissals" (global or for this app) is off.
     func dismissNotification(_ key: String) {
@@ -306,7 +412,71 @@ final class AppModel {
         }
     }
 
-    func clearUpdateInfo() { updateInfo = nil }
+    func clearUpdateInfo() {
+        updateInfo = nil
+        resetUpdateInstall()
+    }
+
+    /// Back to a clean slate (not mid-install): no stale error or progress.
+    func resetUpdateInstall() {
+        guard updateInstallState != .installing else { return }
+        set(\.updateInstallState, .idle)
+        set(\.updateProgress, nil)
+    }
+
+    static let releasesPage = "https://github.com/himanshudev28/MacDroid/releases/latest"
+
+    enum UpdateResult { case restarting, updatedManually, openedPage, alreadyRunning, failed(String) }
+
+    /// Download, verify and install the pending update, then quit so the relaunch helper can start the new
+    /// version. Without a signed zip (or a writable app location) the core hands back the release page instead.
+    @discardableResult
+    func installUpdate() async -> UpdateResult {
+        if updateInstallState == .installing { return .alreadyRunning }
+        set(\.updateInstallState, .installing)
+        updateProgress = nil
+        do {
+            let out = try await Core.shared.updateInstall()
+            if out.action == "restart-manually" {
+                // Installed, but the relaunch helper didn't start: not a failure.
+                set(\.updateInstallState, .updated)
+                set(\.updateProgress, nil)
+                return .updatedManually
+            }
+            if out.action == "restart" {
+                set(\.updateProgress, UpdateProgress(phase: "restarting", percent: 100))
+                AppDelegate.quitNow()
+                return .restarting
+            }
+            if let s = out.url, let u = URL(string: s) { NSWorkspace.shared.open(u) }
+            set(\.updateInstallState, .idle)
+            clearUpdateInfo()
+            return .openedPage
+        } catch {
+            set(\.updateInstallState, .failed(error.localizedDescription))
+            set(\.updateProgress, nil)
+            return .failed(error.localizedDescription)
+        }
+    }
+
+    /// The "Open release page" fallback after a failed install.
+    func openReleasePage(_ url: String? = nil) {
+        if let u = URL(string: url ?? updateInfo?.htmlUrl ?? Self.releasesPage) { NSWorkspace.shared.open(u) }
+        resetUpdateInstall()
+    }
+
+    /// Short status line for an install in flight.
+    var updateProgressText: String {
+        if updateInstallState == .updated { return tr("Updated — quit and reopen DroidDock to finish.") }
+        guard let p = updateProgress else { return tr("Downloading… {p}%", ["p": "0"]) }
+        if updateInstallState == .updated { return tr("Updated — quit and reopen DroidDock to finish.") }
+        switch p.phase {
+        case "verifying": return tr("Verifying…")
+        case "installing": return tr("Installing…")
+        case "restarting": return tr("Restarting…")
+        default: return tr("Downloading… {p}%", ["p": String(Int(p.percent ?? 0))])
+        }
+    }
 
     // MARK: Events
 
@@ -360,12 +530,17 @@ final class AppModel {
                 if wasConnected { armReconnectGrace() }
                 set(\.media, nil); set(\.mediaArt, nil); set(\.activeCall, nil); set(\.deviceInfo, nil); set(\.linkQuality, nil)
             } else if !wasConnected {
+                blockedPlain = nil
                 dlog("phone connected: \(s.phoneName ?? "?")")
             }
         case "ble-status":
             if let b = decode(BleStatus.self, ev) { set(\.bleStatus, b) }
         case "wifi-event":
-            set(\.lastWifiEvent, decode(WifiEvent.self, ev))
+            let wifiEvent = decode(WifiEvent.self, ev)
+            set(\.lastWifiEvent, wifiEvent)
+            if let e = wifiEvent, e.action == "allow-plain", let id = e.deviceId {
+                blockedPlainEvent(deviceId: id, name: e.params?["name"] ?? tr("phone"))
+            }
         case "device-info":
             if let i = decode(AppDeviceInfo.self, ev) { set(\.deviceInfo, i) }
         case "link-quality":
@@ -483,8 +658,9 @@ final class AppModel {
             if let e = audioError { toast(.bad, "Phone audio: \(e)") }
         case "update-available":
             updateInfo = decode(UpdateInfo.self, ev)
+            resetUpdateInstall()
         case "update-progress":
-            updateProgress = decode(UpdateProgress.self, ev)
+            set(\.updateProgress, decode(UpdateProgress.self, ev))
         case "automation":
             if let a = decode(AutomationEvent.self, ev) {
                 lastAutomation = a

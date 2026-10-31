@@ -9,11 +9,19 @@ import SwiftUI
 final class ShellChrome {
     static let shared = ShellChrome()
 
+    /// The sub-screen last open under each phone-tabs tab, so a tab click and the Go menu land on the same screen.
+    var lastSub: [PhoneTabsShell.Tab: Destination] = [:]
+
     private var collapsed: [String: Bool] = [:]
     private var hidden: [String: Bool] = [:]
 
+    /// NavigationSplitView autosaves its column widths under one key; a stale value from the previous session or layout would
+    /// override each layout's own ideal width, so start every launch clean (`SplitWidth` sets the width on a layout switch).
+    private static let splitKey = "NSSplitView Subview Frames main, SidebarNavigationSplitView"
+
     private init() {
         let d = UserDefaults.standard
+        d.removeObject(forKey: Self.splitKey)
         for l in AppLayout.allCases {
             collapsed[l.rawValue] = d.bool(forKey: "droiddock.sidebarCollapsed.\(l.rawValue)")
             hidden[l.rawValue] = d.bool(forKey: "droiddock.phoneHidden.\(l.rawValue)")
@@ -79,92 +87,30 @@ final class ShellChrome {
     }
 }
 
-/// One quiet sidebar-footer action: icon + secondary label (icon only in the collapsed rail), hover wash, tooltip.
-struct SidebarChromeRow: View {
-    let symbol: String
-    let title: String
-    var shortcut: String?
-    var iconOnly = false
-    let action: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: DD.Space.sm) {
-                Image(systemName: symbol)
-                    .font(.system(size: 14))
-                    .symbolRenderingMode(.hierarchical)
-                    .frame(width: 20)
-                    .contentTransition(.symbolEffect(.replace))
-                if !iconOnly {
-                    Text(title).font(.system(size: 13)).lineLimit(1)
-                    Spacer(minLength: 0)
-                }
-            }
-            .foregroundStyle(hovering ? .primary : .secondary)
-            .padding(.horizontal, iconOnly ? 0 : DD.Space.sm)
-            .frame(maxWidth: .infinity, minHeight: 28, alignment: iconOnly ? .center : .leading)
-            .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.primary.opacity(hovering ? 0.08 : 0)))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { h in withDDAnimation(Motion.hover) { hovering = h } }
-        .help(shortcut.map { "\(title)  \($0)" } ?? title)
-        .accessibilityLabel(title)
-    }
-}
-
-/// The two rows at the bottom of a sidebar. `showCollapse` is false where the phone is the sidebar.
-struct SidebarChromeBar: View {
-    let layout: AppLayout
-    var showCollapse = true
-    var iconOnly = false
-    /// One row of two icon buttons (tooltips carry the names) for sidebars that are short of height.
-    var inline = false
-    @State private var chrome = ShellChrome.shared
-
-    var body: some View {
-        Group {
-            if inline && !iconOnly { HStack(spacing: DD.Space.xs) { rows(iconOnly: true).frame(maxWidth: 44); Spacer(minLength: 0) } }
-            else { VStack(spacing: 2) { rows(iconOnly: iconOnly) } }
-        }
-        .padding(.horizontal, DD.Space.sm).padding(.vertical, DD.Space.xs)
-        .background(alignment: .top) { Divider() }
-    }
-
-    @ViewBuilder private func rows(iconOnly: Bool) -> some View {
-        Group {
-            if showCollapse {
-                let c = chrome.isCollapsed(layout)
-                SidebarChromeRow(symbol: "sidebar.left", title: c ? tr("Expand sidebar") : tr("Collapse sidebar"),
-                                 shortcut: "⌃⌘S", iconOnly: iconOnly) { chrome.toggleSidebar(layout) }
-            }
-            let h = chrome.isPhoneHidden(layout)
-            SidebarChromeRow(symbol: h ? "iphone.slash" : "iphone", title: h ? tr("Show phone") : tr("Hide phone"),
-                             shortcut: "⌥⌘S", iconOnly: iconOnly) { chrome.togglePhone(layout) }
-        }
-    }
-}
-
 /// One icon of the collapsed rail: a 28 pt row, centred, with a small dot at the top-right for badges. Selection is the
 /// list's own rounded highlight (like Xcode's navigator icons).
 struct RailIcon: View {
-    /// Wide enough for the traffic lights (~76 pt) plus the list's own inset.
-    static let width: CGFloat = 80
+    static let width: CGFloat = LayoutMetrics.railWidth
     let destination: Destination
     let badge: Int
 
     var body: some View {
         Image(systemName: destination.symbol)
-            .font(.system(size: 14))
+            .font(.system(size: 15))
+            .symbolRenderingMode(.hierarchical)
             .frame(width: 28, height: 28)
             .overlay(alignment: .topTrailing) {
-                if badge > 0 { Circle().fill(Color.accentColor).frame(width: 7, height: 7).offset(x: -1, y: 3) }
+                if badge > 0 {
+                    Circle().fill(Color.accentColor).frame(width: 8, height: 8)
+                        .overlay(Circle().strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
+                        .offset(x: -1, y: 3)
+                        .accessibilityHidden(true)
+                }
             }
             .frame(maxWidth: .infinity)
-            .listRowInsets(EdgeInsets(top: 3, leading: 0, bottom: 3, trailing: 0))
-            .help(destination.title).accessibilityLabel(destination.title)
+            .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+            .help(destination.helpText)
+            .accessibilityLabel(badge > 0 ? "\(destination.title), \(badge)" : destination.title)
     }
 }
 
@@ -188,20 +134,28 @@ struct RailToggleItem: ToolbarContent {
 /// and titles unclipped. Settings' inner sidebar collapses to a menu below `SettingsScreen.compactBelow`, so the
 /// detail minimum does not have to include it.
 enum LayoutMetrics {
-    static let detailMin: CGFloat = 620
-    static let inspectorMin: CGFloat = 300
+    static let detailMin: CGFloat = 640
+    /// The phone-card column is the same width in every layout (phone-tabs/minimal/grouped sidebar, classic inspector).
+    static let phoneMin: CGFloat = 300, phoneIdeal: CGFloat = 320, phoneMax: CGFloat = 360
+    /// Classic's list-only sidebar.
+    static let listMin: CGFloat = 220, listIdeal: CGFloat = 240, listMax: CGFloat = 280
+    /// Collapsed icon rail.
+    static let railWidth: CGFloat = 72
+    /// Card margin from every column edge, in every host.
+    static let cardInset: CGFloat = 12
+    static let inspectorMin = phoneMin
 
     static func minWidth(_ l: AppLayout, phoneHidden: Bool, collapsed: Bool) -> CGFloat {
         switch l {
-        case .phoneTabs: return phoneHidden ? 700 : DD.Size.sidebarMin + 740
-        case .classic: return (collapsed ? RailIcon.width : 224) + detailMin + (phoneHidden ? 0 : inspectorMin)
-        case .grouped: return (collapsed ? RailIcon.width : 264) + detailMin
-        case .minimal: return phoneHidden ? 720 : 330 + 760
+        case .phoneTabs: return phoneHidden ? 700 : phoneMin + 700
+        case .classic: return (collapsed ? railWidth : listMin) + detailMin + (phoneHidden ? 0 : phoneMin)
+        case .grouped: return (collapsed ? railWidth : phoneMin) + detailMin
+        case .minimal: return phoneHidden ? 720 : phoneMin + 720
         }
     }
 }
 
-/// Grows (never shrinks) the main window to a width, clamped to the screen's visible frame and kept on-screen.
+/// Grows (never shrinks, never animates) the main window to a width, clamped to the screen's visible frame and kept on-screen.
 @MainActor
 enum WindowFit {
     private static var lastFit = Date.distantPast
@@ -224,7 +178,7 @@ enum WindowFit {
         if f.minY < vis.minY { f.origin.y = vis.minY }
         if f.maxY > vis.maxY { f.origin.y = vis.maxY - f.height }
         lastFit = Date()
-        let animate = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion && w.isVisible
-        w.setFrame(f, display: true, animate: animate)
+        // Never `animate: true`: that runs a synchronous nested animation loop on the main thread (see RootView).
+        w.setFrame(f, display: true)
     }
 }

@@ -45,6 +45,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        #if DEBUG || DD_BENCH
+        if CommandBarSelfTest.runIfRequested() { return }   // DD_SELFTEST_CMDBAR=1
+        #endif
         if DDSelfTest.runIfRequested() { return }   // DD_SELFTEST=mirror|audio|all (WP4)
         AppModel.shared.start()
         #if DEBUG
@@ -55,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
         #if DEBUG
         DebugWindowProbe.runIfRequested()
+        CommandBarSelfTest.demoIfRequested()
         #endif
         DockPolicy.apply()
         ShellRouter.install()

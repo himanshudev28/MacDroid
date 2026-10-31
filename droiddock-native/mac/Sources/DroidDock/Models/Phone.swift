@@ -7,13 +7,29 @@ struct WifiStatus: Codable, Sendable, Equatable {
     var caps: [String]?
     /// `wifi` | `ble` | nil (BLE fallback; additive).
     var transport: String?
+    /// `tls` | `aes` | `ble` | `plain` | `none` (additive); changes when the same phone swaps link type.
+    var security: String?
     func supports(_ cap: String) -> Bool { connected && (caps ?? []).contains(cap) }
+}
+
+/// The last phone the core blocked for connecting without encryption (kept in memory only).
+struct BlockedPlain: Equatable, Sendable {
+    var deviceId: String
+    var name: String
 }
 
 /// `{kind, text}` from `wifi-event`.
 struct WifiEvent: Codable, Sendable, Equatable {
     var kind: String   // ok | bad | info
     var text: String
+    /// Additive: English template + `{name}`-style params, so the core's own messages can be localized.
+    var key: String?
+    var params: [String: String]?
+    /// Set with `action == "allow-plain"`: the blocked phone's id, for `tls_allow_plain`.
+    var deviceId: String?
+    var action: String?
+    /// What to show: the localized template when the core sent a key, else its English `text`.
+    var display: String { key.map { tr($0, params ?? [:]) } ?? text }
 }
 
 /// bridge.ts `Notif` (named to avoid Foundation.Notification).

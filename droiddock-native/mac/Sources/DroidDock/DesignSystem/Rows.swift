@@ -148,6 +148,9 @@ struct ListRow<Leading: View, Trailing: View>: View {
     var isUnread: Bool = false
     var isSelected: Bool = false
     var hoverHighlight: Bool = true
+    /// Keep the trailing actions visible (dimmed until hovered) instead of revealing them on hover only.
+    /// Use for rows whose actions are the point of the row (quick dial), so they are discoverable.
+    var persistentActions: Bool = false
     @ViewBuilder var leading: Leading
     @ViewBuilder var trailing: Trailing
 
@@ -156,7 +159,7 @@ struct ListRow<Leading: View, Trailing: View>: View {
     @Environment(\.controlActiveState) private var activeState
 
     /// In hover mode, trailing actions appear on hover only (over the meta); in List mode they're inline.
-    private var revealsTrailing: Bool { hoverHighlight && Trailing.self != EmptyView.self }
+    private var revealsTrailing: Bool { hoverHighlight && !persistentActions && Trailing.self != EmptyView.self }
     /// We draw the selection ourselves (hover mode) and the window is key.
     private var drawsSelection: Bool { hoverHighlight && isSelected }
     /// Text sits on an accent fill: our own selection in a key window, or a native List's focused selection.
@@ -202,7 +205,7 @@ struct ListRow<Leading: View, Trailing: View>: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            if !revealsTrailing { trailing }
+            if !revealsTrailing { trailing.opacity(persistentActions && !hovering && !isSelected ? 0.55 : 1) }
         }
         // Hover-revealed actions take the timestamp's place instead of reserving dead space.
         .overlay(alignment: subtitle == nil ? .trailing : .topTrailing) {
@@ -235,6 +238,15 @@ struct ListRow<Leading: View, Trailing: View>: View {
         .ddAnimation(Motion.hover, value: hovering)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+extension ListRow {
+    /// Keep the row's trailing actions visible at rest (see `persistentActions`).
+    func persistentActions(_ on: Bool = true) -> ListRow {
+        var copy = self
+        copy.persistentActions = on
+        return copy
     }
 }
 

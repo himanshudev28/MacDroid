@@ -33,42 +33,31 @@ struct DroidDockApp: App {
     }
 }
 
-/// Go menu. ⌘1…⌘5 follow the active layout, so the menu and the toolbar tabs always agree.
+/// Go menu: one list and one set of ⌘ keys in every layout (⌘0 Dashboard, ⌘1…⌘7 the daily screens), so the menu, the tab
+/// tooltips and muscle memory agree whichever layout is active.
 struct NavigationCommands: Commands {
     let model: AppModel
     @AppStorage(AppLayout.defaultsKey) private var layoutRaw = AppLayout.phoneTabs.rawValue
 
     private var layout: AppLayout { AppLayout(rawValue: layoutRaw) ?? .phoneTabs }
 
-    private func item(_ title: String, _ key: Character?, _ go: @escaping () -> Void) -> some View {
+    private func item(_ d: Destination) -> some View {
         Group {
-            if let key { Button(title, action: go).keyboardShortcut(KeyEquivalent(key), modifiers: .command) }
-            else { Button(title, action: go) }
+            if let key = d.shortcutKey {
+                Button(d.title) { model.selection = d }.keyboardShortcut(KeyEquivalent(key), modifiers: .command)
+            } else {
+                Button(d.title) { model.selection = d }
+            }
         }
     }
 
     var body: some Commands {
         CommandMenu(tr("Go")) {
-            switch layout {
-            case .phoneTabs:
-                ForEach(Array(PhoneTabsShell.Tab.allCases.enumerated()), id: \.element) { i, t in
-                    item(t.title, Character("\(i + 1)")) { model.selection = t.items[0] }
-                }
-                Divider()
-                ForEach(PhoneTabsShell.extras.filter { $0 != .settings }) { d in item(d.title, nil) { model.selection = d } }
-            case .minimal:
-                ForEach(Array(MinimalShell.tabs.enumerated()), id: \.element) { i, d in
-                    item(d.title, Character("\(i + 1)")) { model.selection = d }
-                }
-                Divider()
-                ForEach(MinimalShell.overflow) { d in item(d.title, nil) { model.selection = d } }
-            case .classic, .grouped:
-                ForEach(Destination.allCases.filter { $0.shortcutKey != nil }) { d in
-                    item(d.title, d.shortcutKey) { model.selection = d }
-                }
-            }
+            ForEach(Destination.goShortcuts) { item($0) }
             Divider()
-            // ⌘, belongs to the Settings scene; this item opens the in-window (Classic/Minimal) page.
+            ForEach(Destination.goOthers) { item($0) }
+            Divider()
+            // ⌘, belongs to the Settings scene; this item opens the in-window Settings page.
             Button(Destination.settings.title) { model.selection = .settings }
         }
         CommandGroup(replacing: .sidebar) {
@@ -96,6 +85,8 @@ struct PhoneCommands: Commands {
             Divider()
             Button(model.mirror != nil ? tr("Stop Mirror") : tr("Mirror Screen")) { ShellActions.toggleMirror() }
                 .keyboardShortcut("m", modifiers: [.command, .shift])
+            Button(tr("Open Command Bar")) { CommandBarController.shared.toggle() }
+            Divider()
             Button(tr("Take Screenshot")) { ShellActions.screenshot() }
             Button(tr("Ring Phone")) { ShellActions.toggleRing() }
             Divider()

@@ -35,10 +35,7 @@ struct ClipboardScreen: View {
             }
         }
         .task {   // poll only while visible
-            while !Task.isCancelled {
-                clip.poll()
-                try? await Task.sleep(for: .seconds(1), tolerance: .milliseconds(400))
-            }
+            await UIActivity.shared.pollWhileWindowVisible(every: .seconds(1), tolerance: .milliseconds(400)) { clip.poll() }
         }
     }
 

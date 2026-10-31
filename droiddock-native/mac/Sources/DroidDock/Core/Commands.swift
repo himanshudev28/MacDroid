@@ -173,7 +173,7 @@ extension Core {
     func appVersion() async throws -> String { try await invoke("app_version") }
     func updateCheck() async throws -> UpdateInfo? { try await invoke("update_check") }
     /// Returns the release page URL (Swift opens it); no auto-install until Sparkle.
-    func updateInstall() async throws -> String? { try await invoke("update_install") }
+    func updateInstall() async throws -> UpdateInstallOutcome { try await invoke("update_install") }
 }
 
 // MARK: WP8/WP9 additions (notification tiers, Wi-Fi screenshot, Quick Share send)
@@ -252,4 +252,16 @@ extension Core {
     func bleStatus() async throws -> BleStatus { try await invoke("ble_status") }
     /// Force the transport: "wifi", "ble" or "auto" (hand control back). Mirrored to the phone as `link-prefer`.
     func linkPrefer(_ transport: String) async throws { try await invoke("link_prefer", ["transport": transport]) }
+}
+
+// MARK: - Link security (TLS)
+struct TlsStatus: Decodable, Sendable, Equatable {
+    /// `tls` | `aes` | `ble` | `plain` | `none`
+    var linkSecurity: String = "none"
+    var fp: String = ""
+}
+extension Core {
+    func tlsStatus() async throws -> TlsStatus { try await invoke("tls_status") }
+    /// Lets a blocked older phone connect without encryption again (removes it from the core's TLS-only list).
+    func tlsAllowPlain(deviceId: String) async throws { try await invoke("tls_allow_plain", ["deviceId": deviceId]) }
 }

@@ -106,11 +106,17 @@ struct PairingInfo: Codable, Sendable, Equatable {
     var port: Int
     var token: String
     var ips: [String]
+    /// SHA-256 of the Mac's TLS public key (base64url); the phone pins it. Absent from older cores.
+    var fp: String?
 
     /// Same shape as pairing.ts `pairingUrl` (the QR payload).
     var url: String {
         let name = host.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-_.!~*'()"))) ?? host
-        return "droiddock://pair?v=1&name=\(name)&ips=\(ips.joined(separator: ","))&port=\(port)&token=\(token)"
+        return "droiddock://pair?v=1&name=\(name)&ips=\(ips.joined(separator: ","))&port=\(port)&token=\(token)\(fpSuffix)"
+    }
+    private var fpSuffix: String {
+        guard let fp, !fp.isEmpty else { return "" }
+        return "&fp=\(fp)"
     }
 }
 

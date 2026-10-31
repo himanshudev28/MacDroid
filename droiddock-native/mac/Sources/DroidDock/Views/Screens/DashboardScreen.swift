@@ -61,11 +61,28 @@ struct DashboardScreen: View {
                     .symbolRenderingMode(.hierarchical).foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(tr("DroidDock {v} is available", ["v": u.version])).font(DD.Font.headline).foregroundStyle(DD.fg)
-                    Text(tr("You have {v}.", ["v": u.currentVersion])).font(DD.Font.callout).foregroundStyle(DD.dim)
+                    switch model.updateInstallState {
+                    case .installing:
+                        ProgressView(value: (model.updateProgress?.percent ?? 0) / 100).frame(maxWidth: 220)
+                        Text(model.updateProgressText).font(DD.Font.callout).foregroundStyle(DD.dim)
+                    case .failed(let m):
+                        Text(tr("Update failed")).font(DD.Font.callout).foregroundStyle(DD.badText)
+                        Text(m).font(DD.Font.caption).foregroundStyle(DD.dim).lineLimit(3)
+                    case .updated:
+                        Text(model.updateProgressText).font(DD.Font.callout).foregroundStyle(DD.dim)
+                    case .idle:
+                        Text(tr("You have {v}.", ["v": u.currentVersion])).font(DD.Font.callout).foregroundStyle(DD.dim)
+                    }
                 }
                 Spacer()
-                Button(tr("Later")) { model.clearUpdateInfo() }.buttonStyle(SecondaryButtonStyle(compact: true))
-                Button(tr("Update")) { ShellActions.openUpdate() }.buttonStyle(PrimaryButtonStyle(compact: true))
+                if model.updateInstallState != .installing && model.updateInstallState != .updated {
+                    if case .failed = model.updateInstallState {
+                        Button(tr("Open release page")) { model.openReleasePage(u.htmlUrl) }.buttonStyle(SecondaryButtonStyle(compact: true))
+                    } else {
+                        Button(tr("Later")) { model.clearUpdateInfo() }.buttonStyle(SecondaryButtonStyle(compact: true))
+                    }
+                    Button(tr("Update")) { ShellActions.openUpdate() }.buttonStyle(PrimaryButtonStyle(compact: true))
+                }
             }
         }
         .transition(.opacity)

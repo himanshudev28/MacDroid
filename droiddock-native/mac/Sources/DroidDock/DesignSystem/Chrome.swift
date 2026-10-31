@@ -9,6 +9,8 @@ struct DDTab<ID: Hashable>: Identifiable {
     var title: String
     var systemImage: String
     var badge: Int = 0
+    /// Shown in the tooltip, e.g. "⌘1". The Go menu owns the real key equivalent.
+    var shortcut: String?
 }
 
 /// Toolbar-centre view switcher drawn to the native macOS segmented-control metrics (track, white/raised knob,
@@ -93,7 +95,7 @@ struct SegmentedTabBar<ID: Hashable>: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(index < 9 ? "\(tab.title)  ⌘\(index + 1)" : tab.title)
+        .help(tab.shortcut.map { "\(tab.title)  \($0)" } ?? tab.title)
         .accessibilityLabel(tab.badge > 0 ? "\(tab.title), \(tab.badge)" : tab.title)
         .accessibilityAddTraits(selected ? .isSelected : [])
 
@@ -129,12 +131,12 @@ struct DDToast: View {
     private var symbol: String {
         switch kind {
         case .ok: "checkmark.circle.fill"
-        case .bad: "exclamationmark.triangle.fill"
+        case .bad: "xmark.octagon.fill"
         case .info: "info.circle.fill"
         }
     }
     private var tint: Color {
-        switch kind { case .ok: DD.ok; case .bad: DD.warn; case .info: DD.dim }
+        switch kind { case .ok: DD.ok; case .bad: DD.bad; case .info: DD.dim }
     }
 
     var body: some View {

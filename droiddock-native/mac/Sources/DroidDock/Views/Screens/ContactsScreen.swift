@@ -30,7 +30,7 @@ struct ContactsScreen: View {
     var body: some View {
         Group {
             if !model.isConnected && store.contacts.isEmpty {
-                EmptyState.disconnected(feature: tr("contacts")) { model.selection = .dashboard }
+                EmptyState.disconnected(feature: tr("contacts"))
             } else {
                 switch store.phase {
                 case .idle, .loading:
@@ -76,6 +76,7 @@ struct ContactsScreen: View {
                                 IconButton(systemImage: "phone", label: tr("Call")) { call(c) }
                             }
                         }
+                        .persistentActions()
                         .contextMenu {
                             Button(tr("Message")) { message(c) }
                             Button(tr("Call")) { call(c) }

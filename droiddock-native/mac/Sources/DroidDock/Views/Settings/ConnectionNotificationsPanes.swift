@@ -72,7 +72,8 @@ struct ConnectionSettingsPane: View {
                 }
                 DescribedToggle(tr("Reconnect automatically"), detail: tr("Find the phone again after sleep or a network change."),
                                 isOn: model.cfg(\.autoReconnect, "autoReconnect"))
-                DescribedToggle(tr("Encrypt the link"), detail: tr("AES-256-GCM on everything after pairing, keyed off your pairing code. Each side needs a recent enough app; anything unsupported stays as it was."),
+                LinkSecurityRow()
+                DescribedToggle(tr("Also encrypt older phones"), detail: tr("Only used by phones that don't support TLS yet."),
                                 isOn: model.cfg(\.encryptLink, "encryptLink"))
                 DescribedToggle(tr("Clipboard sync"), detail: tr("Share what you copy both ways. Off stops all clipboard traffic."),
                                 isOn: model.cfg(\.clipboardSync, "clipboardSync"))
@@ -160,5 +161,61 @@ struct ConnectionSettingsPane: View {
         if u - Date().timeIntervalSince1970 * 1000 > 3.1e11 { return tr("Paused until you resume.") }
         let d = Date(timeIntervalSince1970: u / 1000)
         return tr("Paused until {time}", ["time": d.formatted(date: .omitted, time: .shortened)])
+    }
+}
+
+/// Settings → Connection: how the live phone link is protected (TLS / Bluetooth / older AES / none).
+struct LinkSecurityRow: View {
+    @Environment(AppModel.self) private var model
+    @State private var status = TlsStatus()
+
+    private var title: String {
+        switch status.linkSecurity {
+        case "tls": return tr("Encrypted (TLS)")
+        case "ble": return tr("Encrypted (Bluetooth)")
+        case "aes": return tr("Encrypted (older method)")
+        case "plain": return tr("Not encrypted")
+        default: return tr("No phone connected")
+        }
+    }
+    private var symbol: String {
+        switch status.linkSecurity {
+        case "tls": return "lock.shield"
+        case "ble", "aes": return "lock"
+        case "plain": return "lock.open"
+        default: return "minus.circle"
+        }
+    }
+    /// First 16 characters of the fingerprint in groups of four.
+    private var shortFp: String {
+        let c = Array(status.fp.prefix(16))
+        return stride(from: 0, to: c.count, by: 4).map { String(c[$0..<min($0 + 4, c.count)]) }.joined(separator: " ")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DD.Space.xs) {
+            LabeledContent(tr("Connection security")) {
+                Label(title, systemImage: symbol)
+                    .foregroundStyle(status.linkSecurity == "plain" ? Color.orange : DD.dim)
+            }
+            if status.linkSecurity == "tls", !shortFp.isEmpty {
+                Text(verbatim: tr("Mac identity: {id}", ["id": shortFp])).font(DD.Font.mono).foregroundStyle(DD.dim)
+                    .help(status.fp).textSelection(.enabled)
+            } else if status.linkSecurity == "plain" {
+                Text(tr("Update DroidDock on your phone and it will switch to encryption automatically."))
+                    .font(DD.Font.callout).foregroundStyle(DD.dim).fixedSize(horizontal: false, vertical: true)
+            }
+            if let b = model.blockedPlain {
+                HStack(spacing: DD.Space.md) {
+                    Text(tr("{name} was blocked: it tried to connect without encryption.", ["name": b.name]))
+                        .font(DD.Font.callout).foregroundStyle(Color.orange).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Button(tr("Allow")) { Task { await model.allowPlain() } }
+                }
+            }
+        }
+        .task(id: model.wifi) {
+            status = (try? await Core.shared.tlsStatus()) ?? TlsStatus()
+        }
     }
 }

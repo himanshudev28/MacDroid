@@ -47,17 +47,30 @@ struct OnboardingView: View {
                 }
             }
             .id(step)
-            .transition(.opacity)
+            .ddTransition(Self.stepTransition)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(width: 560, height: 560)
+        .clipped()
         .onAppear { if model.isConnected { step = .permissions } }
-        .onChange(of: model.isConnected) { _, c in if c && step == .pair { go(.permissions) } }
+        .task(id: model.isConnected) {
+            // Let the "connected" check land and read before moving on. Keyed on the connection, so a drop during the
+            // wait (or the sheet closing) cancels the advance.
+            guard model.isConnected, step == .pair else { return }
+            try? await Task.sleep(for: .milliseconds(900))
+            if !Task.isCancelled, model.isConnected, step == .pair { go(.permissions) }
+        }
         .interactiveDismissDisabled(false)
         .onExitCommand { state.finish() }
     }
 
     private func go(_ s: Step) { withDDAnimation(Motion.state) { step = s } }
+
+    /// Forward-only flow: the next step slides in from the trailing side while the old one leaves toward the leading side
+    /// (faster, so it clears first). `.ddTransition` turns this into a plain fade under Reduce Motion.
+    private static let stepTransition = AnyTransition.asymmetric(
+        insertion: .offset(x: 28).combined(with: .opacity),
+        removal: .offset(x: -28).combined(with: .opacity).animation(Motion.exit))
 
     private var topBar: some View {
         HStack {
@@ -83,20 +96,25 @@ struct OnboardingView: View {
 
 // MARK: - Shared pieces
 
-private struct HeroGlyph: View {
-    var systemImage: String
-    var tint: Color
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .fill(LinearGradient(colors: [tint.opacity(0.95), tint.opacity(0.62)], startPoint: .top, endPoint: .bottom))
-                .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(DD.OnCard.stroke, lineWidth: 1))
-            Image(systemName: systemImage).font(.system(size: 38, weight: .regular))
-                .symbolRenderingMode(.hierarchical).foregroundStyle(.white)
-        }
-        .frame(width: 88, height: 88)
-        .accessibilityHidden(true)
+/// One-shot entrance for a step's parts: rise 6 pt + fade, `Motion.stagger(index)` apart. Fade only under Reduce Motion.
+private struct StepRise: ViewModifier {
+    var index: Int
+    @Environment(\.accessibilityReduceMotion) private var envReduceMotion
+    @State private var shown = false
+    func body(content: Content) -> some View {
+        let reduced = OnboardingMotion.reduced(envReduceMotion)
+        content
+            .opacity(shown ? 1 : 0)
+            .offset(y: shown || reduced ? 0 : 6)
+            .onAppear {
+                guard !shown else { return }
+                withAnimation((reduced ? Motion.reducedFade : Motion.content).delay(0.06 + Motion.stagger(index))) { shown = true }
+            }
     }
+}
+
+private extension View {
+    func stepRise(_ index: Int) -> some View { modifier(StepRise(index: index)) }
 }
 
 private struct StepScaffold<Content: View>: View {
@@ -108,14 +126,18 @@ private struct StepScaffold<Content: View>: View {
     var body: some View {
         VStack(spacing: DD.Space.md) {
             Text(title).font(DD.Font.largeTitle).foregroundStyle(DD.fg).multilineTextAlignment(.center)
+                .stepRise(0)
             Text(message).font(DD.Font.body).foregroundStyle(DD.dim).multilineTextAlignment(.center)
                 .frame(maxWidth: 400).fixedSize(horizontal: false, vertical: true)
+                .stepRise(1)
             content.padding(.top, DD.Space.sm)
+                .stepRise(2)
             Spacer(minLength: DD.Space.md)
             Button(actionTitle, action: action)
                 .buttonStyle(PrimaryButtonStyle())
                 .keyboardShortcut(.defaultAction)
                 .padding(.bottom, DD.Space.xl)
+                .stepRise(3)
         }
         .padding(.horizontal, DD.Space.xl)
     }
@@ -128,7 +150,7 @@ private struct WelcomeStep: View {
     var body: some View {
         VStack(spacing: DD.Space.lg) {
             Spacer(minLength: 0)
-            HeroGlyph(systemImage: "iphone.gen3.radiowaves.left.and.right", tint: Color.accentColor)
+            OnboardingHero()
             StepScaffold(title: tr("Welcome to DroidDock"),
                          message: tr("Your Android phone, right on your Mac. Notifications, messages, files, and your screen, over your own Wi-Fi."),
                          actionTitle: tr("Get Started"), action: next) {
@@ -160,17 +182,28 @@ private struct PairStep: View {
                      message: tr("Open DroidDock on your Android, tap Pair with Mac, and scan this code. Both devices need the same Wi-Fi."),
                      actionTitle: model.isConnected ? tr("Continue") : tr("I'll do this later"), action: next) {
             VStack(spacing: DD.Space.md) {
-                LockedQRView {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.white)
-                        if let qr = shell.qr {
-                            Image(nsImage: qr).interpolation(.none).resizable().scaledToFit().padding(14)
-                                .accessibilityLabel(tr("Pairing QR code"))
-                        } else { ProgressView().controlSize(.small) }
+                ZStack {
+                    if model.isConnected {
+                        connectedTile
+                            .ddTransition(.asymmetric(insertion: .scale(scale: 0.94).combined(with: .opacity), removal: .opacity))
+                    } else {
+                        LockedQRView {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.white)
+                                if let qr = shell.qr {
+                                    Image(nsImage: qr).interpolation(.none).resizable().scaledToFit().padding(14)
+                                        .accessibilityLabel(tr("Pairing QR code"))
+                                        .transition(.opacity)
+                                } else { ProgressView().controlSize(.small) }
+                            }
+                            .frame(width: 188, height: 188)
+                            .ddHairline(RoundedRectangle(cornerRadius: 18, style: .continuous), DD.line)
+                        }
+                        .transition(.opacity.animation(Motion.exit))
                     }
-                    .frame(width: 188, height: 188)
-                    .ddHairline(RoundedRectangle(cornerRadius: 18, style: .continuous), DD.line)
                 }
+                .frame(width: 188, height: 188)
+                .ddAnimation(Motion.pop, value: model.isConnected)
                 if model.isConnected {
                     StatusPill(text: tr("Connected to {name}", ["name": model.phoneName ?? tr("your phone")]), kind: .link)
                         .transition(.opacity)
@@ -183,6 +216,35 @@ private struct PairStep: View {
             }
             .ddAnimation(Motion.state, value: model.isConnected)
         }
+    }
+
+    private var connectedTile: some View { ConnectedTile() }
+}
+
+/// Replaces the QR the moment the phone connects: a green check that pops in, then bounces once as it settles.
+private struct ConnectedTile: View {
+    @Environment(\.accessibilityReduceMotion) private var envReduceMotion
+    @State private var bounce = false
+    var body: some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(DD.ok.opacity(0.14))
+            .overlay(
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 64, weight: .regular))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(DD.ok)
+                    .symbolEffect(.bounce, value: bounce)
+            )
+            .ddHairline(RoundedRectangle(cornerRadius: 18, style: .continuous), DD.ok.opacity(0.35))
+            .frame(width: 188, height: 188)
+            .accessibilityHidden(true)   // the "Connected to …" pill below says it
+            .task {
+                // A symbol effect fires on a value *change*, so flip it once the pop-in has mostly landed.
+                // Under Reduce Motion the check just fades in; no bounce.
+                guard !OnboardingMotion.reduced(envReduceMotion) else { return }
+                try? await Task.sleep(for: .milliseconds(160))
+                bounce = true
+            }
     }
 }
 
@@ -218,10 +280,7 @@ private struct PermissionsStep: View {
             .overlay(RoundedRectangle(cornerRadius: DD.Radius.lg, style: .continuous).strokeBorder(DD.containerEdge, lineWidth: 1))
         }
         .task {
-            while !Task.isCancelled {
-                await refresh()
-                try? await Task.sleep(for: .milliseconds(1200))
-            }
+            await UIActivity.shared.pollWhileWindowVisible(every: .milliseconds(1200), tolerance: .milliseconds(300)) { await refresh() }
         }
     }
 
@@ -238,7 +297,10 @@ private struct PermissionsStep: View {
             if done {
                 Image(systemName: "checkmark.circle.fill").font(.system(size: 18))
                     .symbolRenderingMode(.hierarchical).foregroundStyle(DD.ok)
-                    .transition(.opacity).accessibilityLabel(tr("Allowed"))
+                    .accessibilityLabel(tr("Allowed"))
+                    // Granting is the payoff of this step: the check pops in (spring, a hint of bounce) as the button fades.
+                    .ddTransition(.asymmetric(insertion: .scale(scale: 0.6).combined(with: .opacity).animation(Motion.pop),
+                                              removal: .opacity))
             } else {
                 Button(action, action: perform).buttonStyle(SecondaryButtonStyle(compact: true))
             }
@@ -249,14 +311,21 @@ private struct PermissionsStep: View {
     }
 
     private func refresh() async {
-        if Bundle.main.bundleIdentifier != nil {
+        if Self.notificationsAvailable {
             let s = await UNUserNotificationCenter.current().notificationSettings()
             notifs = s.authorizationStatus == .authorized || s.authorizationStatus == .provisional
         }
         ax = (try? await Core.shared.accessibilityTrusted()) ?? false
     }
 
+    /// `UNUserNotificationCenter.current()` asserts (SIGABRT) outside a .app bundle, e.g. the bare debug binary.
+    /// Same check as `NotificationService.available`.
+    private static var notificationsAvailable: Bool {
+        Bundle.main.bundleIdentifier != nil && Bundle.main.bundleURL.pathExtension == "app"
+    }
+
     private func requestNotifications() {
+        guard Self.notificationsAvailable else { return }
         Task {
             let center = UNUserNotificationCenter.current()
             let s = await center.notificationSettings()
@@ -282,7 +351,7 @@ private struct DoneStep: View {
     var body: some View {
         VStack(spacing: DD.Space.lg) {
             Spacer(minLength: 0)
-            HeroGlyph(systemImage: "checkmark", tint: DD.ok)
+            OnboardingDoneMark()
             StepScaffold(title: tr("You're all set"),
                          message: tr("DroidDock lives in your menu bar too. Close the window any time; it keeps running."),
                          actionTitle: tr("Start Using DroidDock"), action: finish) {

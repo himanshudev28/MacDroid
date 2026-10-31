@@ -25,7 +25,10 @@ struct FilesScreen: View {
     @FocusState private var newFolderFocused: Bool
     private static let newFolderID = "\u{1}new-folder"
 
-    private var sorted: [FsEntry] {
+    /// Filtered + sorted rows, cached: `body` reads this several times and re-sorting each time is wasted work.
+    @State private var sortedCache: [FsEntry]?
+    private var sorted: [FsEntry] { sortedCache ?? computeSorted() }
+    private func computeSorted() -> [FsEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         let base = q.isEmpty ? files.entries : files.entries.filter { $0.name.lowercased().contains(q) }
         let s = base.sorted(using: sortOrder)
@@ -45,6 +48,11 @@ struct FilesScreen: View {
                 content
             }
         }
+        .onAppear { sortedCache = computeSorted() }
+        .onChange(of: files.entries) { _, _ in sortedCache = computeSorted() }
+        .onChange(of: query) { _, _ in sortedCache = computeSorted() }
+        .onChange(of: creatingFolder) { _, _ in sortedCache = computeSorted() }
+        .onChange(of: sortOrder) { _, _ in sortedCache = computeSorted() }
         .task(id: model.isConnected) {
             if model.isConnected { files.reload() } else if !files.loadedOnce { files.reset() }
         }
@@ -368,7 +376,7 @@ struct FilesScreen: View {
                             detail: tr("{done} of {total}", ["done": FileFormat.bytes(p.sent), "total": FileFormat.bytes(p.total)]),
                             state: .running) {
                     IconButton(systemImage: "xmark", label: tr("Cancel transfer"), size: 24) {
-                        Task { try? await Core.shared.fsCancel(transferId: p.transferId) }
+                        Task { await model.run(tr("Couldn't cancel the transfer")) { try await Core.shared.fsCancel(transferId: p.transferId) } }
                     }
                 }
             }
@@ -454,6 +462,7 @@ struct FilesScreen: View {
         let dest = files.path
         Task {
             for p in paths {
+                model.notePush(path: p, dest: dest)
                 do { try await Core.shared.fsPush(localPath: p, dest: dest) }
                 catch { model.toast(.bad, "\((p as NSString).lastPathComponent): \(FileFormat.errorText(error.localizedDescription))") }
             }

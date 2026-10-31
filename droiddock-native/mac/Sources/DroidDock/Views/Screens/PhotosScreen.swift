@@ -42,7 +42,7 @@ struct PhotosScreen: View {
                     Label(selection.isEmpty ? tr("Save") : tr("Save {n}", ["n": selection.count]), systemImage: "square.and.arrow.down")
                 }
                 .disabled(selection.isEmpty || saving).help(tr("Save the selected items to Downloads"))
-                Button { Task { try? await Core.shared.photoSyncBackfill() } } label: { Label(tr("Back Up Now"), systemImage: "icloud.and.arrow.down") }
+                Button { backUpNow() } label: { Label(tr("Back Up Now"), systemImage: "icloud.and.arrow.down") }
                     .disabled(!model.isConnected || model.config?.photoSyncEnabled != true)
                     .help(model.config?.photoSyncEnabled == true ? tr("Copy every photo on the phone to your Mac now") : tr("Turn on photo sync in Settings to back up automatically"))
                 Button { selection = []; Task { await store.reload() } } label: { Label(tr("Refresh"), systemImage: "arrow.clockwise") }
@@ -147,8 +147,12 @@ struct PhotosScreen: View {
         }
     }
 
+    private func backUpNow() {
+        model.toast(.info, tr("Backing up photos…"))
+        Task { await model.run(tr("Couldn't start the backup")) { try await Core.shared.photoSyncBackfill() } }
+    }
+
     private func open(_ item: MediaItem) {
-        model.toast(.ok, tr("Opening {name}…", ["name": item.name]))
         Task {
             do { try await Core.shared.photoOpen(path: item.path, name: item.name) }
             catch { model.toast(.bad, FileFormat.errorText(error.localizedDescription)) }

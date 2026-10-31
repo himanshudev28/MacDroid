@@ -7,6 +7,7 @@ struct NotificationsScreen: View {
     @Environment(AppModel.self) private var model
     @AppStorage("droiddock.notifStacks") private var stacked = true
     @State private var search = ""
+    @State private var confirmClearAll = false
     @State private var filterApp: String?
     @State private var expanded: Set<String> = []
     @State private var replyingKey: String?
@@ -57,7 +58,7 @@ struct NotificationsScreen: View {
                                    ? tr("Phone notifications show up here, and as Mac banners you can reply to.")
                                    : tr("Phone notifications show up here. Turn on Mac banners in Settings."))
                 } else {
-                    EmptyState.disconnected(feature: tr("notifications")) { model.selection = .dashboard }
+                    EmptyState.disconnected(feature: tr("notifications"))
                 }
             } else if visible.isEmpty {
                 NoResults(query: search.isEmpty ? (filterApp ?? "") : search)
@@ -147,6 +148,11 @@ struct NotificationsScreen: View {
             }
             .contextMenu { rowMenu(n, isCall: isCall) }
             .accessibilityAction(named: tr("Dismiss")) { dismiss(n) }
+            .accessibilityAction(named: tr("Reply")) { if n.replyable == true { startReply(n) } }
+            .accessibilityAction(named: isCall ? tr("Call back") : tr("Open on phone")) {
+                if isCall, let num = n.number ?? n.text { call(num) }
+                else if NotificationClickActions.shared.canOpenOnPhone(key: n.key) { NotificationClickActions.shared.open(key: n.key) }
+            }
 
             if let frac = progress(n) {
                 ProgressView(value: frac).progressViewStyle(.linear).controlSize(.small)
@@ -266,8 +272,12 @@ struct NotificationsScreen: View {
             .help(tr("Filter by app"))
             .disabled(model.notifications.isEmpty)
 
-            Button { clear(visible) } label: { Label(tr("Clear"), systemImage: "trash") }
+            Button { if visible.count > 5 { confirmClearAll = true } else { clear(visible) } } label: { Label(tr("Clear"), systemImage: "trash") }
                 .keyboardShortcut(.delete, modifiers: .command)
+                .confirmationDialog(tr("Clear {n} notifications?", ["n": visible.count]), isPresented: $confirmClearAll, titleVisibility: .visible) {
+                    Button(tr("Clear All"), role: .destructive) { clear(visible) }
+                    Button(tr("Cancel"), role: .cancel) {}
+                } message: { Text(tr("This can't be undone.")) }
                 .help(tr("Clear all  ⌘⌫"))
                 .disabled(visible.isEmpty)
         }

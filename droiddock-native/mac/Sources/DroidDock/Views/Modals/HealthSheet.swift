@@ -82,10 +82,7 @@ struct HealthSheet: View {
         .frame(width: 560, height: 520)
         .ddAppearance(AppearanceSettings.shared)
         .task {
-            while !Task.isCancelled {
-                await refresh()
-                try? await Task.sleep(for: .seconds(4), tolerance: .seconds(1))
-            }
+            await UIActivity.shared.pollWhileWindowVisible(every: .seconds(4), tolerance: .seconds(1)) { await refresh() }
         }
     }
 

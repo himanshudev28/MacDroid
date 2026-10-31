@@ -191,6 +191,9 @@ final class MirrorSession {
 
     func stop() { Task { try? await Core.shared.mirrorStop() } }
 
+    /// Dismiss a failed-start banner (the launcher's "Dismiss").
+    func clearFailure() { if case .failed = phase { phase = .idle } }
+
     func dismissControlHint() { controlHint = false }
 
     func toggleMute() { audioMuted.toggle(); audio.muted = audioMuted }

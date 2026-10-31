@@ -23,8 +23,17 @@ struct UpdateInfo: Codable, Sendable, Equatable {
     var version: String
     var notes: String
     var currentVersion: String
+    /// Release page, for the "Open release page" fallback.
+    var htmlUrl: String?
+    /// The release carries a signed zip the app can install itself.
+    var installAvailable: Bool?
 }
-struct UpdateProgress: Codable, Sendable, Equatable { var downloaded: Double; var total: Double? }
+/// `update-progress`: phase is downloading | verifying | installing | restarting.
+struct UpdateProgress: Codable, Sendable, Equatable {
+    var phase: String?; var percent: Double?; var downloaded: Double?; var total: Double?
+}
+/// `update_install` result: `restart` (new app in place, quit now) or `open` (show `url`).
+struct UpdateInstallOutcome: Codable, Sendable, Equatable { var action: String; var url: String? }
 
 /// `automation` event: `droiddock://` routes forwarded by the core.
 struct AutomationEvent: Codable, Sendable, Equatable {

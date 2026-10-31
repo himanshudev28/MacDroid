@@ -25,7 +25,9 @@ enum WindowControl {
     static var openMain: (() -> Void)?
 
     static var mainWindow: NSWindow? {
-        NSApp.windows.first { !($0 is NSPanel) && $0.styleMask.contains(.titled) && $0.canBecomeMain }
+        // Id first: with the Settings window frontmost, "first titled window" is not necessarily the main one.
+        NSApp.windows.first { $0.identifier?.rawValue == "main" }
+            ?? NSApp.windows.first { !($0 is NSPanel) && $0.styleMask.contains(.titled) && $0.canBecomeMain }
     }
 
     static func showMain() {

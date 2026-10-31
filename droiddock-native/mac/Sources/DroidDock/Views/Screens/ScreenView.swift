@@ -25,7 +25,6 @@ struct ScreenView: View {
         if needsWifi {
             ContentUnavailableView(tr("Needs Wi-Fi"), systemImage: "wifi.slash",
                                    description: Text(tr("Your phone is connected over Bluetooth. This comes back when Wi-Fi does.")))
-                .background(DD.ink)
         } else {
             realScreen
         }
@@ -61,6 +60,5 @@ struct PlaceholderScreen: View {
             title: destination.title,
             message: model.isConnected ? tr("This screen is being rebuilt in native SwiftUI.")
                                        : tr("Link your phone to use {name}.", ["name": destination.title]))
-        .background(DD.ink)
     }
 }

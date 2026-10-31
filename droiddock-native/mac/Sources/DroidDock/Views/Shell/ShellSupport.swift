@@ -54,7 +54,15 @@ final class ShellState {
     private(set) var callStart: Date?
     var ringing = false
     /// User tapped "Pair a phone" on an offline card.
-    var forcePairing = false
+    var forcePairing = false {
+        didSet {
+            // "Pair a phone" must show the QR in every layout: bring the phone card back if it is hidden or collapsed.
+            guard forcePairing, !oldValue else { return }
+            let l = ShellChrome.currentLayout
+            ShellChrome.shared.setPhoneHidden(l, false)
+            if !ShellChrome.phoneIsSidebar(l) { ShellChrome.shared.setCollapsed(l, false) }
+        }
+    }
 
     @ObservationIgnored private var started = false
     @ObservationIgnored private var qrURL: String?
@@ -249,8 +257,11 @@ enum ShellActions {
 
     static func openUpdate() {
         Task {
-            if let s = try? await Core.shared.updateInstall(), let u = URL(string: s) { NSWorkspace.shared.open(u) }
-            else { model.toast(.bad, tr("Could not open the release page")) }
+            switch await model.installUpdate() {
+            case .failed(let m): model.toast(.bad, m.isEmpty ? tr("Update failed") : m)
+            case .updatedManually: model.toast(.ok, tr("Updated — quit and reopen DroidDock to finish."))
+            default: break
+            }
         }
     }
 
@@ -323,3 +334,71 @@ enum DebugPanelWindow {
     }
 }
 #endif
+
+// MARK: - Shared shell pieces
+
+extension View {
+    /// Keeps the window title set (Mission Control, Window menu and VoiceOver read it) but draws no title text, for layouts
+    /// whose toolbar tabs are the title. macOS 15 can remove the title item; macOS 14 falls back to an empty visible title.
+    @ViewBuilder func hidesWindowTitle(_ title: String) -> some View {
+        if #available(macOS 15, *) {
+            self.navigationTitle(title).toolbar(removing: .title)
+        } else {
+            self.navigationTitle("")
+        }
+    }
+
+    /// Visible, inline, left-aligned title (like Finder and Mail) with the phone's name as the subtitle.
+    func inlineTitle(_ title: String, subtitle: String) -> some View {
+        self.navigationTitle(title).navigationSubtitle(subtitle).toolbarTitleDisplayMode(.inline)
+    }
+}
+
+/// Trailing "More" menu: every destination a layout's tabs or footer don't show, so nothing is out of reach (also when the
+/// phone panel is hidden). The glyph turns into the open destination's icon, tinted, while one of them is open.
+struct ShellMoreMenu: View {
+    let destinations: [Destination]
+    @Environment(AppModel.self) private var model
+
+    private var inMenu: Bool { destinations.contains(model.selection) }
+
+    var body: some View {
+        Menu {
+            ForEach(destinations) { d in
+                Button { withDDPointerAnimation(Motion.screen) { model.selection = d } } label: {
+                    if let k = d.shortcutKey { Label("\(d.title)  ⌘\(k)", systemImage: d.symbol) }
+                    else { Label(d.title, systemImage: d.symbol) }
+                }
+            }
+        } label: {
+            Image(systemName: inMenu ? model.selection.symbol : "ellipsis.circle")
+                .foregroundStyle(inMenu ? Color.accentColor : Color.secondary)
+        }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden)
+        .fixedSize()
+        .help(inMenu ? model.selection.title : tr("More"))
+        .accessibilityLabel(tr("More"))
+    }
+}
+
+/// Toolbar toggle for the phone panel (Classic's inspector, Grouped's card). Same switch as View › Hide Phone (⌥⌘S).
+struct PhonePanelToggleItem: ToolbarContent {
+    let layout: AppLayout
+    @State private var chrome = ShellChrome.shared
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Toggle(isOn: Binding(get: { !chrome.isPhoneHidden(layout) }, set: { chrome.setPhoneHidden(layout, !$0) })) {
+                Image(systemName: "iphone")
+            }
+            .toggleStyle(.button)
+            .help("\(tr("Phone panel"))  ⌥⌘S")
+            .accessibilityLabel(tr("Phone panel"))
+        }
+    }
+}
+
+extension AppModel {
+    /// Window subtitle: the phone's name, or "Not connected". Never the app name.
+    var shellSubtitle: String { isConnected ? (phoneName ?? "") : tr("Not connected") }
+}

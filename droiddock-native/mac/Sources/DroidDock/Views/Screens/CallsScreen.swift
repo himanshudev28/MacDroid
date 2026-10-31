@@ -19,7 +19,7 @@ struct CallsScreen: View {
     var body: some View {
         Group {
             if !model.isConnected {
-                EmptyState.disconnected(feature: tr("calls")) { model.selection = .dashboard }
+                EmptyState.disconnected(feature: tr("calls"))
             } else {
                 HSplitView {
                     dialer.frame(minWidth: 300, idealWidth: 320, maxWidth: 380)
@@ -102,7 +102,10 @@ struct CallsScreen: View {
                     } trailing: {
                         IconButton(systemImage: "phone.fill", label: tr("Call")) { call(c.number, c.name) }
                     }
+                    .persistentActions()
                     .onTapGesture(count: 2) { call(c.number, c.name) }
+                    .accessibilityAction(named: tr("Call")) { call(c.number, c.name) }
+                    .accessibilityAction(named: tr("Message")) { InboxRouter.shared.openMessages(to: MessageTarget(number: c.number, name: c.name)) }
                     .contextMenu {
                         Button(tr("Call")) { call(c.number, c.name) }
                         Button(tr("Message")) { InboxRouter.shared.openMessages(to: MessageTarget(number: c.number, name: c.name)) }

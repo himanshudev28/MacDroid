@@ -15,32 +15,15 @@ struct RootView: View {
     var body: some View {
         let layout = AppLayout(rawValue: layoutRaw) ?? .phoneTabs
         let required = chrome.requiredWidth(layout)
-        Group {
-            switch layout {
-            case .phoneTabs: PhoneTabsShell()
-            case .classic: ClassicShell()
-            case .grouped: GroupedShell()
-            case .minimal: MinimalShell()
-            }
-        }
-        // Layout switch (Settings › Appearance): an instant swap. Animating two NavigationSplitViews (the old one fading
-        // out while the new one measured its columns) left uneven columns and a stalled main thread; each shell has a
-        // stable identity so its split view is built fresh with its own column widths.
-        .id(layout)
+        MainShell(layout: layout)
+        // Layout switch (Settings › Appearance): an instant swap of the columns inside one persistent split view.
         .transaction(value: layoutRaw) { $0.animation = nil; $0.disablesAnimations = true }
         .liquidWindowBackground()
         .frame(minWidth: required, minHeight: 600)
-        // Layout switch or panel/sidebar change: grow the window to the new layout's real minimum (animated unless
-        // Reduce Motion is on, clamped to the screen).
-        // A second pass after the swapped shell has measured: a grow issued while the old split view was still tearing down can be eaten.
-        .onChange(of: required) { _, w in
-            WindowFit.grow(to: w)
-            Task { @MainActor in try? await Task.sleep(for: .milliseconds(500)); WindowFit.grow(to: chrome.requiredWidth(layout)) }
-        }
-        .onChange(of: layoutRaw) { _, _ in
-            Task { @MainActor in try? await Task.sleep(for: .milliseconds(300)); WindowFit.grow(to: chrome.requiredWidth(AppLayout(rawValue: layoutRaw) ?? .phoneTabs)) }
-        }
-        .task { try? await Task.sleep(for: .milliseconds(150)); WindowFit.grow(to: required) }
+        // A wider layout or panel needs a wider window. Applied in the same pass as the state change, never animated: an animated
+        // `setFrame` runs a nested run loop on the main thread and re-lays-out the half-built split view every frame (measured:
+        // 0.6 to 3.4 s stalls when switching layouts from a narrow window).
+        .onChange(of: required, initial: true) { _, w in WindowFit.grow(to: w) }
         .overlay(alignment: .bottom) { ToastStack() }
         .sheet(isPresented: $onboarding.isShowing) {
             OnboardingView().environment(model).ddAppearance(AppearanceSettings.shared)

@@ -89,7 +89,8 @@ private struct DDAnimationModifier<V: Equatable>: ViewModifier {
     let value: V
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func body(content: Content) -> some View {
-        content.animation(Motion.resolved(animation, reduceMotion: reduceMotion), value: value)
+        // `|| systemReduceMotion`: same system setting in release; in DEBUG it also honours the `DD_REDUCE_MOTION` QA override.
+        content.animation(Motion.resolved(animation, reduceMotion: reduceMotion || Motion.systemReduceMotion), value: value)
     }
 }
 
@@ -98,7 +99,7 @@ private struct DDTransitionModifier: ViewModifier {
     let transition: AnyTransition
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func body(content: Content) -> some View {
-        content.transition(reduceMotion ? .opacity : transition)
+        content.transition(reduceMotion || Motion.systemReduceMotion ? .opacity : transition)
     }
 }
 

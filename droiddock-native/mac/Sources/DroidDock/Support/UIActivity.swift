@@ -27,6 +27,8 @@ final class UIActivity {
     @ObservationIgnored private var sendTask: Task<Void, Never>?
     @ObservationIgnored private var windowWasVisible = true
     @ObservationIgnored private var activeChain: Task<Void, Never>?
+    @ObservationIgnored private var visibleWaiters: [Int: CheckedContinuation<Void, Never>] = [:]
+    @ObservationIgnored private var nextWaiterID = 0
     @ObservationIgnored private var purgeTask: Task<Void, Never>?
 
     func start() {
@@ -49,6 +51,31 @@ final class UIActivity {
             Task { @MainActor in self?.recompute() }
         }
         recompute()
+    }
+
+    /// Returns at once while a main window is on screen; otherwise parks (no timer) until one is, or the task is cancelled.
+    /// `orderOut`/occlusion do not fire `onDisappear`, so polling `.task` loops call this each turn.
+    func waitUntilWindowVisible() async {
+        guard !windowVisible else { return }
+        nextWaiterID += 1
+        let id = nextWaiterID
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                if windowVisible || Task.isCancelled { c.resume() } else { visibleWaiters[id] = c }
+            }
+        } onCancel: {
+            Task { @MainActor in UIActivity.shared.visibleWaiters.removeValue(forKey: id)?.resume() }
+        }
+    }
+
+    /// Runs `body` every `interval` while the main window is on screen, and not at all while it is hidden or covered.
+    func pollWhileWindowVisible(every interval: Duration, tolerance: Duration, _ body: @MainActor () async -> Void) async {
+        while !Task.isCancelled {
+            await waitUntilWindowVisible()
+            if Task.isCancelled { return }
+            await body()
+            try? await Task.sleep(for: interval, tolerance: tolerance)
+        }
     }
 
     func setPanelOpen(_ open: Bool) {
@@ -76,6 +103,7 @@ final class UIActivity {
                 && $0.occlusionState.contains(.visible)
         }
         if any != windowVisible { windowVisible = any }
+        if any { let w = visibleWaiters; visibleWaiters = [:]; w.values.forEach { $0.resume() } }
         if any != windowWasVisible {
             windowWasVisible = any
             purgeTask?.cancel()

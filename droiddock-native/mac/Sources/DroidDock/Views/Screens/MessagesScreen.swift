@@ -20,7 +20,7 @@ struct MessagesScreen: View {
     var body: some View {
         Group {
             if !model.isConnected && store.threads.isEmpty {
-                EmptyState.disconnected(feature: tr("messages")) { model.selection = .dashboard }
+                EmptyState.disconnected(feature: tr("messages"))
             } else {
                 HSplitView {
                     threadList.frame(minWidth: 230, idealWidth: 280, maxWidth: 360)
@@ -102,7 +102,7 @@ struct MessagesScreen: View {
                 .tag(t.threadId)
                 .listRowSeparator(.hidden)
                 .contextMenu {
-                    Button(tr("Call")) { Task { try? await Core.shared.actionCall(number: t.address) } }
+                    Button(tr("Call")) { Task { await model.run(tr("Couldn't place the call")) { try await Core.shared.actionCall(number: t.address) } } }
                     Button(tr("Copy Number")) {
                         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(t.address, forType: .string)
                     }
@@ -180,7 +180,7 @@ private struct ConversationPane: View {
             }
             Spacer()
             IconButton(systemImage: "phone", label: tr("Call")) {
-                if let a = store.address { Task { try? await Core.shared.actionCall(number: a) } }
+                if let a = store.address { Task { await model.run(tr("Couldn't place the call")) { try await Core.shared.actionCall(number: a) } } }
             }
         }
         .padding(.horizontal, DD.Space.content).padding(.vertical, DD.Space.sm)

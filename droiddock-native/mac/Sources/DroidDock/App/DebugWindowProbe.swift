@@ -7,6 +7,7 @@ import AppKit
 enum DebugWindowProbe {
     static func runIfRequested() {
         let env = ProcessInfo.processInfo.environment
+        if env["DD_STALL_WATCH"] == "1" { startStallWatch() }
         guard env["DD_TEST_TITLEBAR"] == "1" else { return }
         let seq = (env["DD_TEST_SEQ"] ?? "").split(separator: ",").map(String.init)
         Task { @MainActor in
@@ -118,11 +119,26 @@ enum DebugWindowProbe {
                 case "layoutlive:classic", "layoutlive:phoneTabs", "layoutlive:grouped", "layoutlive:minimal":
                     // Same path as the Settings picker: AppStorage write + WindowFit via the layout observer.
                     UserDefaults.standard.set(String(step.dropFirst(11)), forKey: AppLayout.defaultsKey)
+                case let t where t.hasPrefix("lshot:"):
+                    // lshot:<layout>|<prefix>: switch layout, capture the window at +60 ms and +1.5 s (the loop's own settle wait), log frames.
+                    let a = t.dropFirst(6).split(separator: "|").map(String.init)
+                    let t0 = CFAbsoluteTimeGetCurrent()
+                    UserDefaults.standard.set(a[0], forKey: AppLayout.defaultsKey)
+                    try? await Task.sleep(for: .milliseconds(60))
+                    if let w = window { dlog("probe lshot early frame=\(NSStringFromRect(w.frame)) dt=\(Int((CFAbsoluteTimeGetCurrent() - t0) * 1000))"); capture(w.windowNumber, a[1] + "-early.png"); dumpStructure("early") }
+                    try? await Task.sleep(for: .milliseconds(1400))
+                    if let w = window { dlog("probe lshot settled frame=\(NSStringFromRect(w.frame))"); capture(w.windowNumber, a[1] + "-settled.png"); dumpStructure("settled") }
+                case "dump": dumpStructure("dump")
+                case "settings:open":
+                    if let app = NSApp.mainMenu?.items.first?.submenu, let i = app.items.firstIndex(where: { $0.keyEquivalent == "," }) { app.performActionForItem(at: i) } else { dlog("probe: no Settings menu item") }
+                    try? await Task.sleep(for: .milliseconds(800))
+                    dlog("probe windows: \(NSApp.windows.map { "\($0.identifier?.rawValue ?? "-")|\($0.frameAutosaveName)|\(type(of: $0))|\(Int($0.frame.width))x\(Int($0.frame.height))|vis=\($0.isVisible)" })")
+                    dlog("probe mainWindow = \(WindowControl.mainWindow.map { $0.identifier?.rawValue ?? $0.frameAutosaveName } ?? "nil")")
                 case "toggle": ShellChrome.shared.toggleSidebar(ShellChrome.currentLayout)
                 case "click-min": clickButton(.miniaturizeButton)
                 case "click-close-probe": hitTest(.closeButton)
                 case "restore": window?.deminiaturize(nil)
-                case let t where t.hasPrefix("shot:"): shot(String(t.dropFirst(5)))
+                case let t where t.hasPrefix("shot:"): shot(String(t.dropFirst(5))); dumpStructure("fresh")
                 case let t where t.hasPrefix("scrcpy:"):
                     let serial = String(t.dropFirst(7))
                     Task { do { try await Core.shared.scrcpyEmbeddedStart(serial: serial) } catch { dlog("probe scrcpy failed: \(error)") } }
@@ -148,6 +164,50 @@ enum DebugWindowProbe {
                 report(step)
             }
         }
+    }
+
+    /// CPU time (user + system, ms) a thread has used. Nonisolated: the stall watcher calls it off the main thread.
+    nonisolated private static func threadCPUms(_ port: mach_port_t) -> Double {
+        var info = thread_basic_info(); var n = mach_msg_type_number_t(MemoryLayout<thread_basic_info>.size / MemoryLayout<integer_t>.size)
+        let r = withUnsafeMutablePointer(to: &info) { $0.withMemoryRebound(to: integer_t.self, capacity: Int(n)) { thread_info(port, thread_flavor_t(THREAD_BASIC_INFO), $0, &n) } }
+        guard r == KERN_SUCCESS else { return 0 }
+        return Double(info.user_time.seconds + info.system_time.seconds) * 1000 + Double(info.user_time.microseconds + info.system_time.microseconds) / 1000
+    }
+
+    /// QA: `DD_STALL_WATCH=1` logs every main-thread stall over 60 ms (a background thread pings the main queue every 15 ms).
+    private static func startStallWatch() {
+        let mainPort = mach_thread_self()
+        Thread.detachNewThread {
+            while true {
+                let sent = CFAbsoluteTimeGetCurrent(), cpu0 = Self.threadCPUms(mainPort)
+                let sem = DispatchSemaphore(value: 0)
+                DispatchQueue.main.async { sem.signal() }
+                sem.wait()
+                let ms = (CFAbsoluteTimeGetCurrent() - sent) * 1000
+                if ms > 60 { dlog("STALL main thread \(Int(ms)) ms (cpu \(Int(Self.threadCPUms(mainPort) - cpu0)) ms)") }
+                Thread.sleep(forTimeInterval: 0.015)
+            }
+        }
+    }
+
+    /// QA: toolbar items + every NSSplitView's subview widths of the main window.
+    static func dumpStructure(_ tag: String) {
+        guard let w = window else { return }
+        let items = w.toolbar?.items.map { $0.itemIdentifier.rawValue.split(separator: ".").last.map(String.init) ?? "?" } ?? []
+        for it in w.toolbar?.items ?? [] {
+            var extra = ""
+            if let ts = it as? NSTrackingSeparatorToolbarItem { extra = " splitView=\(String(describing: Unmanaged.passUnretained(ts.splitView).toOpaque())) div=\(ts.dividerIndex) inWindow=\(ts.splitView.window != nil)" }
+            dlog("probe   item \(it.itemIdentifier.rawValue) view=\(it.view.map { NSStringFromRect($0.frame) } ?? "-") visPri=\(it.visibilityPriority.rawValue) \(type(of: it))\(extra)")
+        }
+        var splits: [String] = []
+        var count = 0
+        func walk(_ v: NSView) {
+            count += 1
+            if let sv = v as? NSSplitView { splits.append("\(String(describing: Unmanaged.passUnretained(sv).toOpaque()))" + "[" + sv.arrangedSubviews.map { "\(Int($0.frame.width))" + ($0.isHidden ? "h" : "") }.joined(separator: ",") + "]") }
+            v.subviews.forEach(walk)
+        }
+        if let cv = w.contentView?.superview { walk(cv) }
+        dlog("probe struct[\(tag)] frame=\(Int(w.frame.width))x\(Int(w.frame.height)) min=\(Int(w.minSize.width))x\(Int(w.minSize.height)) toolbarItems=\(items) splits=\(splits) views=\(count) windows=\(NSApp.windows.count)")
     }
 
     private static func shot(_ path: String) {

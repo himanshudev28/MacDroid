@@ -82,9 +82,8 @@ struct PrivacySettingsPane: View {
         .task(id: remote) {
             spacesBound = (try? await Core.shared.spacesBindingActive()) ?? false
             guard remote else { return }
-            while !Task.isCancelled {
+            await UIActivity.shared.pollWhileWindowVisible(every: .seconds(2), tolerance: .milliseconds(500)) {
                 axTrusted = (try? await Core.shared.accessibilityTrusted()) ?? true
-                try? await Task.sleep(for: .seconds(2), tolerance: .milliseconds(500))
             }
         }
         .onAppear { reportCount = CrashReporter.reportFiles().count }

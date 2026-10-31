@@ -3,94 +3,106 @@ import SwiftUI
 /// Camera screen. Shell-agnostic: never assume which layout hosts it (ARCHITECTURE.md §K).
 struct CameraScreen: View {
     @Environment(AppModel.self) private var model
+    @AppStorage("droiddock.camera.link") private var storedLink = CameraLink.wifi
+    @AppStorage("droiddock.mirror.advanced") private var showAdvanced = false
     @State private var busy = false
+    @State private var lastStart: (() async throws -> Void)?
 
     private var session: MirrorSession { MirrorSession.shared }
     private var live: Bool { session.isActive && session.source == "camera" }
     private var tools: ToolsStatus { model.tools ?? ToolsStatus() }
     private var serial: String? { model.devices.first { $0.state == "device" }?.serial }
+    private var adbReason: String? {
+        if !tools.scrcpy { return tr("scrcpy not installed") }
+        return serial == nil ? tr("No ADB device connected") : nil
+    }
+    private var adbOK: Bool { adbReason == nil }
+
+    private enum Phase { case stage, running, connecting, unavailable, idle }
+    private var stateKey: Phase {
+        if live && session.placement == .inWindow { return .stage }
+        if live && session.placement == .popout { return .running }
+        if session.phase == .connecting || busy { return .connecting }
+        if !model.isConnected && serial == nil { return .unavailable }
+        return .idle
+    }
+    /// Wi-Fi when the phone is linked, otherwise ADB; an unusable stored choice falls back.
+    private var link: CameraLink {
+        switch storedLink {
+        case .wifi: return model.isConnected ? .wifi : (adbOK ? .adb : .wifi)
+        case .adb: return adbOK ? .adb : (model.isConnected ? .wifi : .adb)
+        }
+    }
+    private var canStart: Bool { link == .wifi ? model.isConnected : adbOK }
 
     var body: some View {
         Group {
-            if live && session.placement == .inWindow {
-                MirrorStage(inWindow: true).padding(DD.Space.lg)
-            } else if live && session.placement == .popout {
-                running
-            } else {
-                launcher
+            switch stateKey {
+            case .stage: MirrorStage(inWindow: true).padding(DD.Space.md)
+            case .running: SessionRunningForm(kind: .camera)
+            case .connecting: SessionConnecting(kind: .camera, needsApproval: link == .wifi, cancel: { session.stop(); busy = false }).ddTransition(.opacity)
+            case .unavailable:
+                EmptyState.disconnected(feature: tr("Camera"))
+            case .idle: idleForm
             }
         }
-        .animation(Motion.state, value: live)
+        .ddAnimation(Motion.state, value: stateKey)
     }
 
-    private var running: some View {
-        VStack { Spacer(minLength: 0)
-            Card(padding: DD.Space.xl, raised: true) {
-                VStack(spacing: DD.Space.md) {
-                    Image(systemName: "camera").font(.system(size: 28))
-                        .symbolRenderingMode(.hierarchical).foregroundStyle(DD.dim)
-                    StatusPill(text: session.isLive ? tr("Camera live") : tr("Waiting for the phone…"),
-                               kind: session.isLive ? .link : .neutral)
-                    Text(tr("Your phone's camera is streaming in its own window. Flip front/back from there."))
-                        .font(DD.Font.callout).foregroundStyle(DD.dim).multilineTextAlignment(.center)
-                        .frame(maxWidth: 300)
-                    HStack(spacing: DD.Space.sm) {
-                        Button(tr("Bring to front")) { session.setPlacement(inWindow: false) }
-                            .buttonStyle(SecondaryButtonStyle())
-                        Button(tr("Show here")) { session.setPlacement(inWindow: true) }
-                            .buttonStyle(SecondaryButtonStyle())
-                        Button(tr("Stop")) { session.stop() }.buttonStyle(DestructiveButtonStyle())
-                    }
-                }.frame(maxWidth: .infinity)
-            }.frame(maxWidth: 380)
-            Spacer(minLength: 0)
-        }.frame(maxWidth: .infinity)
-    }
-
-    private var launcher: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: DD.Space.lg) {
-                VStack(alignment: .leading, spacing: DD.Space.xs) {
-                    Text(tr("Camera")).font(DD.Font.largeTitle).foregroundStyle(DD.fg)
-                    Text(tr("Use your phone's camera as a live feed on this Mac.")).font(DD.Font.body).foregroundStyle(DD.dim)
-                }
-                if case .failed(let msg) = session.phase {
-                    Label(msg, systemImage: "exclamationmark.triangle")
-                        .font(DD.Font.callout).foregroundStyle(DD.bad)
-                        .padding(DD.Space.md).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: DD.Radius.md, style: .continuous).fill(DD.bad.opacity(0.10)))
-                }
-                MirrorLaunchCard(
-                    symbol: "camera", title: tr("Wi-Fi camera"),
-                    subtitle: tr("Streams the phone's back camera over Wi-Fi. Flip to the front camera once it's running."),
-                    tag: "Wi-Fi", primary: true, live: model.isConnected,
-                    requirement: model.isConnected ? nil : tr("Phone app link required"),
-                    hint: tr("Pair the DroidDock phone app from the Dashboard to stream over Wi-Fi."),
-                    button: tr("Start camera"), busy: session.phase == .connecting) {
-                    Task {
-                        await session.start(source: "camera")
-                        model.toast(.info, tr("Approve the camera on your phone…"))
-                    }
-                }
-                MirrorLaunchCard(
-                    symbol: "cable.connector", title: tr("ADB camera"),
-                    subtitle: tr("Full-quality camera preview over USB or wireless ADB via scrcpy, in its own window."),
-                    tag: "ADB", live: serial != nil,
-                    requirement: !tools.scrcpy ? tr("scrcpy not installed") : (serial == nil ? tr("No ADB device connected") : nil),
-                    hint: tools.scrcpy ? tr("Connect a phone via USB or wireless ADB from the Devices tab.")
-                                       : tr("Install scrcpy first (Devices tab → Tools)."),
-                    button: tr("Stream via ADB"), busy: busy) {
-                    busy = true
-                    Task {
-                        do { try await Core.shared.adbCamera(serial: serial ?? "") }
-                        catch { model.toast(.bad, error.localizedDescription) }
-                        busy = false
-                    }
+    private var idleForm: some View {
+        SettingsForm {
+            if case .failed(let msg) = session.phase {
+                SessionErrorSection(message: msg, retry: lastStart.map { f in { run(f) } }, dismiss: { session.clearFailure() })
+            }
+            Section {
+                SessionHero(symbol: "camera", tint: Color(nsColor: .systemOrange),
+                            title: tr("Phone camera"),
+                            status: canStart ? (link == .wifi ? tr("Ready over Wi-Fi") : tr("Ready over USB")) : tr("Pair your phone or connect it with a cable"),
+                            ready: canStart, button: tr("Start Camera"),
+                            blockedReason: tr("Pair your phone or connect it with a cable"), action: start)
+            }
+            Section {
+                Picker(tr("Connect over"), selection: $storedLink) {
+                    Text(tr("Wi-Fi")).tag(CameraLink.wifi).disabled(!model.isConnected)
+                    Text(tr("USB or wireless ADB")).tag(CameraLink.adb).disabled(!adbOK)
+                }.pickerStyle(.menu)
+            } header: { Text(tr("Connection")) } footer: {
+                Text(link == .wifi ? tr("Streams the phone's back camera over Wi-Fi. Flip to the front camera once it's running.")
+                                   : tr("Full-quality camera preview over USB or wireless ADB via scrcpy, in its own window."))
+            }
+            MirrorQualitySection(showAdvanced: $showAdvanced, audio: false, adbOptions: false)
+            if !adbOK, let r = adbReason {
+                Section {
+                    LabeledContent(tr("USB or wireless ADB")) { Text(r).foregroundStyle(DD.warnText) }
+                    Button(tr("Open Devices…")) { model.selection = .devices }
                 }
             }
-            .padding(DD.Space.content)
-            .frame(maxWidth: 640)
-            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func start() {
+        let work: () async throws -> Void
+        if link == .wifi {
+            work = {
+                await session.start(source: "camera")
+                // Only tell the user to approve if the start did not fail.
+                if case .failed = session.phase { return }
+                model.toast(.info, tr("Approve the camera on your phone…"))
+            }
+        } else {
+            work = { try await Core.shared.adbCamera(serial: serial ?? "") }
+        }
+        lastStart = work
+        run(work)
+    }
+
+    private func run(_ work: @escaping () async throws -> Void) {
+        busy = true
+        Task {
+            do { try await work() }
+            catch is CancellationError {}
+            catch { model.toast(.bad, "\(tr("Couldn't start the camera")): \(error.localizedDescription)") }
+            busy = false
         }
     }
 }

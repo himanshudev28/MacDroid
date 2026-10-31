@@ -93,12 +93,23 @@ struct UpdatesSection: View {
         return model.updateInfo
     }
     private var busy: Bool { if case .checking = state { return true } else { return false } }
+    private var installing: Bool { model.updateInstallState == .installing }
 
     var body: some View {
-        DDSection(tr("Software update"), footer: tr("Looks for a new release shortly after launch, at most once a day. Nothing downloads without your say-so.")) {
+        DDSection(tr("Software update"), footer: tr("Looks for a new release shortly after launch, at most once a day. Nothing downloads without your say-so. After an update, macOS may ask for Accessibility access again.")) {
             LabeledContent {
-                if let info {
-                    Button(tr("Download…")) { install(info) }.buttonStyle(PrimaryButtonStyle(compact: true))
+                if installing {
+                    ProgressView(value: (model.updateProgress?.percent ?? 0) / 100).frame(width: 120)
+                } else if model.updateInstallState == .updated {
+                    EmptyView()
+                } else if let info {
+                    HStack(spacing: DD.Space.sm) {
+                        if case .failed = model.updateInstallState {
+                            Button(tr("Open release page")) { model.openReleasePage(info.htmlUrl) }.buttonStyle(SecondaryButtonStyle(compact: true))
+                        }
+                        Button(info.installAvailable == true ? tr("Install and restart") : tr("Download…")) { install(info) }
+                            .buttonStyle(PrimaryButtonStyle(compact: true))
+                    }
                 } else {
                     Button(tr("Check for Updates")) { check() }.disabled(busy)
                 }
@@ -113,6 +124,9 @@ struct UpdatesSection: View {
     }
 
     private var subtitle: String {
+        if installing { return model.updateProgressText }
+        if case .failed(let m) = model.updateInstallState { return m }
+        if model.updateInstallState == .updated { return model.updateProgressText }
         if let info { return "\(info.currentVersion) → \(info.version)" }
         switch state {
         case .checking: return tr("Checking…")
@@ -122,7 +136,11 @@ struct UpdatesSection: View {
         default: return tr("DroidDock updates from GitHub, not the App Store.")
         }
     }
-    private var statusColor: Color { if case .error = state { DD.badText } else { DD.dim } }
+    private var statusColor: Color {
+        if case .error = state { return DD.badText }
+        if case .failed = model.updateInstallState { return DD.badText }
+        return DD.dim
+    }
 
     private func check() {
         state = .checking
@@ -133,10 +151,7 @@ struct UpdatesSection: View {
     }
     private func install(_ i: UpdateInfo) {
         Task {
-            do {
-                if let s = try await Core.shared.updateInstall(), let url = URL(string: s) { NSWorkspace.shared.open(url) }
-                state = .opened; model.clearUpdateInfo()
-            } catch { state = .error(error.localizedDescription) }
+            if case .openedPage = await model.installUpdate() { state = .opened }
         }
     }
 }
@@ -150,14 +165,17 @@ struct AppearanceSettingsPane: View {
     var body: some View {
         @Bindable var look = AppearanceSettings.shared
         SettingsForm {
-            DDSection(tr("Window layout"), footer: tr("Switches immediately. Phone tabs keeps the phone beside five tabs; Classic is a plain sidebar of every screen.")) {
-                HStack(alignment: .top, spacing: DD.Space.md) {
+            DDSection(tr("Window layout"),
+                      footer: (AppLayout(rawValue: layoutRaw) ?? .phoneTabs).summary + " " + tr("Switches immediately.")) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120, maximum: 168), spacing: DD.Space.lg, alignment: .top)],
+                          alignment: .leading, spacing: DD.Space.lg) {
                     ForEach(AppLayout.allCases) { l in
-                        LayoutThumbnail(layout: l, selected: layoutRaw == l.rawValue) { layoutRaw = l.rawValue }
+                        LayoutTile(layout: l, selected: layoutRaw == l.rawValue) { layoutRaw = l.rawValue }
                     }
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, DD.Space.xs)
+                .padding(.vertical, DD.Space.sm)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(tr("Window layout"))
             }
             DDSection(tr("Theme"), footer: tr("DroidDock uses the accent colour from System Settings › Appearance.")) {
                 Picker(tr("Theme"), selection: $look.theme) {
@@ -193,92 +211,141 @@ struct AppearanceSettingsPane: View {
     }
 }
 
-/// A miniature wireframe of one window layout.
-private struct LayoutThumbnail: View {
+/// A miniature wireframe of one window layout, drawn in system colours (like System Settings › Appearance).
+private struct LayoutTile: View {
     let layout: AppLayout
     let selected: Bool
     let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.colorSchemeContrast) private var contrast
     private var accent: Color { .accentColor }
+    private var sideFill: Color { Color(nsColor: .quaternarySystemFill) }
+    private var ink: Color { Color(nsColor: .tertiaryLabelColor) }
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: DD.Space.sm) {
+            VStack(spacing: 6) {
                 wire
-                    .frame(width: 112, height: 76)
-                    .background(RoundedRectangle(cornerRadius: DD.Radius.md, style: .continuous).fill(DD.content))
-                    .overlay(RoundedRectangle(cornerRadius: DD.Radius.md, style: .continuous)
-                        .strokeBorder(selected ? accent : DD.line, lineWidth: selected ? 2 : 1))
-                Text(layout.title).font(DD.Font.callout)
-                    .fontWeight(selected ? .semibold : .regular)
-                    .foregroundStyle(selected ? DD.fg : DD.dim)
+                    .aspectRatio(16.0 / 10.0, contentMode: .fit)
+                    .background(Color(nsColor: .windowBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(DD.line, lineWidth: 1))
+                    .padding(3)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(selected ? accent : (hovering ? DD.hover : .clear),
+                                          lineWidth: selected ? (contrast == .increased ? 3.5 : 3) : 3)
+                    }
+                    .accessibilityHidden(true)
+                Text(layout.title).font(DD.Font.callout).fontWeight(.medium).foregroundStyle(DD.fg)
             }
         }
         .buttonStyle(PressableButtonStyle())   // tile-like custom button: press 0.97
+        .onHover { h in withDDAnimation(Motion.hover) { hovering = h } }
         .ddAnimation(Motion.select, value: selected)
+        .help(layout.summary)
         .accessibilityLabel(layout.title)
+        .accessibilityHint(layout.summary)
+        .accessibilityValue(selected ? tr("Selected") : "")
         .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
     }
 
-    private func bar(_ w: CGFloat, _ h: CGFloat = 4, _ o: Double = 0.3) -> some View {
-        Capsule().fill(DD.dim.opacity(o)).frame(width: w, height: h)
+    private func bar(_ w: CGFloat, _ h: CGFloat = 3, _ o: Double = 0.5) -> some View {
+        Capsule().fill(ink.opacity(o)).frame(width: w, height: h)
     }
     private var card: some View {
-        RoundedRectangle(cornerRadius: 5, style: .continuous).fill(selected ? accent.opacity(0.85) : DD.dim.opacity(0.45))
+        RoundedRectangle(cornerRadius: 4, style: .continuous).fill(selected ? accent.opacity(0.85) : ink.opacity(0.9))
     }
-    private var sideBG: some View { Rectangle().fill(DD.panel2) }
+    private func row(_ on: Bool = false) -> some View {
+        RoundedRectangle(cornerRadius: 2, style: .continuous).fill(on ? accent.opacity(0.7) : ink.opacity(0.35)).frame(height: 4)
+    }
+    private var toolbarStrip: some View {
+        HStack(spacing: 3) {
+            ForEach(0..<3, id: \.self) { _ in Circle().fill(ink.opacity(0.7)).frame(width: 3.5, height: 3.5) }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 5).frame(height: 10).frame(maxWidth: .infinity)
+    }
+    private var contentBars: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(0..<4, id: \.self) { i in bar(CGFloat(56 - i * 8), 4, 0.25) }
+            Spacer(minLength: 0)
+        }.padding(6).frame(maxWidth: .infinity, alignment: .leading)
+    }
 
     @ViewBuilder private var wire: some View {
-        HStack(spacing: 0) {
-            switch layout {
-            case .phoneTabs:
-                sideBG.frame(width: 34).overlay { card.padding(4) }
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 3) { ForEach(0..<5, id: \.self) { i in
-                        Capsule().fill(i == 0 ? accent.opacity(0.6) : DD.dim.opacity(0.25)).frame(width: 9, height: 5) } }
-                    ForEach(0..<4, id: \.self) { i in bar(CGFloat(58 - i * 7)) }
-                    Spacer()
-                }.padding(6).frame(maxWidth: .infinity, alignment: .leading)
-            case .minimal:
-                sideBG.frame(width: 34).overlay {
-                    VStack(spacing: 3) { card.frame(height: 32)
-                        HStack(spacing: 2) { ForEach(0..<4, id: \.self) { _ in Circle().fill(DD.dim.opacity(0.35)).frame(width: 4, height: 4) } }
-                        Spacer() }.padding(4)
+        GeometryReader { g in
+            let W = g.size.width, H = g.size.height
+            VStack(spacing: 0) {
+                switch layout {
+                case .phoneTabs:
+                    HStack(spacing: 0) {
+                        toolbarStrip.frame(width: W * 0.30)
+                        HStack(spacing: 2) {
+                            ForEach(0..<5, id: \.self) { i in
+                                Capsule().fill(i == 0 ? accent.opacity(0.75) : ink.opacity(0.4)).frame(width: 8, height: 4) }
+                        }.frame(maxWidth: .infinity)
+                    }.frame(height: 10)
+                    HStack(spacing: 0) {
+                        ZStack(alignment: .bottom) {
+                            sideFill
+                            VStack(spacing: 3) {
+                                card.padding(.horizontal, 4).padding(.top, 2)
+                                HStack(spacing: 3) { ForEach(0..<5, id: \.self) { _ in Circle().fill(ink.opacity(0.6)).frame(width: 3, height: 3) } }
+                                    .padding(.bottom, 3)
+                            }
+                        }.frame(width: W * 0.30)
+                        contentBars
+                    }
+                case .classic:
+                    HStack(spacing: 0) {
+                        toolbarStrip.frame(width: W * 0.22)
+                        Spacer(minLength: 0)
+                    }.frame(height: 10)
+                    HStack(spacing: 0) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            bar(12, 2.5, 0.6)
+                            row(true); row(); row()
+                            bar(12, 2.5, 0.6)
+                            row(); row(); row()
+                            Spacer(minLength: 0)
+                        }.padding(4).frame(width: W * 0.22).background(sideFill)
+                        contentBars
+                        card.padding(4).frame(width: W * 0.24, height: H * 0.7, alignment: .top).frame(maxHeight: .infinity, alignment: .top)
+                            .background(sideFill)
+                    }
+                case .grouped:
+                    HStack(spacing: 0) { toolbarStrip.frame(width: W * 0.30); Spacer(minLength: 0) }.frame(height: 10)
+                    HStack(spacing: 0) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            card.frame(height: (H - 10) * 0.36)
+                            bar(12, 2.5, 0.6); row(true); row(); row()
+                            bar(12, 2.5, 0.6); row(); row()
+                            Spacer(minLength: 0)
+                        }.padding(4).frame(width: W * 0.30).background(sideFill)
+                        contentBars
+                    }
+                case .minimal:
+                    HStack(spacing: 0) {
+                        toolbarStrip.frame(width: W * 0.34)
+                        HStack(spacing: 3) {
+                            ForEach(0..<5, id: \.self) { i in Circle().fill(i == 0 ? accent.opacity(0.75) : ink.opacity(0.4)).frame(width: 4.5, height: 4.5) }
+                            Capsule().fill(ink.opacity(0.4)).frame(width: 6, height: 3)
+                        }.frame(maxWidth: .infinity)
+                    }.frame(height: 10)
+                    HStack(spacing: 0) {
+                        VStack(spacing: 3) {
+                            card.frame(height: (H - 10) * 0.62)
+                            HStack(spacing: 2) { ForEach(0..<6, id: \.self) { _ in Circle().fill(ink.opacity(0.6)).frame(width: 3.5, height: 3.5) } }
+                            Spacer(minLength: 0)
+                        }.padding(4).frame(width: W * 0.34).background(sideFill)
+                        VStack(alignment: .leading, spacing: 5) {
+                            ForEach(0..<3, id: \.self) { _ in bar(50, 6, 0.2) }
+                            Spacer(minLength: 0)
+                        }.padding(6).frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 3) { ForEach(0..<3, id: \.self) { i in
-                        Circle().fill(i == 0 ? accent.opacity(0.6) : DD.dim.opacity(0.25)).frame(width: 6, height: 6) } }
-                    ForEach(0..<3, id: \.self) { _ in bar(50, 6, 0.2) }
-                    Spacer()
-                }.padding(6).frame(maxWidth: .infinity, alignment: .leading)
-            case .grouped:
-                sideBG.frame(width: 34).overlay {
-                    VStack(alignment: .leading, spacing: 3) {
-                        card.frame(height: 20)
-                        ForEach(0..<2, id: \.self) { _ in bar(16, 3, 0.45) ; bar(22, 3, 0.25); bar(20, 3, 0.25) }
-                        Spacer()
-                    }.padding(4)
-                }
-                VStack(alignment: .leading, spacing: 5) {
-                    ForEach(0..<5, id: \.self) { i in bar(CGFloat(60 - (i * 5) % 17), 5, 0.2) }
-                    Spacer()
-                }.padding(6).frame(maxWidth: .infinity, alignment: .leading)
-            case .classic:
-                sideBG.frame(width: 34).overlay {
-                    VStack(alignment: .leading, spacing: 3) {
-                        bar(14, 3, 0.45)
-                        ForEach(0..<3, id: \.self) { i in
-                            RoundedRectangle(cornerRadius: 2).fill(i == 0 ? accent.opacity(0.55) : DD.dim.opacity(0.2)).frame(height: 5) }
-                        bar(14, 3, 0.45)
-                        ForEach(0..<3, id: \.self) { _ in RoundedRectangle(cornerRadius: 2).fill(DD.dim.opacity(0.2)).frame(height: 5) }
-                        Spacer()
-                    }.padding(4)
-                }
-                VStack(alignment: .leading, spacing: 5) {
-                    ForEach(0..<5, id: \.self) { i in bar(CGFloat(60 - (i * 5) % 17), 5, 0.2) }
-                    Spacer()
-                }.padding(6).frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: DD.Radius.md, style: .continuous))
     }
 }

@@ -59,7 +59,7 @@ struct TransfersScreen: View {
     }
 
     private func clearHistory() {
-        Task { try? await Core.shared.transfersClear() }
+        Task { await model.run(tr("Couldn't clear history")) { try await Core.shared.transfersClear() } }
         model.clearFinishedQuickShareSends()
     }
 
@@ -165,7 +165,7 @@ struct TransfersScreen: View {
                            fraction: e.total > 0 ? e.done / e.total : 0, detail: parts.joined(separator: " · "),
                            state: stalled ? .paused : .running) {
             if e.cancellable {
-                IconButton(systemImage: "xmark", label: tr("Cancel transfer"), size: 24) { Task { try? await Core.shared.transferCancel(key: e.key) } }
+                IconButton(systemImage: "xmark", label: tr("Cancel transfer"), size: 24) { Task { await model.run(tr("Couldn't cancel the transfer")) { try await Core.shared.transferCancel(key: e.key) } } }
             }
         }
         .listRowSeparator(.hidden)
@@ -192,7 +192,7 @@ struct TransfersScreen: View {
         return ProgressRow(name: displayName(e), systemImage: icon(e), incoming: e.dir == "toMac", fraction: 1, detail: detail, state: state) {
             HStack(spacing: 2) {
                 if e.status == "done", e.path != nil {
-                    IconButton(systemImage: "magnifyingglass", label: tr("Show in Finder"), size: 24) { Task { try? await Core.shared.transferReveal(key: e.key) } }
+                    IconButton(systemImage: "magnifyingglass", label: tr("Show in Finder"), size: 24) { Task { await model.run(tr("Couldn't reveal in Finder")) { try await Core.shared.transferReveal(key: e.key) } } }
                 }
                 if e.status != "done", canRetry(e) {
                     IconButton(systemImage: "arrow.clockwise", label: tr("Retry"), size: 24) { retry(e) }
@@ -203,8 +203,8 @@ struct TransfersScreen: View {
         .contentShape(Rectangle())
         .contextMenu {
             if e.path != nil {
-                Button { Task { try? await Core.shared.transferOpen(key: e.key) } } label: { Label(tr("Open"), systemImage: "arrow.up.forward.app") }
-                Button { Task { try? await Core.shared.transferReveal(key: e.key) } } label: { Label(tr("Show in Finder"), systemImage: "magnifyingglass") }
+                Button { Task { await model.run(tr("Couldn't open the file")) { try await Core.shared.transferOpen(key: e.key) } } } label: { Label(tr("Open"), systemImage: "arrow.up.forward.app") }
+                Button { Task { await model.run(tr("Couldn't reveal in Finder")) { try await Core.shared.transferReveal(key: e.key) } } } label: { Label(tr("Show in Finder"), systemImage: "magnifyingglass") }
             }
             if e.status != "done", canRetry(e) { Button { retry(e) } label: { Label(tr("Retry"), systemImage: "arrow.clockwise") } }
         }
@@ -227,7 +227,7 @@ struct TransfersScreen: View {
         return ProgressRow(name: s.peer.map { tr("Quick Share to {name}", ["name": $0]) } ?? tr("Quick Share"),
                            systemImage: "dot.radiowaves.left.and.right", incoming: false, fraction: s.fraction, detail: detail, state: state) {
             if live {
-                IconButton(systemImage: "xmark", label: tr("Cancel transfer"), size: 24) { Task { try? await Core.shared.quickshareSendCancel(transferId: s.transferId) } }
+                IconButton(systemImage: "xmark", label: tr("Cancel transfer"), size: 24) { Task { await model.run(tr("Couldn't cancel the transfer")) { try await Core.shared.quickshareSendCancel(transferId: s.transferId) } } }
             } else {
                 IconButton(systemImage: "arrow.clockwise", label: tr("Send Again"), size: 24) { showShare = true }
             }
@@ -244,11 +244,18 @@ struct TransfersScreen: View {
         e.source == "photoSync" ? "photo.stack.fill" : e.source == "quickShare" ? "dot.radiowaves.left.and.right" : FileFormat.symbol(name: e.name, dir: false)
     }
     /// Only Mac → phone sends keep their local source path, so only those can be retried here.
-    private func canRetry(_ e: TransferEntry) -> Bool { e.dir == "toPhone" && e.path != nil && e.source != "quickShare" }
+    /// A Files-tab upload can go back where it was headed only if we recorded that folder; the Share/Finder sends
+    /// always target Downloads, so those are safe too.
+    private func retryDest(_ e: TransferEntry) -> String? {
+        guard let p = e.path else { return nil }
+        if let d = model.pushDestination(path: p, startedMs: e.startedMs) { return d }
+        return e.source == "files" ? nil : "/sdcard/Download"
+    }
+    private func canRetry(_ e: TransferEntry) -> Bool { e.dir == "toPhone" && e.source != "quickShare" && retryDest(e) != nil }
     private func retry(_ e: TransferEntry) {
-        guard let p = e.path else { return }
+        guard let p = e.path, let dest = retryDest(e) else { return }
         Task {
-            do { try await Core.shared.fsPush(localPath: p, dest: "/sdcard/Download") }
+            do { try await Core.shared.fsPush(localPath: p, dest: dest) }
             catch { model.toast(.bad, FileFormat.errorText(error.localizedDescription)) }
         }
     }

@@ -49,21 +49,27 @@ enum Destination: String, CaseIterable, Identifiable, Hashable, Sendable {
         }
     }
 
-    /// ⌘<n> accelerator as in Rail.tsx (`key`).
+    /// ⌘<n> accelerator. One scheme in every layout (Go menu, tab tooltips): ⌘0 Dashboard, ⌘1…⌘7 the daily screens.
     var shortcutKey: Character? {
         switch self {
-        case .dashboard: "1"
-        case .apps: "2"
-        case .devices: "3"
-        case .mirror: "4"
-        case .camera: "5"
-        case .notifications: "6"
-        case .messages: "7"
-        case .calls: "8"
-        case .contacts: "9"
+        case .dashboard: "0"
+        case .notifications: "1"
+        case .files: "2"
+        case .apps: "3"
+        case .clipboard: "4"
+        case .mirror: "5"
+        case .messages: "6"
+        case .calls: "7"
         default: nil
         }
     }
+
+    /// Tooltip text: the title plus its shortcut, if it has one.
+    var helpText: String { shortcutKey.map { "\(title)  ⌘\($0)" } ?? title }
+
+    /// The Go menu's list, identical in every layout: shortcut screens in key order, then the rest.
+    static let goShortcuts: [Destination] = allCases.filter { $0.shortcutKey != nil }.sorted { $0.shortcutKey! < $1.shortcutKey! }
+    static let goOthers: [Destination] = allCases.filter { $0.shortcutKey == nil && $0 != .settings }
 
     /// Rail.tsx groups (classic layout).
     static let classicGroups: [(title: String, items: [Destination])] = [
@@ -85,6 +91,16 @@ enum AppLayout: String, CaseIterable, Identifiable, Sendable {
         case .classic: tr("Classic")
         case .grouped: tr("Grouped")
         case .minimal: tr("Minimal")
+        }
+    }
+
+    /// One line for the layout picker.
+    var summary: String {
+        switch self {
+        case .phoneTabs: tr("Your phone on the left, five tabs along the top.")
+        case .classic: tr("A sidebar with every screen. The phone sits in a side panel.")
+        case .grouped: tr("A phone card above a sidebar grouped into Inbox, Files and Phone.")
+        case .minimal: tr("The phone card with a few icon tabs. Everything else is under More.")
         }
     }
 }

@@ -76,6 +76,7 @@ final class NotificationClickActions {
     /// Default-click handler used by the banners. Order: a Mac app/URL the user mapped, then the per-app choice
     /// (open on the phone in a pop-up by default, DroidDock's Notifications page, or nothing).
     func handleBannerClick(key: String) {
+        if key == AppModel.allowPlainBannerID { AppModel.shared.blockedPlainBannerClicked(); return }   // the "Allow without encryption?" banner
         NotificationService.shared.remove(id: key)   // handled: drop its Notification Center copy, as macOS does
         guard NotifPrefs.openOnClick else { return }
         let pkg = package(forNotificationKey: key)

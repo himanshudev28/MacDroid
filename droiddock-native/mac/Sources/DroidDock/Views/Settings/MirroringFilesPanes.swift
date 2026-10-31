@@ -7,12 +7,25 @@ struct MirroringSettingsPane: View {
     @AppStorage("droiddock.mirrorInWindow") private var mirrorInWindow = false
     @AppStorage(MirrorSession.pauseHiddenAdbKey) private var pauseHiddenAdb = false
     @AppStorage(MirrorSession.preferAdbKey) private var preferAdb = true
+    // The same keys the Mirror screen uses, so the two always agree.
+    @AppStorage("droiddock.mirror.mode") private var mirrorMode = MirrorMode.screen
+    @AppStorage("droiddock.mirror.link") private var mirrorLink = MirrorLink.auto
+    private var startWith: Binding<String> {
+        Binding(get: { mirrorMode == .desktop ? "desktop" : (mirrorMode == .screen && mirrorLink == .adbWindow ? "adb" : "wifi") },
+                set: {
+                    switch $0 {
+                    case "adb": mirrorMode = .screen; mirrorLink = .adbWindow
+                    case "desktop": mirrorMode = .desktop
+                    default: mirrorMode = .screen; mirrorLink = .auto
+                    }
+                })
+    }
 
     var body: some View {
         let c = model.config ?? DroidConfig()
         SettingsForm {
             DDSection(footer: tr("Wi-Fi needs no ADB. ADB and Desktop need scrcpy.")) {
-                Picker(tr("Start with"), selection: model.cfg(\.defaultMirrorMode, "defaultMirrorMode")) {
+                Picker(tr("Start with"), selection: startWith) {
                     Text("Wi-Fi").tag("wifi"); Text("ADB").tag("adb"); Text(tr("Desktop")).tag("desktop")
                 }
                 DescribedToggle(tr("Mirror inside the main window"), detail: tr("Off pops the phone out into its own window."), isOn: $mirrorInWindow)

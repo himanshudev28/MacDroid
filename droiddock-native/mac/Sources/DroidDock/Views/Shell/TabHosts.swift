@@ -4,7 +4,10 @@ import SwiftUI
 struct SegmentedHost: View {
     let items: [Destination]
     @Binding var selection: Destination
+    /// The trailing "Offline" pill. Off for screens that show their own disconnected empty state.
+    var showsOfflinePill = true
     @Environment(AppModel.self) private var model
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         VStack(spacing: 0) {
@@ -14,19 +17,19 @@ struct SegmentedHost: View {
                     ForEach(items) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented).labelsHidden().controlSize(.small)
-                .frame(maxWidth: 340)
+                .fixedSize()
             }
             .frame(maxWidth: .infinity)
             .overlay(alignment: .trailing) {
-                if !model.isConnected {
+                if !model.isConnected && showsOfflinePill {
                     StatusPill(text: tr("Offline"), kind: .bad, systemImage: "wifi.slash")
                         .padding(.trailing, DD.Space.content)
                         .transition(.opacity)
                 }
             }
-            .padding(.vertical, DD.Space.sm)
+            .frame(height: 36)
             .ddAnimation(Motion.content, value: model.isConnected)
-            Divider()
+            Rectangle().fill(DD.line).frame(height: 1 / max(displayScale, 1))
             ScreenView(destination: selection)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -53,6 +56,6 @@ struct ScreenHost: View {
     @Environment(AppModel.self) private var model
     var body: some View {
         @Bindable var m = model
-        SegmentedHost(items: [.mirror, .camera], selection: $m.selection)
+        SegmentedHost(items: [.mirror, .camera], selection: $m.selection, showsOfflinePill: false)
     }
 }

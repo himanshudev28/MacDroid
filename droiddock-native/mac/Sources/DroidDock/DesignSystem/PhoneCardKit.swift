@@ -885,12 +885,14 @@ struct SeekBar: View {
                 .gesture(DragGesture(minimumDistance: 0)
                     .onChanged { g in
                         if !dragging { dragging = true; Haptics.alignment() }
+                        guard geo.size.width > 0, duration.isFinite, duration > 0 else { return }
                         let v = Double(min(max(g.location.x / geo.size.width, 0), 1)) * duration
                         if v <= 0 || v >= duration { Haptics.alignment() }
                         onScrub(v)
                     }
                     .onEnded { g in
                         dragging = false
+                        guard geo.size.width > 0, duration.isFinite, duration > 0 else { return }
                         let v = Double(min(max(g.location.x / geo.size.width, 0), 1)) * duration
                         Haptics.levelChange()
                         onCommit(v)
@@ -929,7 +931,16 @@ struct SeekBar: View {
 struct QuickActionsRow: View {
     var actions: [DDQuickAction]
     var body: some View {
-        HStack(spacing: 10) {
+        // Six platters need ~280 pt at the usual gap; tighten the gap before the row can spill out of a 300-pt column.
+        ViewThatFits(in: .horizontal) {
+            row(spacing: 10)
+            row(spacing: 5)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func row(spacing: CGFloat) -> some View {
+        HStack(spacing: spacing) {
             ForEach(actions) { a in
                 OnCardCircleButton(systemImage: a.systemImage,
                                    label: a.shortcut.map { "\(a.title)  \($0)" } ?? a.title,

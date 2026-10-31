@@ -328,10 +328,12 @@ struct EmptyState: View {
 extension EmptyState {
     /// Standard "phone not linked" recipe for any screen that needs the phone.
     static func disconnected(feature: String, onPair: (() -> Void)? = nil) -> EmptyState {
-        EmptyState(systemImage: "smartphone",
+        // Every screen offers the way forward by default: the pairing card (QR) in the phone sidebar.
+        let onPair = onPair ?? { withDDAnimation(Motion.state) { ShellState.shared.forcePairing = true } }
+        return EmptyState(systemImage: "smartphone",
                    title: tr("Phone not linked"),
                    message: tr("Link your phone to see {feature} here.", ["feature": feature]),
-                   actionTitle: onPair == nil ? nil : tr("Pair a phone"),
+                   actionTitle: tr("Pair a phone"),
                    action: onPair)
     }
 

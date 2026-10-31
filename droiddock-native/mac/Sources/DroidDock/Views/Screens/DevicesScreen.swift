@@ -156,7 +156,7 @@ struct DevicesScreen: View {
 
     private func forget() {
         Task {
-            do { try await Core.shared.adbUnpair(); paired = false; model.toast(.ok, tr("Phone forgotten")) }
+            do { try await Core.shared.adbUnpair(); paired = false; CommandBarController.shared.clearRecents(); model.toast(.ok, tr("Phone forgotten")) }
             catch { model.toast(.bad, error.localizedDescription) }
         }
     }

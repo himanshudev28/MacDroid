@@ -5,7 +5,7 @@ import SwiftUI
 
 /// What a global shortcut can do. Each case drives the same code path as the matching `droiddock://` route.
 enum HotKeyAction: String, CaseIterable, Codable, Identifiable, Sendable {
-    case showHide, sendClipboard, toggleMirror, ringPhone, screenshot, playPause, menuBarPanel
+    case showHide, sendClipboard, toggleMirror, ringPhone, screenshot, playPause, menuBarPanel, commandBar
     var id: String { rawValue }
 
     var title: String {
@@ -17,6 +17,7 @@ enum HotKeyAction: String, CaseIterable, Codable, Identifiable, Sendable {
         case .screenshot: tr("Take phone screenshot")
         case .playPause: tr("Play or pause phone media")
         case .menuBarPanel: tr("Open menu-bar panel")
+        case .commandBar: tr("Open command bar")
         }
     }
     var symbol: String {
@@ -28,6 +29,7 @@ enum HotKeyAction: String, CaseIterable, Codable, Identifiable, Sendable {
         case .screenshot: "camera.viewfinder"
         case .playPause: "playpause"
         case .menuBarPanel: "menubar.rectangle"
+        case .commandBar: "command"
         }
     }
     /// Optional starting points offered as a one-click suggestion; never bound automatically.
@@ -41,6 +43,7 @@ enum HotKeyAction: String, CaseIterable, Codable, Identifiable, Sendable {
         case .screenshot: return KeyCombo(keyCode: UInt32(kVK_ANSI_S), modifiers: m)
         case .playPause: return KeyCombo(keyCode: UInt32(kVK_ANSI_P), modifiers: m)
         case .menuBarPanel: return nil
+        case .commandBar: return KeyCombo(keyCode: UInt32(kVK_Space), modifiers: UInt32(optionKey))
         }
     }
 }
@@ -149,7 +152,15 @@ final class HotKeys {
     private var suspended = false
     private var ringing = false
 
-    private init() { bindings = Self.load() }
+    private init() {
+        bindings = Self.load()
+        // ⌥Space is the one default binding, seeded once so clearing it in Settings sticks.
+        if !UserDefaults.standard.bool(forKey: Self.commandBarSeededKey) {
+            UserDefaults.standard.set(true, forKey: Self.commandBarSeededKey)
+            if bindings[.commandBar] == nil, let c = HotKeyAction.commandBar.suggestion, !bindings.values.contains(c) { bindings[.commandBar] = c; save() }
+        }
+    }
+    private static let commandBarSeededKey = "droiddock.hotkeys.commandBarSeeded"
 
     // MARK: Persistence
 
@@ -248,13 +259,14 @@ final class HotKeys {
                 catch { model.toast(.bad, error.localizedDescription) }
             }
         case .screenshot:
-            guard let dev = model.devices.first(where: { $0.state == "device" }) else {
-                model.toast(.info, tr("Connect the phone over ADB to take a screenshot")); return
+            // Same path as the UI button: Wi-Fi (cap `screenshot`) first, ADB as fallback; the core emits `phone-screenshot`,
+            // which AppModel turns into the success toast.
+            guard model.isConnected || model.devices.contains(where: { $0.state == "device" }) else {
+                model.toast(.info, tr("No phone linked")); return
             }
             Task {
                 do {
-                    let path = try await Core.shared.adbScreenshot(serial: dev.serial)
-                    model.toast(.ok, tr("Screenshot saved"))
+                    let path = try await Core.shared.phoneScreenshot()
                     if FileManager.default.fileExists(atPath: path) {
                         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
                     }
@@ -266,6 +278,8 @@ final class HotKeys {
             Task { try? await Core.shared.mediaCmd(cmd) }
         case .menuBarPanel:
             Self.openStatusItemPanel()
+        case .commandBar:
+            CommandBarController.shared.toggle()
         }
     }
 
