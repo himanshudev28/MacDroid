@@ -58,6 +58,8 @@ struct WsLink {
     outbox: mpsc::Sender<WsMessage>,
     kill: Option<oneshot::Sender<()>>,
     up_since_ms: i64,
+    /// The socket runs inside TLS (so `key` / `frame_key` stay `None`).
+    tls: bool,
 }
 
 /// The Bluetooth half. Always sealed at L2 by `ble_link`, never by `key`.
@@ -121,6 +123,28 @@ fn transport_of(p: &PhoneHandle, ws_primary: bool) -> Option<&'static str> {
         (Some(_), Some(_)) if ws_primary => Some("wifi"),
         (_, Some(_)) => Some("ble"),
         (None, None) => None,
+    }
+}
+
+/// How the live link is protected: `tls`, `aes` (older sealed Wi-Fi), `ble`
+/// (always sealed at L2), `plain`, or `none` with no phone.
+pub async fn link_security(state: &SharedState) -> &'static str {
+    let ws_primary = state.ws_primary.load(Ordering::Relaxed);
+    let phone = state.phone.lock().await;
+    let Some(p) = phone.as_ref() else { return "none" };
+    security_of(p, ws_primary)
+}
+
+fn security_of(p: &PhoneHandle, ws_primary: bool) -> &'static str {
+    match transport_of(p, ws_primary) {
+        Some("wifi") => match &p.ws {
+            Some(w) if w.tls => "tls",
+            Some(w) if w.key.is_some() => "aes",
+            Some(_) => "plain",
+            None => "none",
+        },
+        Some(_) => "ble",
+        None => "none",
     }
 }
 
@@ -227,8 +251,9 @@ pub async fn status(state: &SharedState) -> WifiStatus {
             phone_name: Some(p.name.clone()),
             caps: p.caps.clone(),
             transport: transport_of(p, ws_primary),
+            security: Some(security_of(p, ws_primary)),
         },
-        None => WifiStatus { connected: false, phone_name: None, caps: Vec::new(), transport: None },
+        None => WifiStatus { connected: false, phone_name: None, caps: Vec::new(), transport: None, security: Some("none") },
     }
 }
 
@@ -333,6 +358,9 @@ pub struct WifiStatus {
     pub caps: Vec<String>,
     /// `"wifi"` | `"ble"` | null. Additive (BLE fallback).
     pub transport: Option<&'static str>,
+    /// `tls` | `aes` | `ble` | `plain` | `none`. Additive.
+    #[serde(default)]
+    pub security: Option<&'static str>,
 }
 
 /// Fire-and-forget send of a JSON control message (clipboard, reply, dismiss,
@@ -569,6 +597,19 @@ async fn reply_on(state: &SharedState, value: Value, origin: LinkKind) -> bool {
 
 /// Last transport published in `wifi-status`, so a transport-only change re-emits.
 static LAST_TRANSPORT: std::sync::Mutex<Option<&'static str>> = std::sync::Mutex::new(None);
+/// How the Wi-Fi link is protected right now (`tls`/`aes`/`plain`), set when a
+/// Wi-Fi link registers; and the value last published, so a plain->TLS swap of
+/// the same phone re-emits `wifi-status` and the Mac's security row refreshes.
+static WIFI_SEC: std::sync::Mutex<&'static str> = std::sync::Mutex::new("plain");
+static LAST_SEC: std::sync::Mutex<&'static str> = std::sync::Mutex::new("none");
+
+fn security_label(transport: Option<&'static str>) -> &'static str {
+    match transport {
+        Some("wifi") => *WIFI_SEC.lock().unwrap(),
+        Some(_) => "ble",
+        None => "none",
+    }
+}
 
 fn emit_status(
     app: &AppHandle,
@@ -580,12 +621,16 @@ fn emit_status(
     let state = app.state::<LastPhoneName>();
     let mut guard = state.0.lock().unwrap();
     let mut last_t = LAST_TRANSPORT.lock().unwrap();
+    let security = if connected { security_label(transport) } else { "none" };
+    let mut last_s = LAST_SEC.lock().unwrap();
     if !connected && guard.is_none() {
         return;
     }
-    if connected && *guard == phone_name && *last_t == transport {
+    if connected && *guard == phone_name && *last_t == transport && *last_s == security {
         return;
     }
+    *last_s = security;
+    drop(last_s);
     let name_changed = *guard != phone_name;
     *guard = if connected { phone_name.clone() } else { None };
     *last_t = if connected { transport } else { None };
@@ -604,7 +649,7 @@ fn emit_status(
     } else if name_changed {
         crate::statusbar::refresh_title(app);
     }
-    let _ = app.emit("wifi-status", WifiStatus { connected, phone_name, caps, transport });
+    let _ = app.emit("wifi-status", WifiStatus { connected, phone_name, caps, transport, security: Some(security) });
 }
 
 /// Forward a feature message to the frontend as a Tauri event, mirroring
@@ -670,8 +715,26 @@ pub async fn run(app: AppHandle, state: SharedState, port: u16) {
     }
 }
 
+/// English template of the blocked-plain-link event; Swift localizes it via `tr(key, params)`.
+const BLOCKED_KEY: &str = "Blocked an unencrypted connection from {name}, which normally connects securely. Update DroidDock on the phone.";
+
 async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream) {
-    let ws_stream = match tokio_tungstenite::accept_async(stream).await {
+    // One port, two protocols: a ClientHello (0x16) gets the TLS handshake first,
+    // anything else is the plain WebSocket upgrade as before. A bare TCP probe
+    // returns None here without a log line.
+    let Some(stream) = crate::tls::accept(&app, stream).await else { return };
+    let secure = stream.is_tls();
+    // A peer that sends one byte ("G") or goes silent after the TLS handshake
+    // must not hold this task and its fd forever.
+    let upgraded = tokio::time::timeout(Duration::from_secs(10), tokio_tungstenite::accept_async(stream))
+        .await
+        .unwrap_or_else(|_| {
+            Err(tokio_tungstenite::tungstenite::Error::Io(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "WebSocket upgrade timed out",
+            )))
+        });
+    let ws_stream = match upgraded {
         Ok(s) => s,
         Err(e) => {
             // Was a silent `else { return }`. A failed upgrade is the one error
@@ -688,9 +751,12 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
 
     // Funnel every outbound send (welcome, pushes, replies, binary chunks)
     // through one writer task so nothing races on the socket's write half.
-    let writer = tokio::spawn(async move {
+    let mut writer = tokio::spawn(async move {
         while let Some(msg) = outbox_rx.recv().await {
-            if write.send(msg).await.is_err() {
+            // A close frame is always the last thing on this socket: stop after
+            // it is flushed so a caller can await this task to know it went out.
+            let is_close = msg.is_close();
+            if write.send(msg).await.is_err() || is_close {
                 break;
             }
         }
@@ -713,8 +779,8 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
             () = &mut auth_deadline, if !authed => break,
             incoming = read.next() => {
                 let Some(Ok(ws_msg)) = incoming else { break };
-                // Any frame (text, binary, WS ping/pong) proves the link is
-                // alive; `link_quality` skips its own probe while this is fresh.
+                // Any frame (text, binary, WS ping/pong) shows the phone side is
+                // alive; `link_quality` uses it to tell a busy link from a dead one.
                 crate::link_quality::note_inbound();
 
                 // Binary frames: only meaningful post-auth (mirror + transfer).
@@ -771,8 +837,84 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                         tokio::time::sleep(Duration::from_millis(1000)).await;
                         break;
                     }
-                    eprintln!("[ws] HANDSHAKE OK: {hello_name:?} caps={caps:?} deviceId={device_id:?}");
+                    // Downgrade guard: a phone that has already done TLS must not
+                    // fall back to a plain link (someone stripping the handshake).
+                    if !secure && crate::tls::plain_blocked(&app, device_id.as_deref()) {
+                        eprintln!("[ws] HANDSHAKE REJECT: plain hello from TLS-capable {hello_name:?}");
+                        let has_cap = caps.iter().any(|c| c == crate::tls::CAP);
+                        let identity = crate::tls::identity(&app);
+                        let close = WsMessage::Close(Some(tokio_tungstenite::tungstenite::protocol::CloseFrame {
+                            code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::from(4003u16),
+                            reason: "tls-required".into(),
+                        }));
+                        match (crate::tls::hello_decision(true, true, has_cap, identity.is_some()), identity) {
+                            (crate::tls::HelloAction::PinAndClose4003, Some(id)) => {
+                                // Re-pair path: hand the phone the pin (no AES session
+                                // exists yet, so it goes out unsealed), then close with
+                                // 4003. No welcome, no registration. The writer task
+                                // drains the outbox in order and stops after the close
+                                // frame, so awaiting it means the pin was flushed first.
+                                let pin = crate::tls::pin_message(&token, &id.fp);
+                                let _ = outbox_tx.send(WsMessage::text(pin.to_string())).await;
+                                let _ = outbox_tx.send(close).await;
+                                let _ = tokio::time::timeout(Duration::from_secs(2), &mut writer).await;
+                                // Finish the WebSocket close handshake (read until the
+                                // peer's Close, end of stream, or 2 s) so dropping the
+                                // socket can't RST away the frames just sent.
+                                let _ = tokio::time::timeout(Duration::from_secs(2), async {
+                                    while let Some(Ok(m)) = read.next().await {
+                                        if m.is_close() {
+                                            break;
+                                        }
+                                    }
+                                })
+                                .await;
+                            }
+                            _ => {
+                                // Old phone (no `tls` cap) on the block list: offer the
+                                // user a one-click "Allow", at most once per device per
+                                // 10 minutes. Anything else gets the plain notice.
+                                let offer = if has_cap { None } else { device_id.as_deref() };
+                                let payload = match offer {
+                                    Some(id) if crate::tls::prompt_due(id) => Some(json!({
+                                        "kind": "bad",
+                                        "key": BLOCKED_KEY,
+                                        "params": { "name": hello_name },
+                                        "text": BLOCKED_KEY.replace("{name}", &hello_name),
+                                        "deviceId": id,
+                                        "action": "allow-plain",
+                                    })),
+                                    Some(_) => None,
+                                    None => Some(json!({
+                                        "kind": "bad",
+                                        "key": BLOCKED_KEY,
+                                        "params": { "name": hello_name },
+                                        "text": BLOCKED_KEY.replace("{name}", &hello_name),
+                                    })),
+                                };
+                                if let Some(p) = payload {
+                                    emit_event(&app, "wifi-event", &p);
+                                }
+                                let _ = outbox_tx.send(close).await;
+                                let _ = tokio::time::timeout(Duration::from_secs(2), &mut writer).await;
+                                // Finish the WebSocket close handshake (read until the
+                                // peer's Close, end of stream, or 2 s) so dropping the
+                                // socket can't RST away the frames just sent.
+                                let _ = tokio::time::timeout(Duration::from_secs(2), async {
+                                    while let Some(Ok(m)) = read.next().await {
+                                        if m.is_close() {
+                                            break;
+                                        }
+                                    }
+                                })
+                                .await;
+                            }
+                        }
+                        break;
+                    }
+                    eprintln!("[ws] HANDSHAKE OK: {hello_name:?} caps={caps:?} deviceId={device_id:?} tls={secure}");
                     authed = true;
+                    let phone_tls = caps.iter().any(|c| c == crate::tls::CAP);
 
                     // Tier C: encryption engages only when the phone asked for
                     // it AND the user enabled it here. Either side silent →
@@ -780,13 +922,14 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                     // never strand an older phone build.
                     let cfg = live_config(&app);
                     let want_enc =
-                        cfg.encrypt_link && caps.iter().any(|c| c == crate::crypto::CAP);
+                        !secure && cfg.encrypt_link && caps.iter().any(|c| c == crate::crypto::CAP);
                     let session_key =
                         want_enc.then(|| crate::crypto::derive(&cfg.token));
                     // Frames need the phone to advertise `enc2` as well. Same
                     // master switch, so a user who turned encryption off gets
                     // plaintext frames too.
-                    let want_enc_frames = cfg.encrypt_link
+                    let want_enc_frames = !secure
+                        && cfg.encrypt_link
                         && caps.iter().any(|c| c == crate::crypto::CAP_FRAMES);
                     let frame_key =
                         want_enc_frames.then(|| crate::crypto::derive(&cfg.token));
@@ -804,6 +947,9 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                     if want_enc_frames {
                         enc_caps.push(crate::crypto::CAP_FRAMES.to_string());
                     }
+                    if phone_tls {
+                        enc_caps.push(crate::tls::CAP.to_string());
+                    }
                     let link = WsLink {
                         id: next_link_id(),
                         key: session_key,
@@ -811,6 +957,7 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                         outbox: outbox_tx.clone(),
                         kill: Some(kill_tx.take().expect("hello only authenticates once per connection")),
                         up_since_ms: now_ms(),
+                        tls: secure,
                     };
                     my_link_id = Some(link.id);
                     let reg = register_link(
@@ -831,6 +978,17 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                         break;
                     }
                     finish_register(&app, &state, &reg, LinkKind::Ws).await;
+                    if secure {
+                        crate::tls::note_tls_device(&app, device_id.as_deref());
+                    } else if phone_tls {
+                        // Plain Wi-Fi only (never BLE): hand an existing pairing its
+                        // pin, authenticated with the token. Sealed by `reply_on` if
+                        // the older AES layer is on.
+                        if let Some(id) = crate::tls::identity(&app) {
+                            let pin = crate::tls::pin_message(&live_config(&app).token, &id.fp);
+                            reply_on(&state, pin, LinkKind::Ws).await;
+                        }
+                    }
                     continue;
                 }
 
@@ -960,6 +1118,18 @@ async fn finish_register(app: &AppHandle, state: &SharedState, reg: &Registered,
         app.state::<crate::link_quality::LinkQuality>().reset_for_new_link();
     }
     let transport = transport(state).await;
+    if kind == LinkKind::Ws {
+        let sec = state.phone.lock().await.as_ref().and_then(|p| p.ws.as_ref()).map_or("plain", |w| {
+            if w.tls {
+                "tls"
+            } else if w.key.is_some() {
+                "aes"
+            } else {
+                "plain"
+            }
+        });
+        *WIFI_SEC.lock().unwrap() = sec;
+    }
     if reg.fresh {
         // Wakes every loop parked in `await_connected`, so the first
         // clipboard poll / link ping / media push happens now.

@@ -718,6 +718,35 @@ fn emit_toast(app: &AppHandle, kind: &str, text: &str) {
     let _ = app.emit("wifi-event", serde_json::json!({ "kind": kind, "text": text }));
 }
 
+/// `adb track-devices -l`, tied to this process's life. adb never notices its
+/// parent dying, so a crash or SIGKILL of DroidDock (or of a test binary with its
+/// own `DD_DATA_DIR`, where the launch-time PID-file reaper never looks) used to
+/// leave it running under launchd. A small `sh` watchdog blocks reading a pipe
+/// whose write end only we hold (the child's stdin, kept by the caller): when we
+/// exit for any reason the kernel closes it, `read` returns, and the watchdog
+/// ends adb. `exec` keeps the PID, so `TRACKER_PID` and `child.kill()` still hit
+/// adb itself. No polling. (Background jobs in a non-interactive sh get
+/// /dev/null as stdin, hence the hand-off on fd 3.) Before killing, the watchdog
+/// checks that the PID is still running `track-devices`: if adb had already
+/// exited and the PID been recycled, an unrelated process is left alone.
+#[cfg(unix)]
+fn tracker_command(adb: &str) -> Command {
+    const WATCHDOG: &str = "exec 3<&0; \
+        (read _ <&3; case \"$(/bin/ps -o command= -p $$ 2>/dev/null)\" in *track-devices*) kill $$;; esac) \
+        >/dev/null 2>&1 </dev/null & \
+        exec 3<&-; exec \"$0\" track-devices -l </dev/null";
+    let mut c = Command::new("/bin/sh");
+    c.args(["-c", WATCHDOG, adb]).stdin(std::process::Stdio::piped());
+    c
+}
+
+#[cfg(not(unix))]
+fn tracker_command(adb: &str) -> Command {
+    let mut c = Command::new(adb);
+    c.args(["track-devices", "-l"]);
+    c
+}
+
 /// Spawn `adb track-devices -l` and parse its 4-hex-length-prefixed stream,
 /// auto-respawning on exit (2s backoff) — mirrors `trackDevices`.
 fn spawn_tracker(app: AppHandle, adb: String, stop: Arc<AtomicBool>) {
@@ -730,13 +759,14 @@ fn spawn_tracker(app: AppHandle, adb: String, stop: Arc<AtomicBool>) {
                 return;
             }
             let started = Instant::now();
-            let child = Command::new(&adb)
-                .args(["track-devices", "-l"])
+            let child = tracker_command(&adb)
                 .env("PATH", augmented_path())
                 .stdout(std::process::Stdio::piped())
                 .spawn();
             match child {
                 Ok(mut child) => {
+                    // Hold the write end of the watchdog pipe for as long as this child runs (see `tracker_command`).
+                    let _parent_alive = child.stdin.take();
                     if let Some(pid) = child.id() {
                         TRACKER_PID.store(pid, Ordering::SeqCst);
                         crate::shutdown::tracker_pid_record(&app, pid);

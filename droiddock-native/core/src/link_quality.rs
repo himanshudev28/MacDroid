@@ -31,12 +31,6 @@ const PING_EVERY: Duration = Duration::from_secs(4);
 /// keeps its semantics (an unanswered probe is stalled after `STALL_AFTER_MS`);
 /// it just starts later. Going active again probes at once.
 const PING_EVERY_INACTIVE: Duration = Duration::from_secs(20);
-/// A probe is skipped when any frame arrived this recently: that traffic is
-/// itself proof the phone's side is alive, so the ping would add a radio wake
-/// for no information. Never skipped while a probe is already outstanding —
-/// that one must be allowed to stall.
-const FRESH_INBOUND_MS: i64 = 3_000;
-
 /// Epoch-ms of the last frame of any kind from the phone.
 static LAST_INBOUND_MS: AtomicI64 = AtomicI64::new(0);
 
@@ -45,23 +39,45 @@ pub fn note_inbound() {
     LAST_INBOUND_MS.store(now_ms(), Ordering::Relaxed);
 }
 
-/// Pure decision, separated for testing: should this tick send a probe?
-fn should_probe(awaiting: bool, last_inbound_ms: i64, now: i64) -> bool {
-    awaiting || now - last_inbound_ms >= FRESH_INBOUND_MS
+/// Pure stall rule, two tiers:
+/// - nothing at all from the phone for `STALL_AFTER_MS` since the probe went
+///   out: the link is gone both ways;
+/// - the phone keeps talking but our probe has had no echo for
+///   `ONE_WAY_STALL_MS`: the Mac->phone direction is dead. Inbound traffic
+///   only buys time here, it never clears the probe: a busy phone (video,
+///   a big transfer) can queue the `pong` behind its own frames, which is
+///   what made the link flap when any late echo counted as stalled.
+fn is_stalled(awaiting_since: i64, last_inbound_ms: i64, now: i64) -> bool {
+    awaiting_since != 0
+        && (now - awaiting_since.max(last_inbound_ms) > STALL_AFTER_MS
+            || now - awaiting_since > ONE_WAY_STALL_MS)
 }
 
-/// Pure stall rule: a probe is outstanding AND neither its echo nor any other
-/// inbound frame has shown up for `STALL_AFTER_MS` since it was sent. Inbound
-/// traffic of any kind proves the phone is alive, so it restarts the clock.
-fn is_stalled(awaiting_since: i64, last_inbound_ms: i64, now: i64) -> bool {
-    awaiting_since != 0 && now - awaiting_since.max(last_inbound_ms) > STALL_AFTER_MS
+/// How long the loop may sleep. While a probe is outstanding and not yet
+/// stalled, wake right when it would become stalled instead of on the next
+/// cadence tick, so "stalled" shows up within ~`STALL_AFTER_MS` of the probe
+/// rather than up to a whole interval later. Reads memory only; once the grade
+/// is stalled (or nothing is outstanding) the normal cadence applies, so an
+/// idle link keeps zero timers beyond the usual probe sleep.
+fn next_wait(awaiting_since: i64, last_inbound_ms: i64, now: i64, stalled: bool, normal: Duration) -> Duration {
+    if awaiting_since == 0 || stalled {
+        return normal;
+    }
+    let deadline = (awaiting_since.max(last_inbound_ms) + STALL_AFTER_MS)
+        .min(awaiting_since + ONE_WAY_STALL_MS);
+    let left = (deadline + 50 - now).max(100) as u64;
+    normal.min(Duration::from_millis(left))
 }
 
 fn ping_interval(active: bool) -> Duration {
     if active { PING_EVERY } else { PING_EVERY_INACTIVE }
 }
-/// No echo within this long and the link is treated as stalled, socket or no.
+/// No echo and no other inbound frame within this long and the link is treated
+/// as stalled, socket or no.
 const STALL_AFTER_MS: i64 = 12_000;
+/// No echo within this long while the phone keeps sending: the Mac->phone
+/// direction is dead. Generous, because a pong can wait behind a busy stream.
+const ONE_WAY_STALL_MS: i64 = 30_000;
 
 /// EMA weight for each new sample. Low enough to ride out a single spike.
 const ALPHA: f64 = 0.3;
@@ -189,9 +205,14 @@ pub async fn run(app: AppHandle, state: SharedState) {
             // While a probe is outstanding (or the grade is stalled) re-check
             // every PING_EVERY so recovery shows within seconds; this only
             // reads memory, the radio is untouched.
-            let pending = last_grade == "stalled"
-                || app.state::<LinkQuality>().awaiting.load(Ordering::Relaxed) != 0;
-            let wait = if pending { PING_EVERY } else { ping_interval(crate::pacing::is_active() || last_transport == Some("ble")) };
+            let since = app.state::<LinkQuality>().awaiting.load(Ordering::Relaxed) as i64;
+            let stalled = last_grade == "stalled";
+            let normal = if since != 0 || stalled {
+                PING_EVERY
+            } else {
+                ping_interval(crate::pacing::is_active() || last_transport == Some("ble"))
+            };
+            let wait = next_wait(since, LAST_INBOUND_MS.load(Ordering::Relaxed), now_ms(), stalled, normal);
             tokio::select! {
                 _ = tokio::time::sleep(wait) => {}
                 _ = crate::pacing::active_changed() => {}
@@ -233,12 +254,11 @@ pub async fn run(app: AppHandle, state: SharedState) {
         }
 
         let now = now_ms();
-        let awaiting = quality.awaiting.load(Ordering::Relaxed) != 0;
         // While a BLE link exists the Wi-Fi socket is probed at the active cadence
         // even when the app is hidden: that is what decides the handback (§6).
         let active = crate::pacing::is_active() || snap.ble_live;
         let cadence_due = now - last_sent_ms >= ping_interval(active).as_millis() as i64 - 500;
-        if cadence_due && should_probe(awaiting, LAST_INBOUND_MS.load(Ordering::Relaxed), now) {
+        if cadence_due {
             last_sent_ms = now;
             // Only stamp a new outstanding probe if the previous one came back;
             // otherwise the stall clock would keep resetting and never fire.
@@ -273,18 +293,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn skips_probe_when_traffic_is_fresh() {
-        assert!(!should_probe(false, 10_000, 11_000));
-        assert!(should_probe(false, 10_000, 13_000));
-        assert!(should_probe(false, 0, 13_000));
-    }
-
-    #[test]
-    fn outstanding_probe_is_never_skipped_so_stall_detection_survives() {
-        assert!(should_probe(true, 10_000, 10_100));
-    }
-
-    #[test]
     fn stall_needs_an_unanswered_probe() {
         assert!(!is_stalled(0, 0, 1_000_000));
         assert!(!is_stalled(1_000, 0, 1_000 + STALL_AFTER_MS));
@@ -292,13 +300,44 @@ mod tests {
     }
 
     #[test]
-    fn inbound_traffic_resets_the_stall_clock() {
+    fn inbound_traffic_delays_the_stall_but_never_clears_it() {
         let sent = 1_000;
         let now = sent + STALL_AFTER_MS + 5_000;
         assert!(is_stalled(sent, 0, now));
         assert!(!is_stalled(sent, now - 2_000, now));
         // old traffic from before the probe does not help
         assert!(is_stalled(sent, 500, now));
+        // the phone keeps talking but never echoes: the Mac->phone side is dead
+        let late = sent + ONE_WAY_STALL_MS + 1;
+        assert!(is_stalled(sent, late - 100, late));
+    }
+
+    #[test]
+    fn next_wait_lands_on_the_stall_deadline() {
+        let normal = Duration::from_secs(4);
+        // nothing outstanding / already stalled: normal cadence
+        assert_eq!(next_wait(0, 0, 5_000, false, normal), normal);
+        assert_eq!(next_wait(1_000, 0, 50_000, true, normal), normal);
+        // probe sent 10 s ago, phone silent: wake in ~2 s, not 4
+        let w = next_wait(1_000, 0, 11_000, false, normal);
+        assert!(w >= Duration::from_millis(1_900) && w <= Duration::from_millis(2_200), "{w:?}");
+        // fresh probe: the cadence is shorter than the deadline
+        assert_eq!(next_wait(1_000, 0, 1_100, false, normal), normal);
+        // past the deadline: short re-check, never zero (no busy loop)
+        assert_eq!(next_wait(1_000, 0, 13_500, false, normal), Duration::from_millis(100));
+        // phone busy: the one-way deadline caps the wait
+        let w = next_wait(1_000, 30_000, 30_000, false, normal);
+        assert!(w <= Duration::from_millis(1_100), "{w:?}");
+    }
+
+    #[test]
+    fn stall_with_no_echo_is_detected_even_when_the_phone_keeps_talking() {
+        let q = LinkQuality::default();
+        q.awaiting.store((now_ms() - ONE_WAY_STALL_MS - 1_000) as u64, Ordering::Relaxed);
+        note_inbound();
+        assert_eq!(q.report().grade, "stalled");
+        q.on_pong(&json!({ "type": "pong" }));
+        assert_ne!(q.report().grade, "stalled");
     }
 
     #[test]

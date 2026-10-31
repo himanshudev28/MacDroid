@@ -156,6 +156,8 @@ pub const COMMANDS: &[&str] = &[
     "ble_closed",
     "ble_rssi",
     "link_prefer",
+    "tls_status",
+    "tls_allow_plain",
 ];
 
 /// The old Tauri `generate_handler![...]` list, verbatim (last path segment).
@@ -312,6 +314,8 @@ const NEW_COMMANDS: &[&str] = &[
     "ble_closed",
     "ble_rssi",
     "link_prefer",
+    "tls_status",
+    "tls_allow_plain",
 ];
 
 /// Run one command. `body` is the raw payload of `dd_core_invoke_bytes`.
@@ -332,13 +336,21 @@ pub async fn dispatch(
         "ble_closed" => crate::ble_policy::cmd_closed(app, &args).await,
         "ble_rssi" => crate::ble_policy::cmd_rssi(app, &args),
         "link_prefer" => crate::ble_policy::cmd_link_prefer(app, &args).await,
+        "tls_allow_plain" => {
+            crate::tls::forget_device(app, args.get("deviceId").and_then(|v| v.as_str()));
+            Ok(Value::Null)
+        }
+        "tls_status" => {
+            let st = app.state::<crate::ws_server::SharedState>();
+            Ok(crate::commands::tls_status(app, st.inner()).await)
+        }
         "get_config" => {
             let s0 = app.state::<crate::AppState>();
             val(crate::commands::get_config(s0))
         }
         "get_pairing_info" => {
             let s0 = app.state::<crate::AppState>();
-            val(crate::commands::get_pairing_info(s0))
+            val(crate::commands::get_pairing_info(app, s0))
         }
         "get_notif_app_settings" => {
             val(crate::commands::get_notif_app_settings(app.state::<crate::AppState>()))

@@ -202,12 +202,14 @@ pub struct PairingInfo {
     port: u16,
     token: String,
     ips: Vec<String>,
+    /// TLS identity fingerprint the QR carries (empty if TLS could not start).
+    fp: String,
 }
 
 /// Same fields wifi.js's `status()`/`lanIPs()` expose — the frontend builds
 /// the `droiddock://pair?...` URL itself (see lib/pairing.ts) so the
 /// percent-encoding stays visibly identical to wifi.js's `pairingPayload()`.
-pub fn get_pairing_info(state: State<AppState>) -> PairingInfo {
+pub fn get_pairing_info(app: &AppHandle, state: State<AppState>) -> PairingInfo {
     let config = state.config.lock().unwrap().clone();
     let host = config
         .device_name
@@ -219,7 +221,14 @@ pub fn get_pairing_info(state: State<AppState>) -> PairingInfo {
                 .to_string()
         });
     let ips = crate::mdns::selected_ipv4s(&config.server_iface).into_iter().map(|ip| ip.to_string()).collect();
-    PairingInfo { host, port: config.port, token: config.token, ips }
+    let fp = crate::tls::identity(app).map(|i| i.fp.clone()).unwrap_or_default();
+    PairingInfo { host, port: config.port, token: config.token, ips, fp }
+}
+
+/// `tls_status`: how the live phone link is protected, plus the Mac's TLS fingerprint.
+pub async fn tls_status(app: &AppHandle, state: &SharedState) -> Value {
+    let fp = crate::tls::identity(app).map(|i| i.fp.clone()).unwrap_or_default();
+    json!({ "linkSecurity": ws_server::link_security(state).await, "fp": fp })
 }
 
 // ── Phase 4: notifications ───────────────────────────────────────────────

@@ -40,6 +40,7 @@ mod shutdown;
 mod statusbar;
 mod transfer;
 mod transfer_log;
+mod tls;
 mod tray;
 mod updater;
 mod webdav;
