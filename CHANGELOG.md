@@ -8,6 +8,67 @@ to a generic body.
 
 ---
 
+## v3.5.0
+
+Encrypted Wi-Fi link, a command bar, updates that install themselves, and an app identity
+that keeps macOS permissions across updates.
+
+> **Coming from 3.0.0 on the Mac?** Download `DroidDock-3.5.0.dmg` below once (3.0.0 can only
+> open this page), replace the app, then re-grant Accessibility one last time
+> (Settings › Remote & Privacy › Reset permission). From 3.5.0 on, updates install from inside the app
+> and the permission stays. On Android, the app updates itself as usual.
+
+- **Mac: a livelier first-run welcome.** A short animation shows a notification, a file and a
+  clipboard item flying from your phone to your Mac. Steps slide in, the QR turns into a check
+  when your phone connects, each permission pops a check as you allow it, and the last step
+  celebrates. With Reduce Motion on, it all becomes simple fades.
+- **Mac: updates install themselves.** "Update" now downloads the new version, checks its
+  signature, replaces the app and restarts it. If anything is off it opens the release page as
+  before.
+- **Mac: Accessibility stays granted across updates.** The app is now signed with DroidDock's own
+  certificate instead of ad-hoc, so macOS recognises each new version as the same app. Coming from
+  3.0.0 or earlier, re-grant Accessibility once (Settings › Remote & Privacy › Reset permission). The
+  updater only installs an update signed with that same certificate. First launch of a download
+  still needs Privacy & Security › Open Anyway, as this isn't Apple's paid Developer ID.
+- **Mac: ⌘1–⌘7 mean the same thing in every layout.** Classic's old ⌘2 (Apps) and ⌘4 (Mirror)
+  changed to match the other layouts.
+- **Mac: "Weak connection" shows up sooner** (about 12 s after the phone goes quiet) and now also
+  catches a link that only works from the phone to the Mac.
+- **Mac: less background work.** Clipboard, setup, permission and health checks stop while the
+  window is hidden.
+- **Mac: the screenshot hotkey uses Wi-Fi** when the phone supports it, like the toolbar button.
+- **Android: Wi-Fi screenshots of large screens no longer fail silently.** Oversized images are
+  scaled down, and the Mac gets an error instead of a 20-second timeout.
+- **Android: a first-run welcome.** A short walkthrough of what DroidDock does, the permissions it
+  uses (every one optional, changeable later in Settings) and pairing with your Mac.
+- **Android: remove old Macs.** Macs you no longer use can be removed from the paired list, with a
+  confirmation first.
+- **Android: the Mac Remote works in landscape.** Sideways, the trackpad fills the left half and the
+  drag button, keys and typing field sit on the right. Before, the trackpad had no height at all.
+- **Android: rotating the phone keeps your place.** The open tab, open dialogs, the Files source and
+  what you typed into manual pairing all survive a rotation, and the manual-pair dialog's Pair button
+  stays on screen in landscape.
+- **Mac: a command bar.** Press ⌥Space anywhere to text, call or ring your phone, mirror it, take
+  a screenshot, play or pause, send the clipboard, open a phone app or check the battery. Type
+  `text Rahul running late` and press Return. Messages and calls go only to a clear name match.
+  When two contacts could match, the first Return shows who it will go to and the second sends.
+  The shortcut can be changed in Settings › Shortcuts.
+- **The Wi-Fi link is now encrypted (TLS)**, including files, photos and the mirror video, with
+  nothing to switch on. Already-paired phones switch over by themselves after one quick
+  reconnect, with no new QR scan. Once a phone has connected securely it never falls back to an
+  unencrypted link. If the Mac's identity ever changes, the phone asks you to scan the QR again.
+  Settings › Connection shows whether the link is encrypted, and older phone versions keep
+  working unencrypted until they update. Bluetooth fallback was already encrypted.
+- **Mac: switching window layout is instant and lands cleanly.** It no longer freezes the window
+  for a few seconds or leaves uneven columns or a stray toolbar line. All four layouts share the
+  same phone card, sidebar widths and a "More" menu, and the layout picker describes each one.
+- **Mac: a cleaner Mirror screen.** One Start Mirroring button, a short list of modes that says
+  why one is unavailable, and quality settings grouped in one place. Camera works the same way.
+- **Mac: no leftover `adb` processes after a crash.** The device watcher DroidDock starts now
+  ends with the app, even after a crash or Force Quit.
+
+---
+
 ## v3.0.0
 
 A new Mac app. DroidDock for macOS is rebuilt as a native SwiftUI app on a

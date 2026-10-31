@@ -17,8 +17,8 @@ plugins {
 // CI passes `-PversionTag=v1.2.3` from the git tag. Everything else — local
 // builds, Android Studio — falls back to the literals below, so nothing about
 // day-to-day development changes.
-val fallbackVersionName = "3.0.0"
-val fallbackVersionCode = 30000
+val fallbackVersionName = "3.5.0"
+val fallbackVersionCode = 30500
 
 val releaseTag: String? = (findProperty("versionTag") as String?)?.takeIf { it.isNotBlank() }
 
