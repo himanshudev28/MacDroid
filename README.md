@@ -194,12 +194,15 @@ Pair once — they auto-reconnect whenever both apps are open on the same networ
 Grab the prebuilt apps from the [**Releases**](../../releases) page:
 
 1. **Mac** — download `DroidDock-<version>.dmg` (Apple Silicon, macOS 14 or later), open
-   it and drag **DroidDock.app** to Applications. Then **right-click the app → Open** →
-   **Open** for the first launch only.
+   it and drag **DroidDock.app** to Applications. The first launch needs one extra step:
+   - **macOS 15 Sequoia or later:** double-click the app, click **Done** on the warning,
+     then open **System Settings → Privacy & Security**, scroll down to *"DroidDock was
+     blocked…"* and click **Open Anyway** (then confirm with your password or Touch ID).
+   - **macOS 14 Sonoma:** **right-click the app → Open** → **Open**.
 
    > The app is ad-hoc signed, not notarized (that needs a paid Apple Developer
-   > account), so macOS won't run it straight from a double-click. If right-click →
-   > Open doesn't offer you an **Open** button, clear the download flag instead:
+   > account), so macOS won't run it straight from a double-click. macOS 15 removed the
+   > right-click → Open shortcut. If neither way works, clear the download flag instead:
    >
    > ```
    > xattr -dr com.apple.quarantine /Applications/DroidDock.app
@@ -363,15 +366,18 @@ DroidDock/
   clear, because wrapping them means surgery on the hot transfer/mirror loops.
   This is *not* end-to-end encryption of everything, and nothing in the UI claims
   it is. Full TLS is still a future enhancement.
-- **Updating the Mac app revokes its Accessibility permission**, and macOS does not
-  tell you. Because DroidDock is ad-hoc signed rather than Developer ID signed, the
-  permission is recorded against a hash of the exact app binary
-  (`designated => cdhash H"…"`), and every release is a different binary. The row
-  stays in **Privacy & Security → Accessibility** with the switch still on, but the
-  Mac ignores every remote click and keystroke. Fix it with **Settings → System →
-  Reset permission** in DroidDock, then tick DroidDock when macOS asks. Unticking
-  and re-ticking the stale row often doesn't help — it's the row itself that's dead.
-  A Developer ID signature is the only thing that removes this for good.
+- **Accessibility after an update: one last re-grant.** Releases up to 3.0.0 were
+  ad-hoc signed, so macOS recorded the permission against a hash of that exact app
+  binary (`designated => cdhash H"…"`) and every update quietly revoked it. Newer
+  releases are signed with DroidDock's own certificate, which macOS records instead
+  (`identifier "com.droiddock.mac" and certificate root = H"…"`), so the permission
+  survives updates. The first time you move from 3.0.0 or earlier to one of these,
+  the row stays in **Privacy & Security → Accessibility** with the switch still on,
+  but the Mac ignores remote clicks and keystrokes. Fix it once with **Settings →
+  Remote & Privacy → Reset permission** in DroidDock, then tick DroidDock when macOS asks.
+  Unticking and re-ticking the stale row often doesn't help: it's the row itself
+  that's dead. This certificate isn't Apple's paid Developer ID, so the first launch
+  of a download still needs **Open Anyway** (see Install).
 - **Call control over Wi-Fi has three limits, all Android's.** The Answer and
   hang-up buttons need the Calls permission and are hidden until it is granted,
   rather than shown and dead. Mute and speaker are reported back from the phone
