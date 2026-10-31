@@ -212,7 +212,7 @@ internal fun DeviceIdentityRows() {
             label = { Text(t("Device name")) },
             placeholder = { Text(ConnectionManager.hardwareName()) },
             singleLine = true,
-            shape = DockTheme.shapes.field,
+            shape = DockTheme.shapes.field, colors = com.droiddock.app.ui.components.dockFieldColors(),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = sp.m)

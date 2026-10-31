@@ -52,7 +52,7 @@ class MirrorService : Service() {
     private var drainThread: Thread? = null
     @Volatile private var running = false
     @Volatile private var streaming = true // gated off while paused (Auto-mode keep-alive)
-    @Volatile private var videoPaused = false // Mac viewer hidden (`mirror-pause`): video only, independent of [streaming]
+    private val videoGate = VideoPauseGate() // Mac viewer hidden (`mirror-pause`): video only, independent of [streaming]
     /** True while [drain] is skipping predicted frames because the socket is
      *  backed up. Latched so the "give me a keyframe" request is made once per
      *  gap rather than once per dropped frame. */
@@ -158,7 +158,7 @@ class MirrorService : Service() {
         encoder = enc
         running = true
         streaming = true
-        videoPaused = false
+        videoGate.reset()
         this.source = source
         drainThread = thread(name = "mirror-drain") { drain(enc, w, h, source, mime) }
         return surface
@@ -343,7 +343,7 @@ class MirrorService : Service() {
                 // reason to copy a frame out of the codec buffer just to drop
                 // it. Config packets are still read: they are what the Mac
                 // needs to reconfigure its decoder on resume.
-                if ((!streaming || videoPaused) && !isConfig) {
+                if (videoGate.shouldDrop(streaming, isConfig)) {
                     enc.releaseOutputBuffer(idx, false)
                     continue
                 }
@@ -368,7 +368,7 @@ class MirrorService : Service() {
                         if (streaming) ConnectionManager.send(started)
                         announced = true
                     }
-                } else if (streaming && !videoPaused) {
+                } else if (streaming && !videoGate.paused) {
                     // Backpressure. The video path used to push into OkHttp's
                     // outbound queue unconditionally, so a Wi-Fi dip meant
                     // frames piling up in RAM and the Mac rendering seconds
@@ -493,7 +493,7 @@ class MirrorService : Service() {
     /** Resume transmitting: re-announce so the Mac reconfigures, and force a keyframe. */
     fun resumeStreaming() {
         streaming = true
-        videoPaused = false
+        videoGate.reset()
         audio?.resumeStreaming()
         startedJson?.let { ConnectionManager.send(it) }
         droppingVideo = false
@@ -507,14 +507,13 @@ class MirrorService : Service() {
      * silences both.
      */
     fun pauseVideo() {
-        if (encoder != null) videoPaused = true
+        videoGate.pause(encoder != null)
     }
 
     /** Viewer visible again (`mirror-resume`): resume video and force a keyframe
      *  (config is prepended to it) so the Mac decoder can restart immediately. */
     fun resumeVideo() {
-        if (encoder == null) return
-        videoPaused = false
+        if (!videoGate.resume(encoder != null)) return
         droppingVideo = false
         encoder?.let { requestSyncFrame(it) }
     }

@@ -1,6 +1,13 @@
 package com.droiddock.app.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material3.Icon
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -42,12 +49,24 @@ fun DockClipCard(
         Row(verticalAlignment = Alignment.CenterVertically) {
             DockIconBadge(Icons.Rounded.ContentPaste, tone = Tone.SECONDARY, size = 36.dp)
             Spacer(Modifier.width(DockTheme.spacing.m))
-            Text(
-                if (DockTheme.type.upperCaseLabels) title.uppercase() else title,
-                style = if (DockTheme.type.upperCaseLabels) MaterialTheme.typography.labelMedium else MaterialTheme.typography.titleMedium,
-                color = s.onSurface, modifier = Modifier.weight(1f),
-            )
-            if (meta != null) Text(meta, style = MaterialTheme.typography.labelMedium, color = s.onSurfaceVariant)
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (DockTheme.type.upperCaseLabels) title.uppercase() else title,
+                    style = if (DockTheme.type.upperCaseLabels) MaterialTheme.typography.labelMedium else MaterialTheme.typography.titleMedium,
+                    color = s.onSurface, maxLines = 1,
+                )
+                if (meta != null) Text(meta, style = MaterialTheme.typography.labelMedium, color = s.onSurfaceVariant, maxLines = 1)
+            }
+            // "History" lives up here (the whole card opens it too), so the action row
+            // below never has to squeeze three buttons into one line.
+            Row(
+                Modifier.clip(CircleShape).dockClickable(onClickLabel = openLabel, onClick = onOpen)
+                    .padding(start = 10.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(openLabel, style = MaterialTheme.typography.labelLarge, color = s.primary, maxLines = 1)
+                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = s.primary, modifier = Modifier.size(20.dp))
+            }
         }
         Spacer(Modifier.height(DockTheme.spacing.m))
         Text(
@@ -58,12 +77,16 @@ fun DockClipCard(
         )
         Spacer(Modifier.height(DockTheme.spacing.l))
         Row(horizontalArrangement = Arrangement.spacedBy(DockTheme.spacing.s), verticalAlignment = Alignment.CenterVertically) {
-            DockButton(sendLabel, onSend, kind = ButtonKind.TONAL, icon = Icons.AutoMirrored.Rounded.Send, height = 44.dp)
+            DockButton(
+                sendLabel, onSend, kind = ButtonKind.TONAL, icon = Icons.AutoMirrored.Rounded.Send, height = 46.dp,
+                horizontalPadding = 16.dp, modifier = Modifier.weight(1f), fullWidth = true,
+            )
             if (copyLabel != null && onCopy != null) {
-                DockButton(copyLabel, onCopy, kind = ButtonKind.GHOST, icon = Icons.Rounded.ContentCopy, height = 44.dp)
+                DockButton(
+                    copyLabel, onCopy, kind = ButtonKind.SECONDARY, icon = Icons.Rounded.ContentCopy, height = 46.dp,
+                    horizontalPadding = 16.dp, modifier = Modifier.weight(1f), fullWidth = true,
+                )
             }
-            Spacer(Modifier.weight(1f))
-            DockButton(openLabel, onOpen, kind = ButtonKind.GHOST, height = 44.dp)
         }
     }
 }

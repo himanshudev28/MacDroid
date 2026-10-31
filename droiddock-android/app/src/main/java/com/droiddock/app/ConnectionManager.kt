@@ -53,6 +53,8 @@ object ConnectionManager {
     // rather than showing one that silently does nothing on an older phone.
     private fun caps(): List<String> = buildList {
         addAll(listOf("info", "fs", "photos", "shot", "photosync", "wallpaper", "apps", "macinfo", "macmedia"))
+        // TLS: always advertised, on TLS and plain links alike. A plain link gets a `tls-pin` back.
+        add(LinkTls.CAP)
         // Two independent routes to locking, and the Mac only needs to know
         // that *some* route exists. Evaluated per connection rather than once
         // at class init, because granting device admin can happen at any time
@@ -223,6 +225,13 @@ object ConnectionManager {
         .connectTimeout(4, TimeUnit.SECONDS)
         .build()
 
+    // Set when a verified `tls-pin` arrived: connectLoop reconnects at once, with no back-off.
+    private val tlsUpgradeNow = java.util.concurrent.atomic.AtomicBoolean(false)
+    // When a plain link that HAD a welcome upgraded to TLS (0 = none). Used to skip duplicate connect-time pushes.
+    @Volatile private var upgradeWelcomedAt = 0L
+    // True when the last attempt() failed only because the pinned key did not match (or the stored pin is unusable).
+    @Volatile private var lastAttemptMismatch = false
+
     private fun reloadPrefsState() {
         val ctx = appCtx
         pausedUntil.value = Prefs.pausedUntil(ctx)
@@ -295,9 +304,10 @@ object ConnectionManager {
      * of them forgetting a step is how a freshly-paired Mac ends up unreachable
      * because an old Disconnect is still in force.
      */
-    fun onPaired(ctx: Context, pairing: Pairing) {
+    fun onPaired(ctx: Context, pairing: Pairing, fromQr: Boolean = false) {
         appCtx = ctx.applicationContext
-        Prefs.save(appCtx, pairing) // also upserts into the known-devices list
+        LinkSecurity.clearProblems()
+        Prefs.save(appCtx, pairing, fromQr) // also upserts into the known-devices list
         knownDevices.value = Prefs.knownDevices(appCtx)
         macInfo.value = null // belongs to the Mac we're leaving
         macCaps.value = emptyList()
@@ -375,6 +385,7 @@ object ConnectionManager {
     /** Forget-the-Mac teardown: stop the connect loop and drop any live socket.
      *  A later [ensureLoop] (e.g. after re-pairing) starts a fresh loop. */
     fun shutdown() {
+        LinkSecurity.clearProblems()
         loopJob?.cancel()
         loopJob = null
         runCatching { ws?.close(1000, "unpaired") }
@@ -414,6 +425,7 @@ object ConnectionManager {
     /** Resume immediately: clear the pause and reconnect now. */
     fun resume(ctx: Context) {
         appCtx = ctx.applicationContext
+        LinkSecurity.clearProblems()
         Prefs.setPausedUntil(appCtx, 0L)
         pausedUntil.value = 0L
         // Resuming from the Pause dialog also ends a Disconnect — both park the
@@ -427,6 +439,7 @@ object ConnectionManager {
 
     private suspend fun connectLoop() {
         var backoff = 2_000L
+        tlsUpgradeNow.set(false)
         while (true) {
             val pairing = Prefs.load(appCtx)
             if (pairing == null) {
@@ -474,6 +487,15 @@ object ConnectionManager {
             }
 
             var linked = false
+            // identity-changed is shown only when EVERY address tried this round failed on the pin.
+            var tried = 0
+            var mismatched = 0
+            suspend fun tryIp(addr: String): Boolean {
+                val ok = attempt(addr, pairing)
+                tried++
+                if (!ok && lastAttemptMismatch) mismatched++
+                return ok
+            }
             // Stale addresses are the norm, not the exception — a pairing
             // holds up to four and after a router reboot or a network change
             // most of them are dead. Dialed one at a time at OkHttp's 4s
@@ -482,11 +504,14 @@ object ConnectionManager {
             // half a minute. A parallel TCP knock finds who is actually home
             // in about one timeout, and only that address gets a real session.
             for (ip in reachableFirst(pairing)) {
-                if (attempt(ip, pairing)) {
+                if (tryIp(ip)) {
                     linked = true
                     break
                 }
             }
+            // A tls-pin may have been stored on a socket that never got a welcome (Mac refused plain):
+            // reconnect over wss right now instead of probing/backing off.
+            if (tlsUpgradeNow.getAndSet(false)) { backoff = 2_000L; continue }
             // "Expand networking": both probes below are link-local — the UDP
             // broadcast never leaves the subnet and mDNS multicast doesn't
             // traverse a tailnet — so off-LAN they can only ever burn ~4.5s per
@@ -502,7 +527,7 @@ object ConnectionManager {
                 broadcastIp = discoverViaBroadcast(pairing.token, pairing.port + 1)
                 if (broadcastIp != null && !pairing.ips.contains(broadcastIp)) {
                     lastEvent.value = "found Mac at $broadcastIp"
-                    if (attempt(broadcastIp, pairing)) {
+                    if (tryIp(broadcastIp)) {
                         linked = true
                         Prefs.save(
                             appCtx,
@@ -522,7 +547,7 @@ object ConnectionManager {
                 val viaMdns = MdnsDiscovery.find(appCtx)
                 if (viaMdns != null && viaMdns != broadcastIp && !pairing.ips.contains(viaMdns)) {
                     lastEvent.value = "found Mac at $viaMdns (mDNS)"
-                    if (attempt(viaMdns, pairing)) {
+                    if (tryIp(viaMdns)) {
                         linked = true
                         Prefs.save(
                             appCtx,
@@ -538,6 +563,8 @@ object ConnectionManager {
                 roundFailed = true
                 reevaluateLinks()
             }
+            if (!linked) LinkSecurity.identityChanged.value = tried > 0 && mismatched == tried
+            if (tlsUpgradeNow.getAndSet(false)) { backoff = 2_000L; continue }
             backoff = if (linked) 2_000L else minOf(backoff * 2, 15_000L)
             // Interruptible: Wi-Fi coming back is exactly the moment the Mac
             // becomes reachable again, and waiting out the rest of a 15s
@@ -590,8 +617,18 @@ object ConnectionManager {
         var didConnect = false
         lastEvent.value = "connecting to $ip…"
 
-        val request = Request.Builder().url("ws://$ip:${pairing.port}").build()
-        val socket = client.newWebSocket(request, object : WebSocketListener() {
+        // A pinned Mac is reached over wss:// with its key pinned, and never over ws://.
+        lastAttemptMismatch = false
+        if (LinkTls.isUnusablePin(pairing.fp)) {
+            // Pinned to a value we cannot use: refuse to connect (never ws://); re-scanning the QR fixes it.
+            lastAttemptMismatch = true
+            lastEvent.value = LinkTls.IDENTITY_CHANGED
+            return false
+        }
+        val overTls = pairing.fp != null
+        val request = Request.Builder().url(LinkTls.urlFor(ip, pairing.port, pairing.fp)).build()
+        val http = pairing.fp?.let { LinkTls.clientFor(client, it) } ?: client
+        val socket = http.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 val hello = buildHello(pairing)
                 webSocket.send(hello.toString())
@@ -623,6 +660,17 @@ object ConnectionManager {
                 if (msg.optString("type") == "welcome") {
                     didConnect = true
                     onWsWelcome(WsLink(webSocket, ::wire, ::sealOut).also { thisLink = it }, webSocket, msg, pairing, ip)
+                } else if (msg.optString("type") == LinkTls.PIN_TYPE) {
+                    // Plain link, no pin yet, valid HMAC: store the pin and reconnect over TLS now.
+                    // Upgrade only if the pin was really stored; otherwise we would reconnect plain forever.
+                    if (LinkTls.decideUpgrade(pairing.fp, overTls, msg, pairing.token) { fp -> Prefs.setPin(appCtx, pairing.token, fp) }) {
+                        knownDevices.value = Prefs.knownDevices(appCtx)
+                        upgradeWelcomedAt = if (didConnect) System.currentTimeMillis() else 0L
+                        tlsUpgradeNow.set(true)
+                        webSocket.close(1000, LinkTls.UPGRADE_REASON)
+                        // Don't wait out a 60 s close handshake if the Mac is slow to answer.
+                        scope.launch { delay(1_000); webSocket.cancel() }
+                    }
                 } else {
                     if (wifiUpSince != 0L) probeOk = true
                     dispatch(thisLink ?: return, msg)
@@ -638,11 +686,39 @@ object ConnectionManager {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                // Wrong key from a pinned Mac: say so, and keep to TLS (the next attempt is wss:// again).
+                if (LinkTls.isPinMismatch(t)) {
+                    lastAttemptMismatch = true
+                    lastEvent.value = LinkTls.IDENTITY_CHANGED
+                } else if (overTls && LinkTls.looksLikeNonTlsServer(t)) {
+                    // Best-effort: a pinned Mac that answers TLS with plain bytes.
+                    LinkSecurity.problem.value = LinkSecurity.Problem.NOT_TLS
+                    lastEvent.value = LinkTls.NOT_TLS_MSG
+                }
                 cleanup(webSocket)
                 closed.complete(Unit)
             }
 
+            // The Mac refuses a plain link from a device that used TLS before: it sends tls-pin (handled
+            // above, before any welcome) and then closes 4003 "tls-required". No welcome ever arrives, so
+            // none of the connected state is touched; cleanup() is a no-op because ws !== this socket.
+            private fun tlsRequired() {
+                if (LinkTls.onTlsRequiredClose(tlsUpgradeNow.get()) == TlsRequiredAction.SHOW_ERROR) {
+                    LinkSecurity.problem.value = LinkSecurity.Problem.TLS_REQUIRED
+                    lastEvent.value = LinkTls.TLS_REQUIRED_MSG
+                }
+            }
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                if (LinkTls.isTlsRequiredClose(code, reason)) {
+                    tlsRequired()
+                    webSocket.close(1000, null) // finish the close handshake
+                    closed.complete(Unit)
+                }
+            }
+
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                if (LinkTls.isTlsRequiredClose(code, reason)) tlsRequired()
                 cleanup(webSocket)
                 closed.complete(Unit)
             }
@@ -667,6 +743,7 @@ object ConnectionManager {
         ws = null
         wsLink = null
         wifiUpSince = 0L
+        LinkSecurity.encrypted.value = null
         wifiDownSince = System.currentTimeMillis()
         roundFailed = false
         probeOk = false
@@ -946,13 +1023,12 @@ object ConnectionManager {
             "screenshot" -> {
                 val reqId = msg.optLong("reqId")
                 AccessibilityControl.takeScreenshot { png, err ->
-                    val out = JSONObject().put("type", "screenshot").put("reqId", reqId)
-                    if (png != null) {
-                        out.put("data", android.util.Base64.encodeToString(png, android.util.Base64.NO_WRAP))
-                    } else {
-                        out.put("error", err ?: "Screenshot failed")
+                    val out = ScreenshotReply.build(reqId, png, err)
+                    // A refused send (outbound queue full) used to vanish and the
+                    // Mac waited out its 20 s timeout; say why instead.
+                    if (!reply(link, out) && !out.has("error")) {
+                        reply(link, ScreenshotReply.build(reqId, null, "Screenshot too large to send; try again"))
                     }
-                    reply(link, out)
                 }
             }
             "apps-list" -> respond(link, msg, "apps-list") {
@@ -1401,6 +1477,11 @@ object ConnectionManager {
     private fun onWsWelcome(link: WsLink, socket: WebSocket, msg: JSONObject, pairing: Pairing, ip: String) {
         val handover = bleLink != null // another link is already authed: not a fresh session (§7)
         val now = System.currentTimeMillis()
+        val dupWelcome = LinkTls.isDuplicateWelcome(upgradeWelcomedAt, now)
+        upgradeWelcomedAt = 0L
+        // Before the socket is published, so a stale socket's cleanup can't race it.
+        LinkSecurity.encrypted.value = pairing.fp != null || parseCaps(msg).contains(LinkCrypto.CAP)
+        LinkSecurity.clearProblems()
         ws = socket
         wsLink = link
         wifiUpSince = now
@@ -1421,7 +1502,7 @@ object ConnectionManager {
             knownDevices.value = Prefs.knownDevices(appCtx)
         }
         TransferManager.attach(appCtx, socket)
-        if (!handover) {
+        if (!handover && !dupWelcome) { // dupWelcome: the same Mac was just welcomed on the plain link before tls-upgrade
             // forceArt: a fresh Mac has no album-art cache.
             MediaRemote.push(true)
             NotifListener.pushActive()
@@ -1644,15 +1725,14 @@ object ConnectionManager {
      *  while held is a harmless heartbeat that defers the Mac's idle release. */
     fun sendRemoteButton(down: Boolean, button: String = "left"): Boolean {
         if (!macCaps.value.contains("remotedrag")) return false
-        return send(JSONObject().put("type", "remote-button").put("button", button)
-            .put("state", if (down) "down" else "up"))
+        return send(RemoteMessages.remoteButton(down, button))
     }
 
     /** Absolute Mac display brightness, 0..1. Only sent while the Mac advertises
      *  "macbrightness"; older Macs keep the stepped `brightness` remote action. */
     fun sendMacBrightness(level: Float): Boolean {
         if (!macCaps.value.contains("macbrightness")) return false
-        return send(JSONObject().put("type", "mac-brightness-set").put("level", level.coerceIn(0f, 1f).toDouble()))
+        return send(RemoteMessages.macBrightness(level) ?: return false)
     }
 
     /**

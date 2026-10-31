@@ -4,7 +4,8 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 
-data class Pairing(val ips: List<String>, val port: Int, val token: String, val macName: String)
+/** [fp] is the Mac's pinned TLS key fingerprint (see [LinkTls]); null = not pinned yet, plain `ws://`. */
+data class Pairing(val ips: List<String>, val port: Int, val token: String, val macName: String, val fp: String? = null)
 
 /** A Mac this phone has paired with before, plus when it was last linked.
  *  [lastSeenAt] is 0 for a device that has been paired but never reached. */
@@ -14,8 +15,9 @@ data class KnownDevice(
     val port: Int,
     val token: String,
     val lastSeenAt: Long,
+    val fp: String? = null,
 ) {
-    fun toPairing() = Pairing(ips, port, token, macName)
+    fun toPairing() = Pairing(ips, port, token, macName, fp)
     /** Identity is the token: IPs move between networks and two Macs can share
      *  a name, but the token is minted per pairing and never collides. */
     val id: String get() = token
@@ -55,17 +57,117 @@ fun trimAddresses(ips: List<String>, max: Int): List<String> {
     return (head.dropLast(1) + tailnet).distinct()
 }
 
+// ── Address-book pure functions (JVM-testable) ──────────────────────────────
+
+/** Decode the stored device list. JSON without `fp` loads as `fp = null`. */
+fun decodeDevices(raw: String?): List<KnownDevice> = decodeDevicesOrNull(raw) ?: emptyList()
+
+/** Like [decodeDevices] but null when the stored text is present and unreadable. */
+fun decodeDevicesOrNull(raw: String?): List<KnownDevice>? {
+    if (raw == null) return emptyList()
+    return runCatching {
+        val arr = JSONArray(raw)
+        (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            val token = o.optString("token").ifEmpty { return@mapNotNull null }
+            val ips = o.optJSONArray("ips")?.let { a ->
+                (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() }
+            } ?: emptyList()
+            if (ips.isEmpty()) return@mapNotNull null
+            KnownDevice(
+                macName = o.optString("macName", "Mac"),
+                ips = ips,
+                port = o.optInt("port", 48484),
+                token = token,
+                lastSeenAt = o.optLong("lastSeenAt", 0L),
+                // Kept raw: a non-empty but invalid pin means "pinned to something unusable",
+                // which must fail closed (see LinkTls.isUnusablePin), not become "unpinned".
+                fp = o.optString("fp").takeIf { it.isNotEmpty() },
+            )
+        }
+    }.getOrNull()?.sortedByDescending { it.lastSeenAt }
+}
+
+/**
+ * Keep at most [max] devices. [protectToken] (the device just paired, whose
+ * lastSeenAt is still 0) is never evicted, and a pinned device is never evicted
+ * in favour of an unpinned one; ties go to the most recently seen.
+ */
+fun capDevices(list: List<KnownDevice>, protectToken: String? = null, max: Int = 8): List<KnownDevice> =
+    if (list.size <= max) list
+    else list.sortedWith(
+        compareByDescending<KnownDevice> { it.token == protectToken }
+            .thenByDescending { it.fp != null }
+            .thenByDescending { it.lastSeenAt }
+    ).take(max)
+
+/** Encode the device list (most recent first, capped at 8: it is a personal address book). */
+fun encodeDevices(list: List<KnownDevice>): String {
+    val arr = JSONArray()
+    capDevices(list).sortedByDescending { it.lastSeenAt }.forEach { d ->
+        val o = JSONObject()
+            .put("macName", d.macName)
+            .put("ips", JSONArray(d.ips))
+            .put("port", d.port)
+            .put("token", d.token)
+            .put("lastSeenAt", d.lastSeenAt)
+        if (d.fp != null) o.put("fp", d.fp)
+        arr.put(o)
+    }
+    return arr.toString()
+}
+
+/**
+ * Upsert on pairing: keeps `lastSeenAt`, and keeps the old `fp` when the new pairing has none.
+ * A QR scan is [authoritative]: its `fp` (even null) replaces the stored pin, so re-pairing with
+ * a Mac that no longer does TLS clears the pin instead of dialling wss:// forever.
+ */
+fun mergePairing(existing: List<KnownDevice>, p: Pairing, authoritative: Boolean = false): List<KnownDevice> {
+    val prior = existing.firstOrNull { it.token == p.token }
+    return capDevices(existing.filterNot { it.token == p.token } + KnownDevice(
+        macName = p.macName,
+        ips = p.ips,
+        port = p.port,
+        token = p.token,
+        lastSeenAt = prior?.lastSeenAt ?: 0L,
+        fp = if (authoritative) p.fp else p.fp ?: prior?.fp,
+    ), protectToken = p.token)
+}
+
+/** Stamp a successful link: promote the working IP, refresh the name, keep `fp`. */
+fun applySeen(existing: List<KnownDevice>, token: String, workingIp: String?, macName: String?, now: Long): List<KnownDevice> {
+    val d = existing.firstOrNull { it.token == token } ?: return existing
+    val ips = if (workingIp != null) listOf(workingIp) + d.ips.filter { it != workingIp } else d.ips
+    return existing.filterNot { it.token == token } + d.copy(
+        ips = trimAddresses(ips, 4),
+        lastSeenAt = now,
+        macName = macName?.takeIf { it.isNotBlank() } ?: d.macName,
+    )
+}
+
+/** True when [token] is a known device with no pin yet (the only case a pin may be written). */
+fun canPin(existing: List<KnownDevice>, token: String): Boolean =
+    existing.any { it.token == token && it.fp == null }
+
+/** Record a Mac's pin, only where the STORED pin is null. No-op for an unknown token or an existing pin. */
+/** The address book without [token]'s entry, so its pin goes with it; every other entry is untouched. */
+fun removeDevice(existing: List<KnownDevice>, token: String): List<KnownDevice> =
+    existing.filterNot { it.token == token }
+
+fun applyPin(existing: List<KnownDevice>, token: String, fp: String): List<KnownDevice> =
+    existing.map { if (it.token == token && it.fp == null) it.copy(fp = fp) else it }
+
 object Prefs {
     private const val FILE = "droiddock"
 
-    fun save(ctx: Context, p: Pairing) {
+    fun save(ctx: Context, p: Pairing, fromQr: Boolean = false) {
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
             .putString("ips", p.ips.joinToString(","))
             .putInt("port", p.port)
             .putString("token", p.token)
             .putString("macName", p.macName)
             .apply()
-        rememberDevice(ctx, p)
+        rememberDevice(ctx, p, fromQr)
     }
 
     fun load(ctx: Context): Pairing? {
@@ -73,7 +175,11 @@ object Prefs {
         val token = sp.getString("token", null) ?: return null
         val ips = (sp.getString("ips", "") ?: "").split(",").filter { it.isNotBlank() }
         if (ips.isEmpty()) return null
-        return Pairing(ips, sp.getInt("port", 48484), token, sp.getString("macName", "Mac") ?: "Mac")
+        // The legacy keys carry no pin; it lives in the address book, keyed by token.
+        // Fail closed: if the address book is unreadable but this token was pinned, say so.
+        val fp = knownDevices(ctx).firstOrNull { it.token == token }?.fp
+            ?: if (token in pinnedTokens(ctx)) LinkTls.PIN_UNREADABLE else null
+        return Pairing(ips, sp.getInt("port", 48484), token, sp.getString("macName", "Mac") ?: "Mac", fp)
     }
 
     fun clear(ctx: Context) {
@@ -85,6 +191,7 @@ object Prefs {
             .remove("ips").remove("port").remove("token").remove("macName")
             .apply()
         active?.let { forgetDevice(ctx, it.token) }
+        LinkSecurity.clearProblems()
     }
 
     // ── Known devices ────────────────────────────────────────────────────────
@@ -95,84 +202,58 @@ object Prefs {
 
     private const val DEVICES = "knownDevices"
 
-    fun knownDevices(ctx: Context): List<KnownDevice> {
-        val raw = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
-            .getString(DEVICES, null) ?: return emptyList()
-        return runCatching {
-            val arr = JSONArray(raw)
-            (0 until arr.length()).mapNotNull { i ->
-                val o = arr.optJSONObject(i) ?: return@mapNotNull null
-                val token = o.optString("token").ifEmpty { return@mapNotNull null }
-                val ips = o.optJSONArray("ips")?.let { a ->
-                    (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() }
-                } ?: emptyList()
-                if (ips.isEmpty()) return@mapNotNull null
-                KnownDevice(
-                    macName = o.optString("macName", "Mac"),
-                    ips = ips,
-                    port = o.optInt("port", 48484),
-                    token = token,
-                    lastSeenAt = o.optLong("lastSeenAt", 0L),
-                )
-            }
-        }.getOrDefault(emptyList()).sortedByDescending { it.lastSeenAt }
+    fun knownDevices(ctx: Context): List<KnownDevice> =
+        decodeDevices(ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString(DEVICES, null))
+
+    private const val PINNED = "pinnedTokens"
+
+    /** Tokens that have a pin, kept beside the device JSON so a corrupt JSON blob cannot silently unpin them. */
+    private fun pinnedTokens(ctx: Context): Set<String> =
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).getStringSet(PINNED, emptySet()) ?: emptySet()
+
+    /** True when the stored list is present but cannot be read. Writers other than a fresh pairing must not overwrite it. */
+    private fun devicesCorrupt(ctx: Context): Boolean {
+        val raw = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString(DEVICES, null)
+        return raw != null && decodeDevicesOrNull(raw) == null
     }
 
     private fun writeDevices(ctx: Context, list: List<KnownDevice>) {
-        val arr = JSONArray()
-        // Capped: this is an address book for a personal phone, and an unbounded
-        // list would keep tokens for Macs long gone.
-        list.sortedByDescending { it.lastSeenAt }.take(8).forEach { d ->
-            arr.put(
-                JSONObject()
-                    .put("macName", d.macName)
-                    .put("ips", JSONArray(d.ips))
-                    .put("port", d.port)
-                    .put("token", d.token)
-                    .put("lastSeenAt", d.lastSeenAt)
-            )
-        }
+        val capped = capDevices(list)
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
-            .putString(DEVICES, arr.toString()).apply()
+            .putString(DEVICES, encodeDevices(capped))
+            .putStringSet(PINNED, capped.filter { it.fp != null }.map { it.token }.toSet())
+            .apply()
     }
 
-    /** Upsert on pairing. Keeps any previously recorded `lastSeenAt` — pairing
-     *  again with a Mac you linked yesterday shouldn't erase that it was seen. */
-    fun rememberDevice(ctx: Context, p: Pairing) {
-        val existing = knownDevices(ctx)
-        val prior = existing.firstOrNull { it.token == p.token }
-        writeDevices(
-            ctx,
-            existing.filterNot { it.token == p.token } + KnownDevice(
-                macName = p.macName,
-                ips = p.ips,
-                port = p.port,
-                token = p.token,
-                lastSeenAt = prior?.lastSeenAt ?: 0L,
-            )
-        )
+    fun rememberDevice(ctx: Context, p: Pairing, fromQr: Boolean = false) {
+        writeDevices(ctx, mergePairing(knownDevices(ctx), p, fromQr))
     }
 
     /** Called on every successful link: stamps the time and promotes the IP that
      *  actually worked, so the next connect tries it first. */
     fun markSeen(ctx: Context, token: String, workingIp: String?, macName: String?) {
+        if (devicesCorrupt(ctx)) return
+        writeDevices(ctx, applySeen(knownDevices(ctx), token, workingIp, macName, System.currentTimeMillis()))
+    }
+
+    /** Store the Mac's TLS pin (from a verified `tls-pin` message). */
+    /** Returns true only if the pin was actually stored (known device, no pin yet, list readable). */
+    fun setPin(ctx: Context, token: String, fp: String): Boolean {
+        if (devicesCorrupt(ctx)) return false
         val existing = knownDevices(ctx)
-        val d = existing.firstOrNull { it.token == token } ?: return
-        val ips = if (workingIp != null) {
-            listOf(workingIp) + d.ips.filter { it != workingIp }
-        } else d.ips
-        writeDevices(
-            ctx,
-            existing.filterNot { it.token == token } + d.copy(
-                ips = trimAddresses(ips, 4),
-                lastSeenAt = System.currentTimeMillis(),
-                macName = macName?.takeIf { it.isNotBlank() } ?: d.macName,
-            )
-        )
+        if (!canPin(existing, token)) return false
+        writeDevices(ctx, applyPin(existing, token, fp))
+        return true
     }
 
     fun forgetDevice(ctx: Context, token: String) {
-        writeDevices(ctx, knownDevices(ctx).filterNot { it.token == token })
+        if (devicesCorrupt(ctx)) return
+        val existing = knownDevices(ctx)
+        val gone = existing.firstOrNull { it.token == token }?.fp
+        val rest = removeDevice(existing, token)
+        writeDevices(ctx, rest)
+        // Free the cached pinned client unless another Mac shares the fingerprint.
+        if (gone != null && rest.none { it.fp == gone }) LinkTls.dropClient(gone)
     }
 
     /**

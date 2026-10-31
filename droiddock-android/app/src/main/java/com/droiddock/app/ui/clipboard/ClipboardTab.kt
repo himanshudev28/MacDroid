@@ -1,6 +1,37 @@
 package com.droiddock.app.ui.clipboard
 
 import com.droiddock.app.ui.theme.dockItemAnimation
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import com.droiddock.app.ui.components.LocalDockContentPadding
+import com.droiddock.app.ui.components.dockClickable
+import com.droiddock.app.ui.components.dockFieldColors
+import com.droiddock.app.ui.theme.dockPageBackground
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -12,7 +43,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -68,37 +98,47 @@ internal fun ClipboardTab(
     var draft by remember { mutableStateOf("") }
     val notConnected = t("Not connected to Mac")
 
-    Column(Modifier.fillMaxSize()) {
-        DockScaffold(
-            title = t("Clipboard"),
-            subtitle = if (connected) t("Copy on either device") else notConnected,
-            modifier = Modifier.weight(1f),
-            drawPageBackground = true,
-            actions = {
-                if (history.isNotEmpty()) {
-                    DockIconButton(Icons.Rounded.Delete, t("Clear history"), { ConnectionManager.clearClipHistory() })
-                }
-            },
+    // The compose bar sits under the list, so the list itself reserves no room for the
+    // floating nav; the bar does instead (or for the keyboard, whichever is taller).
+    val shell = LocalDockContentPadding.current
+    val dir = LocalLayoutDirection.current
+    val shellBottom = shell.calculateBottomPadding()
+    Column(Modifier.fillMaxSize().dockPageBackground()) {
+        CompositionLocalProvider(
+            LocalDockContentPadding provides PaddingValues(
+                start = shell.calculateStartPadding(dir), end = shell.calculateEndPadding(dir),
+            ),
         ) {
-            item(key = "history-toggle") {
-                DockCard(dockItemAnimation(), contentPadding = 0.dp) {
-                    DockListItem(
-                        headline = t("History"),
-                        supporting = t("Cleared when the app closes"),
-                        icon = Icons.Rounded.ContentPaste,
-                        trailing = { DockSwitch(checked = keepHistory, onCheckedChange = onKeepHistory) },
-                    )
+            DockScaffold(
+                title = t("Clipboard"),
+                subtitle = if (connected) t("Copy on either device") else notConnected,
+                modifier = Modifier.weight(1f),
+                actions = {
+                    if (history.isNotEmpty()) {
+                        DockIconButton(Icons.Rounded.Delete, t("Clear history"), { ConnectionManager.clearClipHistory() })
+                    }
+                },
+            ) {
+                item(key = "history-toggle") {
+                    DockCard(dockItemAnimation(), contentPadding = 0.dp) {
+                        DockListItem(
+                            headline = t("History"),
+                            supporting = t("Cleared when the app closes"),
+                            icon = Icons.Rounded.ContentPaste,
+                            trailing = { DockSwitch(checked = keepHistory, onCheckedChange = onKeepHistory) },
+                        )
+                    }
                 }
-            }
-            if (history.isEmpty()) {
-                item(key = "empty") {
-                    DockEmptyState(
-                        Icons.Rounded.ContentPaste,
-                        title = if (keepHistory) t("Nothing shared yet") else t("History is off"),
-                    )
+                if (history.isEmpty()) {
+                    item(key = "empty") {
+                        DockEmptyState(
+                            Icons.Rounded.ContentPaste,
+                            title = if (keepHistory) t("Nothing shared yet") else t("History is off"),
+                        )
+                    }
+                } else {
+                    items(history, key = { "${it.at}-${it.fromMac}-${it.text.hashCode()}" }) { entry -> ClipRow(entry, dockItemAnimation()) }
                 }
-            } else {
-                items(history, key = { "${it.at}-${it.fromMac}-${it.text.hashCode()}" }) { entry -> ClipRow(entry, dockItemAnimation()) }
             }
         }
 
@@ -106,8 +146,10 @@ internal fun ClipboardTab(
         Row(
             Modifier
                 .fillMaxWidth()
-                .imePadding()
-                .padding(horizontal = sp.gutter, vertical = sp.s),
+                .windowInsetsPadding(
+                    WindowInsets.ime.union(WindowInsets(bottom = shellBottom)).only(WindowInsetsSides.Bottom),
+                )
+                .padding(start = sp.gutter, end = sp.gutter, top = sp.s, bottom = sp.s),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             OutlinedTextField(
@@ -115,18 +157,64 @@ internal fun ClipboardTab(
                 onValueChange = { draft = it },
                 placeholder = { Text(t("Type a message…")) },
                 modifier = Modifier.weight(1f),
-                shape = DockTheme.shapes.field,
+                shape = RoundedCornerShape(26.dp),
+                colors = dockFieldColors(),
                 maxLines = 3,
             )
             Spacer(Modifier.width(sp.s))
-            val canSend = connected && draft.isNotBlank()
-            DockIconButton(
-                Icons.AutoMirrored.Rounded.Send, t("Send"),
-                onClick = {
-                    if (ConnectionManager.sendClipboardText(draft.trim())) draft = ""
-                    else Toast.makeText(ctx, notConnected, Toast.LENGTH_SHORT).show()
+            SendButton(
+                enabled = connected && draft.isNotBlank(),
+                label = t("Send"),
+                onSend = {
+                    val ok = ConnectionManager.sendClipboardText(draft.trim())
+                    if (ok) draft = "" else Toast.makeText(ctx, notConnected, Toast.LENGTH_SHORT).show()
+                    ok
                 },
-                enabled = canSend, tint = s.onSurface,
+            )
+        }
+    }
+}
+
+/**
+ * Round send key: accent-filled when there is something to send, quiet when
+ * not. A successful send morphs the arrow into a check for a moment.
+ */
+@Composable
+private fun SendButton(enabled: Boolean, label: String, onSend: () -> Boolean) {
+    val s = MaterialTheme.colorScheme
+    val d = DockTheme.colors
+    val motion = DockTheme.motion
+    val haptics = DockTheme.haptics
+    var sentAt by remember { mutableStateOf(0L) }
+    LaunchedEffect(sentAt) { if (sentAt != 0L) { kotlinx.coroutines.delay(1200); sentAt = 0L } }
+    val sent = sentAt != 0L
+    val bg by animateColorAsState(
+        when { sent -> d.success; enabled -> s.primary; else -> s.onSurface.copy(alpha = if (d.isDark) 0.10f else 0.07f) },
+        motion.fade(), label = "send-bg",
+    )
+    val fg = if (enabled || sent) s.onPrimary else s.onSurfaceVariant.copy(alpha = 0.6f)
+    Box(
+        Modifier
+            .size(52.dp)
+            .clip(CircleShape)
+            .background(bg)
+            .dockClickable(enabled = enabled) {
+                if (onSend()) { haptics.confirm(); sentAt = System.currentTimeMillis() } else haptics.reject()
+            }
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        AnimatedContent(
+            targetState = sent,
+            transitionSpec = {
+                (scaleIn(motion.pop(), initialScale = 0.5f) + fadeIn(motion.fade())) togetherWith
+                    (scaleOut(motion.exit(), targetScale = 0.5f) + fadeOut(motion.exit()))
+            },
+            label = "send-icon",
+        ) { done ->
+            androidx.compose.material3.Icon(
+                if (done) Icons.Rounded.Check else Icons.AutoMirrored.Rounded.Send, null,
+                tint = if (done) d.onSuccess else fg, modifier = Modifier.size(22.dp),
             )
         }
     }

@@ -37,7 +37,8 @@ internal fun typographyFor(style: UiStyle): Typography = when (style) {
     UiStyle.LIQUID_GLASS -> M3.copy(
         // Tighter tracking and medium weights: calm, optical, not shouty.
         displaySmall = M3.displaySmall.w(FontWeight.Medium, -0.6f),
-        headlineLarge = M3.headlineLarge.w(FontWeight.SemiBold, -0.6f),
+        // Large page titles in the iOS manner: bigger, bolder, tighter.
+        headlineLarge = M3.headlineLarge.w(FontWeight.Bold, -0.9f).copy(fontSize = 34.sp, lineHeight = 40.sp),
         headlineMedium = M3.headlineMedium.w(FontWeight.SemiBold, -0.4f),
         headlineSmall = M3.headlineSmall.w(FontWeight.SemiBold, -0.3f),
         titleLarge = M3.titleLarge.w(FontWeight.SemiBold, -0.2f),
@@ -99,9 +100,9 @@ internal fun dockTypeFor(style: UiStyle, t: Typography): DockType {
             largeTitle = TextStyle(fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Normal, letterSpacing = (-0.4).sp),
         )
         UiStyle.LIQUID_GLASS -> DockType(
-            heroTitle = t.headlineSmall.copy(fontSize = 26.sp, lineHeight = 32.sp),
+            heroTitle = t.headlineSmall.copy(fontSize = 28.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp),
             numeral = t.displaySmall.copy(fontFeatureSettings = tnum, fontWeight = FontWeight.Medium, letterSpacing = (-1).sp),
-            overline = t.labelLarge.copy(fontSize = 13.sp, letterSpacing = 0.1.em),
+            overline = t.labelLarge.copy(fontSize = 13.sp, letterSpacing = 0.02.em),
             upperCaseLabels = false,
             largeTitle = t.headlineLarge,
         )
@@ -126,10 +127,10 @@ internal fun shapesFor(style: UiStyle): Pair<DockShapes, Shapes> = when (style) 
         medium = RoundedCornerShape(16.dp), large = RoundedCornerShape(24.dp), extraLarge = RoundedCornerShape(32.dp),
     )
     UiStyle.LIQUID_GLASS -> DockShapes(
-        hero = RoundedCornerShape(30.dp), card = RoundedCornerShape(22.dp), tile = RoundedCornerShape(24.dp),
+        hero = RoundedCornerShape(32.dp), card = RoundedCornerShape(24.dp), tile = RoundedCornerShape(24.dp),
         control = CircleShape, chip = CircleShape, sheet = RoundedCornerShape(32.dp),
-        badge = CircleShape, deviceBadge = RoundedCornerShape(22.dp), field = RoundedCornerShape(18.dp),
-        cardRadius = 22.dp,
+        badge = CircleShape, deviceBadge = RoundedCornerShape(20.dp), field = RoundedCornerShape(18.dp),
+        cardRadius = 24.dp,
     ) to Shapes(
         extraSmall = RoundedCornerShape(10.dp), small = RoundedCornerShape(14.dp),
         medium = RoundedCornerShape(18.dp), large = RoundedCornerShape(22.dp), extraLarge = RoundedCornerShape(30.dp),
@@ -156,7 +157,7 @@ internal fun shapesFor(style: UiStyle): Pair<DockShapes, Shapes> = when (style) 
 
 internal fun spacingFor(style: UiStyle): DockSpacing = when (style) {
     UiStyle.MATERIAL_YOU -> DockSpacing(gutter = 16.dp, listGap = 2.dp, sectionGap = 24.dp, tileHeight = 112.dp, navHeight = 80.dp)
-    UiStyle.LIQUID_GLASS -> DockSpacing(gutter = 16.dp, listGap = 2.dp, sectionGap = 22.dp, tileHeight = 108.dp, navHeight = 64.dp)
+    UiStyle.LIQUID_GLASS -> DockSpacing(gutter = 16.dp, cardPadding = 18.dp, listGap = 2.dp, sectionGap = 22.dp, tileHeight = 108.dp, navHeight = 64.dp)
     UiStyle.MINIMAL_MONO -> DockSpacing(gutter = 20.dp, cardPadding = 16.dp, listGap = 0.dp, sectionGap = 28.dp, tileHeight = 104.dp, navHeight = 64.dp)
     UiStyle.REACH -> DockSpacing(gutter = 16.dp, cardPadding = 20.dp, listGap = 2.dp, sectionGap = 20.dp, tileHeight = 120.dp, navHeight = 72.dp)
 }

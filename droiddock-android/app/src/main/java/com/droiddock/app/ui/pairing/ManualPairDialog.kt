@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -12,7 +14,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -38,32 +40,39 @@ internal fun ManualPairDialog(onDismiss: () -> Unit, onPair: (Pairing) -> Unit) 
 internal fun ManualPairForm(onCancel: () -> Unit, onPair: (Pairing) -> Unit) {
     val ctx = LocalContext.current
     val sp = DockTheme.spacing
-    var ip by remember { mutableStateOf("") }
-    var port by remember { mutableStateOf("48484") }
-    var token by remember { mutableStateOf("") }
+    // Saveable: rotating the phone mid-entry keeps what was typed.
+    var ip by rememberSaveable { mutableStateOf("") }
+    var port by rememberSaveable { mutableStateOf("48484") }
+    var token by rememberSaveable { mutableStateOf("") }
     Column(verticalArrangement = Arrangement.spacedBy(sp.m)) {
-        Text(
-            t("Open Pair Device on the Mac and read the IP, port and token it shows."),
-            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        OutlinedTextField(
-            value = ip, onValueChange = { ip = it }, singleLine = true,
-            label = { Text(t("Mac IP (e.g. 192.168.0.108)")) },
-            shape = DockTheme.shapes.field,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = port, onValueChange = { port = it }, singleLine = true,
-            label = { Text(t("Port")) }, shape = DockTheme.shapes.field,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = token, onValueChange = { token = it }, singleLine = true,
-            label = { Text(t("Token")) }, shape = DockTheme.shapes.field,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        // In landscape the fields don't fit: they scroll, and Pair / Cancel stay pinned in view.
+        Column(
+            Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(sp.m),
+        ) {
+            Text(
+                t("Open Pair Device on the Mac and read the IP, port and token it shows."),
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = ip, onValueChange = { ip = it }, singleLine = true,
+                label = { Text(t("Mac IP (e.g. 192.168.0.108)")) },
+                shape = DockTheme.shapes.field, colors = com.droiddock.app.ui.components.dockFieldColors(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = port, onValueChange = { port = it }, singleLine = true,
+                label = { Text(t("Port")) }, shape = DockTheme.shapes.field, colors = com.droiddock.app.ui.components.dockFieldColors(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = token, onValueChange = { token = it }, singleLine = true,
+                label = { Text(t("Token")) }, shape = DockTheme.shapes.field, colors = com.droiddock.app.ui.components.dockFieldColors(),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         DockButton(
             text = t("Pair"), fullWidth = true, glow = true,
             modifier = Modifier.padding(top = sp.xs),

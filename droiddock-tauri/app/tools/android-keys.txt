@@ -118,3 +118,13 @@
 "Type on the Mac"
 "UPLOAD QUEUE"
 "Volume"
+"Connected · Encrypted"
+"Connected · Not encrypted"
+"This Mac's identity changed. Scan its QR code again to reconnect."
+"This Mac only accepts secure connections. Scan its QR code again."
+"This Mac isn't using a secure connection. Update DroidDock on the Mac or scan its QR code again."
+Remove
+Remove {name}?
+Remove {name}
+Removed {name}
+You'll need its QR code to pair it again.

@@ -73,7 +73,7 @@ fun DockButton(
         ButtonKind.PRIMARY -> Triple(s.primary, s.onPrimary, null)
         ButtonKind.TONAL -> when {
             mono -> Triple(d.raised, s.onSurface, null)
-            glass -> Triple(s.onSurface.copy(alpha = if (d.isDark) 0.10f else 0.06f), s.onSurface, d.hairline)
+            glass -> Triple(s.onSurface.copy(alpha = if (d.isDark) 0.12f else 0.09f), s.onSurface, d.hairline)
             else -> Triple(s.secondaryContainer, s.onSecondaryContainer, null)
         }
         ButtonKind.SECONDARY -> Triple(Color.Transparent, if (mono) s.onSurface else s.primary,
@@ -86,8 +86,9 @@ fun DockButton(
     // Glass: primary is a tinted capsule, the rest are clear pills.
     val glassFill = when (kind) {
         ButtonKind.PRIMARY -> s.primary.copy(alpha = 0.90f)
-        ButtonKind.TONAL -> s.onSurface.copy(alpha = if (dark) 0.12f else 0.07f)
-        ButtonKind.SECONDARY -> s.onSurface.copy(alpha = if (dark) 0.05f else 0.03f)
+        // Strong enough to read as a button on a frosted card over the colour field.
+        ButtonKind.TONAL -> s.onSurface.copy(alpha = if (dark) 0.14f else 0.10f)
+        ButtonKind.SECONDARY -> s.onSurface.copy(alpha = if (dark) 0.08f else 0.06f)
         ButtonKind.DANGER -> s.errorContainer.copy(alpha = 0.80f)
         ButtonKind.GHOST -> Color.Transparent
     }
@@ -97,7 +98,7 @@ fun DockButton(
             .defaultMinSize(minHeight = height)
             .then(if (glow && kind == ButtonKind.PRIMARY && enabled) Modifier.dockGlow(shape, 0.9f) else Modifier)
             .then(
-                if (frost && kind != ButtonKind.GHOST) Modifier.glassControl(shape, glassFill, if (kind == ButtonKind.PRIMARY) 1f else 0.8f)
+                if (frost && kind != ButtonKind.GHOST) Modifier.glassControl(shape, glassFill, 1f)
                 else Modifier.clip(shape).background(bg)
                     .then(if (border != null) Modifier.border(1.dp, border, shape) else Modifier)
             )

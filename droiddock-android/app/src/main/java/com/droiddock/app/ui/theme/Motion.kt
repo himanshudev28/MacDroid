@@ -15,6 +15,7 @@ import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import kotlinx.coroutines.launch
@@ -244,4 +245,44 @@ fun LazyGridItemScope.dockItemAnimation(): Modifier {
         placementSpec = m.spatial(IntOffset.VisibilityThreshold),
         fadeOutSpec = m.exit(),
     )
+}
+
+/** When a screen first composed: lets [dockStagger] animate only the first screenful. */
+@Stable
+class DockEntrance internal constructor(val startedAt: Long)
+
+private val playedEntrances = HashSet<String>()
+
+/**
+ * One per screen; plays once per process for [key] (cold start), so coming back
+ * to a tab is instant. Items composed later (scrolled into view) appear without motion.
+ */
+@Composable
+fun rememberDockEntrance(key: String): DockEntrance = remember {
+    if (playedEntrances.add(key)) DockEntrance(android.os.SystemClock.uptimeMillis()) else DockEntrance(0L)
+}
+
+/**
+ * Staggered entrance for a screen's opening sections: fade, a 16 dp rise and
+ * a 0.97 → 1 scale, 55 ms apart (capped at 6). Only items composed within
+ * 400 ms of [entrance] animate, so scrolling never replays it. Draw-phase only.
+ */
+@Composable
+fun Modifier.dockStagger(entrance: DockEntrance, index: Int): Modifier {
+    val motion = LocalDockMotion.current
+    if (!motion.enabled) return this
+    val fresh = remember { android.os.SystemClock.uptimeMillis() - entrance.startedAt < 400 }
+    if (!fresh) return this
+    val p = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(60L + minOf(index, 6) * 55L)
+        p.animateTo(1f, spring(0.9f, motion.spatialStiffness * 0.6f))
+    }
+    return this.graphicsLayer {
+        val v = p.value
+        alpha = v.coerceIn(0f, 1f)
+        translationY = (1f - v) * 16.dp.toPx()
+        val sc = 0.97f + 0.03f * v
+        scaleX = sc; scaleY = sc
+    }
 }

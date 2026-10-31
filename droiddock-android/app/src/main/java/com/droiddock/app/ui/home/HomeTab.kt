@@ -4,6 +4,8 @@ import com.droiddock.app.ui.theme.glass.glassControl
 import com.droiddock.app.ui.theme.glass.frostActive
 import com.droiddock.app.ui.components.AnimatedCounter
 import com.droiddock.app.ui.theme.dockItemAnimation
+import com.droiddock.app.ui.theme.dockStagger
+import com.droiddock.app.ui.theme.rememberDockEntrance
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -24,6 +26,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.LinkOff
 import androidx.compose.material.icons.rounded.Cable
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Laptop
 import androidx.compose.material.icons.rounded.PowerSettingsNew
@@ -33,6 +39,11 @@ import androidx.compose.material.icons.rounded.WifiTethering
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,6 +60,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.Icon
 import com.droiddock.app.ConnectionManager
 import com.droiddock.app.KnownDevice
+import com.droiddock.app.LinkSecurity
 import com.droiddock.app.t
 import com.droiddock.app.ui.common.pauseSubtitle
 import com.droiddock.app.ui.components.ButtonKind
@@ -93,15 +105,20 @@ internal fun HomeTab(
     onQuickConnect: () -> Unit,
     onDisconnect: () -> Unit,
     onPickDevice: (KnownDevice) -> Unit,
+    onRemoveDevice: (KnownDevice) -> Unit = {},
     onGoToConnect: () -> Unit,
     onGoToFiles:   () -> Unit,
     clipboard: (@Composable () -> Unit)? = null,
     transport: com.droiddock.app.link.Transport? = null,
+    secure: Boolean? = null,
+    identityChanged: Boolean = false,
+    securityProblem: LinkSecurity.Problem? = null,
 ) {
     val sp = DockTheme.spacing
     val shell = LocalDockContentPadding.current
     val dir = LocalLayoutDirection.current
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val entrance = rememberDockEntrance("home")
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -114,18 +131,19 @@ internal fun HomeTab(
         verticalArrangement = Arrangement.spacedBy(sp.m),
     ) {
         item(key = "hero", contentType = "hero") {
-            Box(dockItemAnimation()) { ConnectionHeroCard(
+            Box(dockItemAnimation().dockStagger(entrance, 0)) { ConnectionHeroCard(
                 connected = connected, isPaused = isPaused, paired = paired,
                 macName = macName, macInfo = macInfo, event = event, pausedUntil = pausedUntil,
                 knownName = devices.firstOrNull()?.macName?.takeIf { it.isNotBlank() && it != "Mac" },
                 disconnected = disconnected, transport = transport,
+                secure = secure, identityChanged = identityChanged, securityProblem = securityProblem,
                 onPause = onPause, onResume = onResume,
                 onQuickConnect = onQuickConnect, onGoConnect = onGoToConnect, onGoToFiles = onGoToFiles,
             ) }
         }
 
         item(key = "quick", contentType = "quick") {
-            Box(dockItemAnimation()) { QuickActions(
+            Box(dockItemAnimation().dockStagger(entrance, 1)) { QuickActions(
                 paired = paired, isPaused = isPaused,
                 showMacControls = connected && canControlMac,
                 onPause = onPause, onResume = onResume,
@@ -135,7 +153,7 @@ internal fun HomeTab(
 
         if (macInfo != null) {
             item(key = "stats", contentType = "stats") {
-                Row(Modifier.fillMaxWidth().then(dockItemAnimation()), horizontalArrangement = Arrangement.spacedBy(sp.m)) {
+                Row(Modifier.fillMaxWidth().then(dockItemAnimation()).dockStagger(entrance, 2), horizontalArrangement = Arrangement.spacedBy(sp.m)) {
                     val info = macInfo
                     StatTile(
                         text = if (!info.hasBattery || info.battery == null) "AC" else null,
@@ -155,20 +173,21 @@ internal fun HomeTab(
 
         // Only while the Mac says it will accept input, same gate as the Control tab.
         if (connected && canControlMac) {
-            item(key = "playing", contentType = "playing") { Box(dockItemAnimation()) { MacNowPlayingCard(media = macMedia) } }
-            item(key = "controls", contentType = "controls") { Box(dockItemAnimation()) { MacControlsCard(volume = macInfo?.volume) } }
+            item(key = "playing", contentType = "playing") { Box(dockItemAnimation().dockStagger(entrance, 3)) { MacNowPlayingCard(media = macMedia) } }
+            item(key = "controls", contentType = "controls") { Box(dockItemAnimation().dockStagger(entrance, 4)) { MacControlsCard(volume = macInfo?.volume) } }
         }
 
         if (clipboard != null) {
-            item(key = "clipboard", contentType = "clipboard") { Box(dockItemAnimation()) { clipboard() } }
+            item(key = "clipboard", contentType = "clipboard") { Box(dockItemAnimation().dockStagger(entrance, 5)) { clipboard() } }
         }
 
         if (devices.isNotEmpty()) {
             item(key = "devices", contentType = "devices") {
-                Box(dockItemAnimation()) { DevicesCard(
+                Box(dockItemAnimation().dockStagger(entrance, 6)) { DevicesCard(
                     devices = devices, connected = connected, activeToken = activeToken,
                     liveName = macName,
                     onDisconnect = onDisconnect, onPickDevice = onPickDevice,
+                    onRemoveDevice = onRemoveDevice,
                 ) }
             }
         }
@@ -192,10 +211,20 @@ internal fun ConnectionHeroCard(
     onGoConnect: () -> Unit,
     onGoToFiles: () -> Unit,
     transport: com.droiddock.app.link.Transport? = null,
+    secure: Boolean? = null,
+    identityChanged: Boolean = false,
+    securityProblem: LinkSecurity.Problem? = null,
 ) {
+    // Radar only for the first 30 s of a search; after that a calm "offline" (no endless loop).
+    var searchSettled by remember(connected, paired, disconnected) { mutableStateOf(false) }
+    LaunchedEffect(connected, paired, disconnected) {
+        if (!connected && paired) { kotlinx.coroutines.delay(30_000); searchSettled = true }
+    }
     val state = when {
         isPaused  -> HeroState.PAUSED
         connected -> HeroState.CONNECTED
+        // Still looking for the Mac: radar rings and the sweep, not a dead "offline".
+        paired && !disconnected && !identityChanged && securityProblem == null && !searchSettled -> HeroState.CONNECTING
         paired    -> HeroState.OFFLINE
         else      -> HeroState.UNPAIRED
     }
@@ -208,12 +237,19 @@ internal fun ConnectionHeroCard(
     val status = when {
         isPaused  -> pauseSubtitle(pausedUntil)
         connected && transport == com.droiddock.app.link.Transport.BLE -> t("Connected · Bluetooth")
+        connected && secure == true -> t("Connected · Encrypted")
+        connected && secure == false -> t("Connected · Not encrypted")
         connected -> if (event.isNullOrBlank()) t("Connected · Wi-Fi") else "Connected · $event"
         paired    -> if (knownName != null) t("Searching for this Mac…") else t("Waiting for Mac to come online")
         else      -> t("Pair with your Mac to get started")
     }
-    val detail = if (!connected && !isPaused && paired && disconnected)
-        t("Auto-reconnect is off until you connect again.") else null
+    val detail = when {
+        !connected && !isPaused && paired && identityChanged -> t("This Mac's identity changed. Scan its QR code again to reconnect.")
+        !connected && !isPaused && paired && securityProblem == LinkSecurity.Problem.TLS_REQUIRED -> t("This Mac only accepts secure connections. Scan its QR code again.")
+        !connected && !isPaused && paired && securityProblem == LinkSecurity.Problem.NOT_TLS -> t("This Mac isn't using a secure connection. Update DroidDock on the Mac or scan its QR code again.")
+        !connected && !isPaused && paired && disconnected -> t("Auto-reconnect is off until you connect again.")
+        else -> null
+    }
 
     val onPrimary: () -> Unit
     val primaryLabel: String
@@ -330,8 +366,26 @@ internal fun DevicesCard(
     liveName:     String?,
     onDisconnect: () -> Unit,
     onPickDevice: (KnownDevice) -> Unit,
+    onRemoveDevice: (KnownDevice) -> Unit = {},
 ) {
     val sp = DockTheme.spacing
+    // The row the user asked to remove, waiting on the confirm dialog.
+    var confirmRemove by remember { mutableStateOf<KnownDevice?>(null) }
+    confirmRemove?.let { d ->
+        AlertDialog(
+            onDismissRequest = { confirmRemove = null },
+            title = { Text(t("Remove {name}?", "name" to d.macName)) },
+            text = { Text(t("You'll need its QR code to pair it again.")) },
+            confirmButton = { TextButton(onClick = { confirmRemove = null; onRemoveDevice(d) }) { Text(t("Remove")) } },
+            dismissButton = { TextButton(onClick = { confirmRemove = null }) { Text(t("Cancel")) } },
+        )
+    }
+    val removeButton: @Composable (KnownDevice) -> Unit = { d ->
+        IconButton(onClick = { confirmRemove = d }) {
+            Icon(Icons.Rounded.Close, contentDescription = t("Remove {name}", "name" to d.macName),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
     val active = devices.firstOrNull { it.token == activeToken } ?: devices.first()
     val others = devices.filter { it.token != active.token }
     // The live name reflects a rename on the Mac; the stored one keeps the card
@@ -348,7 +402,12 @@ internal fun DevicesCard(
                 supporting = if (connected) "Connected · ${active.ips.firstOrNull().orEmpty()}:${active.port}"
                              else lastSeenLabel(active.lastSeenAt),
                 icon = Icons.Rounded.Laptop,
-                trailing = if (connected) ({ DockStatusPill(t("Online")) }) else null,
+                trailing = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (connected) DockStatusPill(t("Online"))
+                        removeButton(active)
+                    }
+                },
             )
             others.forEach { device ->
                 DockDivider()
@@ -357,7 +416,12 @@ internal fun DevicesCard(
                     supporting = lastSeenLabel(device.lastSeenAt),
                     icon = Icons.Rounded.Laptop,
                     iconTone = Tone.NEUTRAL,
-                    trailing = { Text(t("Connect"), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary) },
+                    trailing = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(t("Connect"), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                            removeButton(device)
+                        }
+                    },
                     onClick = { onPickDevice(device) },
                 )
             }

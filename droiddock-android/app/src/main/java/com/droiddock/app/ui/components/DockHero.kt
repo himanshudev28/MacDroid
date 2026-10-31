@@ -155,7 +155,14 @@ fun DockHero(
     ) {
         // Top row: device badge, and the battery numeral on the trailing side.
         Row(verticalAlignment = Alignment.CenterVertically) {
-            DeviceBadge(deviceIcon, live, onBg)
+            DeviceBadge(
+                deviceIcon, live, onBg,
+                Modifier.connectionRipple(
+                    state,
+                    connectedColor = if (style == UiStyle.MINIMAL_MONO) s.tertiary else d.success,
+                    searchColor = s.tertiary,
+                ),
+            )
             Spacer(Modifier.weight(1f))
             if (battery != null) {
                 Column(horizontalAlignment = Alignment.End) {
@@ -189,9 +196,10 @@ fun DockHero(
                 HeroState.OFFLINE, HeroState.UNPAIRED -> s.outline
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(8.dp).clip(if (style == UiStyle.MINIMAL_MONO) androidx.compose.foundation.shape.RoundedCornerShape(1.dp) else CircleShape)
-                        .background(dot),
+                PingDot(
+                    dot,
+                    if (style == UiStyle.MINIMAL_MONO) androidx.compose.foundation.shape.RoundedCornerShape(1.dp) else CircleShape,
+                    ping = st == HeroState.CONNECTED,
                 )
                 Spacer(Modifier.width(sp.s))
                 Text(
@@ -253,7 +261,7 @@ fun DockHero(
 }
 
 @Composable
-private fun DeviceBadge(icon: ImageVector, live: Boolean, onBg: Color) {
+private fun DeviceBadge(icon: ImageVector, live: Boolean, onBg: Color, modifier: Modifier = Modifier) {
     val style = DockTheme.style
     val s = MaterialTheme.colorScheme
     val shape = DockTheme.shapes.deviceBadge
@@ -271,7 +279,7 @@ private fun DeviceBadge(icon: ImageVector, live: Boolean, onBg: Color) {
         UiStyle.LIQUID_GLASS -> s.onPrimary
         else -> if (live) s.onPrimary else s.onSurfaceVariant
     }
-    Box(Modifier.size(size).clip(shape).then(fill), contentAlignment = Alignment.Center) {
+    Box(modifier.size(size).clip(shape).then(fill), contentAlignment = Alignment.Center) {
         Icon(icon, null, tint = tint, modifier = Modifier.size(size * 0.48f))
     }
 }

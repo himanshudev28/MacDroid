@@ -119,7 +119,7 @@ internal fun MacAppsTab(connected: Boolean) {
             value = query,
             onValueChange = { query = it },
             singleLine = true,
-            shape = DockTheme.shapes.field,
+            shape = DockTheme.shapes.field, colors = com.droiddock.app.ui.components.dockFieldColors(),
             label = { Text(t("Search apps")) },
             leadingIcon = { Icon(Icons.Rounded.Search, null) },
             trailingIcon = if (query.isNotEmpty()) {

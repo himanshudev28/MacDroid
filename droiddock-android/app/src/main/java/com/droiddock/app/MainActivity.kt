@@ -80,6 +80,9 @@ import com.droiddock.app.ui.mirror.*
 import com.droiddock.app.ui.settings.*
 import com.droiddock.app.ui.setup.*
 import com.droiddock.app.ui.guide.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.droiddock.app.ui.onboarding.Onboarding
+import com.droiddock.app.ui.onboarding.OnboardingFlow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.droiddock.app.ui.theme.Appearance
@@ -202,8 +205,31 @@ internal fun DroidDockScreen(
     val disconnected by ConnectionManager.manuallyDisconnected.collectAsStateWithLifecycle()
 
     var paired      by remember { mutableStateOf(Prefs.load(ctx) != null) }
+    // First run only: anyone already paired (an upgrade) skips straight to the app.
+    var onboarded   by remember { mutableStateOf(paired || Onboarding.isDone(ctx)) }
     /** Which known device the connect loop is currently pointed at. */
     var activeToken by remember { mutableStateOf(Prefs.load(ctx)?.token) }
+    /** Forget the active Mac: drop its pairing and pin, then switch to another known Mac if there is one. */
+    fun forgetActiveMac() {
+        Prefs.clear(ctx) // drops the active pairing + its address-book entry
+        ConnectionManager.shutdown()
+        val remaining = Prefs.knownDevices(ctx)
+        ConnectionManager.knownDevices.value = remaining
+        activeToken = null
+        paired = false
+        // Another Mac is still known — keep the bridge up and
+        // switch to it rather than dropping the user onto a
+        // pairing screen they don't need.
+        val next = remaining.firstOrNull()
+        if (next != null) {
+            ConnectionManager.connectTo(ctx, next)
+            activeToken = next.token
+            paired = true
+        } else {
+            BridgeService.stop(ctx)
+        }
+        Toast.makeText(ctx, t("Forgot this Mac"), Toast.LENGTH_SHORT).show()
+    }
     var notifAccess by remember { mutableStateOf(notifAccessGranted(ctx)) }
     var phonePerms  by remember { mutableStateOf(phonePermsGranted(ctx)) }
     var allFiles    by remember { mutableStateOf(FileRepo.hasAllFiles()) }
@@ -222,9 +248,9 @@ internal fun DroidDockScreen(
     var clipKeepHistory by remember { mutableStateOf(Prefs.clipboardHistory(ctx)) }
     var defaultTab  by remember { mutableStateOf(Prefs.defaultTab(ctx)) }
     var crashNotify by remember { mutableStateOf(Prefs.notifyOnCrash(ctx)) }
-    var showManual  by remember { mutableStateOf(false) }
-    var showGuide   by remember { mutableStateOf(false) }
-    var showPause   by remember { mutableStateOf(false) }
+    var showManual  by rememberSaveable { mutableStateOf(false) }
+    var showGuide   by rememberSaveable { mutableStateOf(false) }
+    var showPause   by rememberSaveable { mutableStateOf(false) }
     // Found by the throttled check below. Its only job out here is the dot on
     // the Settings nav item — the row that acts on it lives in SettingsTab.
     var newRelease  by remember { mutableStateOf<UpdateChecker.Release?>(null) }
@@ -234,7 +260,8 @@ internal fun DroidDockScreen(
     // there's nothing linked to act on, Home when there is. Evaluated eagerly
     // rather than in an effect so the first frame is already the right tab —
     // a visible flick from Home to Connect would be worse than either.
-    var currentTab by remember {
+    // Saveable: rotation recreates the Activity, and this used to fall back to Home.
+    var currentTab by rememberSaveable {
         mutableStateOf(
             when (val saved = Prefs.defaultTab(ctx)) {
                 "dynamic" -> if (Prefs.load(ctx) == null) "connect" else "home"
@@ -269,9 +296,10 @@ internal fun DroidDockScreen(
         }
     }
 
-    val applyPairing: (Pairing) -> Unit = { pairing ->
+    val applyPairing: (Pairing, Boolean) -> Unit = { pairing, fromQr ->
         BridgeService.start(ctx)
-        ConnectionManager.onPaired(ctx, pairing)
+        LinkSecurity.clearProblems()
+        ConnectionManager.onPaired(ctx, pairing, fromQr)
         paired = true
         activeToken = pairing.token
         Toast.makeText(ctx, "Paired with ${pairing.macName}", Toast.LENGTH_SHORT).show()
@@ -313,28 +341,9 @@ internal fun DroidDockScreen(
 
     val handleQr: (String) -> Unit = { raw ->
         runCatching {
-            if (raw.startsWith("droiddock://pair")) {
-                val uri = Uri.parse(raw)
-                val ips = (uri.getQueryParameter("ips") ?: "")
-                    .split(",").filter { it.isNotBlank() }
-                val token = uri.getQueryParameter("token") ?: ""
-                require(ips.isNotEmpty() && token.isNotEmpty())
-                Pairing(
-                    ips,
-                    uri.getQueryParameter("port")?.toIntOrNull() ?: 48484,
-                    token,
-                    uri.getQueryParameter("name") ?: "Mac"
-                )
-            } else {
-                val o   = JSONObject(raw)
-                val ips = mutableListOf<String>()
-                val arr = o.optJSONArray("ips")
-                if (arr != null) for (i in 0 until arr.length()) ips.add(arr.getString(i))
-                require(ips.isNotEmpty() && o.has("token"))
-                Pairing(ips, o.optInt("port", 48484), o.getString("token"), o.optString("name", "Mac"))
-            }
+            LinkTls.parsePairingQr(raw)
         }.onSuccess { pairing ->
-            applyPairing(pairing)
+            applyPairing(pairing, true) // a scanned QR is authoritative, including "no fp"
         }.onFailure {
             Toast.makeText(ctx, t("Not a DroidDock QR code"), Toast.LENGTH_SHORT).show()
         }
@@ -369,8 +378,11 @@ internal fun DroidDockScreen(
         ActivityResultContracts.RequestPermission()
     ) { }
 
-    LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= 33) {
+    // On a first run the onboarding Permissions page asks instead, with context.
+    LaunchedEffect(onboarded) {
+        if (onboarded && Build.VERSION.SDK_INT >= 33 &&
+            ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
             notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
@@ -403,6 +415,20 @@ internal fun DroidDockScreen(
         else cameraPermLauncher.launch(Manifest.permission.CAMERA)
     }
 
+    // A pairing deep link opened during onboarding finishes it.
+    LaunchedEffect(paired) {
+        if (paired && !onboarded) { Onboarding.markDone(ctx); onboarded = true }
+    }
+
+    if (!onboarded) {
+        OnboardingFlow(onFinish = { pairNow ->
+            Onboarding.markDone(ctx)
+            onboarded = true
+            if (pairNow && !paired) { currentTab = "connect"; launchScan() }
+        })
+        return
+    }
+
     if (showGuide) {
         FeatureGuideScreen(onBack = { showGuide = false })
         return
@@ -410,7 +436,7 @@ internal fun DroidDockScreen(
 
     if (showManual) {
         ManualPairDialog(onDismiss = { showManual = false }) { pairing ->
-            showManual = false; applyPairing(pairing)
+            showManual = false; applyPairing(pairing, false)
         }
     }
 
@@ -442,8 +468,14 @@ internal fun DroidDockScreen(
                     val event by ConnectionManager.lastEvent.collectAsStateWithLifecycle()
                     val macMedia by ConnectionManager.macMedia.collectAsStateWithLifecycle()
                     val transport by ConnectionManager.transport.collectAsStateWithLifecycle()
+                    val secure by LinkSecurity.encrypted.collectAsStateWithLifecycle()
+                    val identityChanged by LinkSecurity.identityChanged.collectAsStateWithLifecycle()
+                    val securityProblem by LinkSecurity.problem.collectAsStateWithLifecycle()
                     HomeTab(
                     transport   = transport,
+                    secure      = secure,
+                    identityChanged = identityChanged,
+                    securityProblem = securityProblem,
                     connected   = connected,
                     isPaused    = isPaused,
                     paired      = paired,
@@ -465,6 +497,15 @@ internal fun DroidDockScreen(
                         activeToken = device.token
                         paired = true
                     },
+                    onRemoveDevice = { device ->
+                        if (device.token == activeToken) {
+                            forgetActiveMac()
+                        } else {
+                            // Not the Mac we're linked to: drop its entry (and its pin) only.
+                            ConnectionManager.forget(ctx, device.token)
+                            Toast.makeText(ctx, t("Removed {name}", "name" to device.macName), Toast.LENGTH_SHORT).show()
+                        }
+                    },
                     onGoToConnect = { currentTab = "connect" },
                     onGoToFiles   = { currentTab = "files" },
                     clipboard = if (appearance.layout == NavLayout.CLASSIC_5) null else ({
@@ -481,26 +522,7 @@ internal fun DroidDockScreen(
                     macName     = macName,
                     onScan      = launchScan,
                     onManual    = { showManual = true },
-                    onForget    = {
-                        Prefs.clear(ctx) // drops the active pairing + its address-book entry
-                        ConnectionManager.shutdown()
-                        val remaining = Prefs.knownDevices(ctx)
-                        ConnectionManager.knownDevices.value = remaining
-                        activeToken = null
-                        paired = false
-                        // Another Mac is still known — keep the bridge up and
-                        // switch to it rather than dropping the user onto a
-                        // pairing screen they don't need.
-                        val next = remaining.firstOrNull()
-                        if (next != null) {
-                            ConnectionManager.connectTo(ctx, next)
-                            activeToken = next.token
-                            paired = true
-                        } else {
-                            BridgeService.stop(ctx)
-                        }
-                        Toast.makeText(ctx, t("Forgot this Mac"), Toast.LENGTH_SHORT).show()
-                    },
+                    onForget    = { forgetActiveMac() },
                 )
                 "files" -> {
                 val activeTransfers by TransferManager.activeTransfers.collectAsStateWithLifecycle()

@@ -73,7 +73,10 @@ fun DockGroup(
     rows: List<@Composable () -> Unit>,
 ) {
     if (rows.isEmpty()) return
-    val hairline = DockTheme.surfaces.mode == SurfaceMode.HAIRLINE || DockTheme.spacing.listGap == 0.dp
+    // Glass: one frosted surface with dividers. Separate segments each got their own
+    // bright rim and glow, which striped the list like a venetian blind.
+    val hairline = DockTheme.surfaces.mode == SurfaceMode.HAIRLINE || DockTheme.spacing.listGap == 0.dp ||
+        com.droiddock.app.ui.theme.glass.frostActive()
     val r = DockTheme.shapes.cardRadius
     if (hairline) {
         Column(modifier.fillMaxWidth().dockSurface(DockTheme.shapes.card)) {

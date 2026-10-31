@@ -219,11 +219,18 @@ object AccessibilityControl {
         runCatching { svc.performGlobalAction(action) }
     }
 
+    private fun encodePng(bmp: android.graphics.Bitmap): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+        return out.toByteArray()
+    }
+
     /**
      * Capture the screen with the accessibility service (API 30+, needs
      * `canTakeScreenshot`). No consent dialog: the user already granted the
-     * service. Calls [onDone] with PNG bytes or an error message, on the main
-     * executor. The Mac asks for this when you press "Screenshot".
+     * service. Calls [onDone] with PNG bytes or an error message, on the
+     * calling thread for the early errors and on the screenshot executor otherwise. The Mac asks
+     * for this when you press "Screenshot".
      */
     fun takeScreenshot(onDone: (ByteArray?, String?) -> Unit) {
         val svc = service
@@ -245,12 +252,28 @@ object AccessibilityControl {
                                         ?.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
                                 } finally { hw.close() }
                                 if (bmp == null) return onDone(null, "Screenshot failed")
-                                val out = java.io.ByteArrayOutputStream()
-                                bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
-                                bmp.recycle()
-                                onDone(out.toByteArray(), null)
+                                var cur: android.graphics.Bitmap = bmp
+                                var png = encodePng(cur)
+                                // Huge screens can exceed what one text frame may carry
+                                // (the send would silently fail); shrink, keeping PNG as
+                                // the Mac requires.
+                                var tries = 0
+                                while (png.size > ScreenshotReply.MAX_PNG_BYTES && tries++ < 3) {
+                                    val f = ScreenshotReply.shrinkFactor(png.size)
+                                    val scaled: android.graphics.Bitmap = android.graphics.Bitmap.createScaledBitmap(
+                                        cur, (cur.width * f).toInt().coerceAtLeast(1),
+                                        (cur.height * f).toInt().coerceAtLeast(1), true
+                                    )
+                                    if (cur !== scaled) cur.recycle()
+                                    cur = scaled
+                                    png = encodePng(cur)
+                                }
+                                cur.recycle()
+                                onDone(png, null)
                             } catch (e: Exception) {
                                 onDone(null, e.message ?: "Screenshot failed")
+                            } catch (e: OutOfMemoryError) {
+                                onDone(null, "Not enough memory for a screenshot")
                             }
                         }
 

@@ -5,6 +5,10 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -124,164 +128,193 @@ internal fun MacRemoteTab(connected: Boolean, previewDrag: Boolean? = null, prev
     }
     val keyFeel = remember(haptics, style) { { if (style != UiStyle.LIQUID_GLASS && style != UiStyle.MINIMAL_MONO) haptics.longPress() } }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = sp.gutter)
-            .padding(top = sp.s, bottom = shell.calculateBottomPadding() + sp.m),
-        verticalArrangement = Arrangement.spacedBy(sp.m),
-    ) {
-        Text(
-            if (connected) t("Drag to move · tap to click · long-press to right-click")
-            else t("Not connected to your Mac."),
-            style = MaterialTheme.typography.bodySmall,
-            color = if (connected) scheme.onSurfaceVariant else scheme.error,
-        )
-
-        // The trackpad is the point of this screen: it takes all the slack
-        // (about two thirds of the page) and is floored at a size worth dragging on.
-        var pressed by remember { mutableStateOf(false) }
-        val gridColor = scheme.onSurface
-        val pressTint = scheme.primary
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .heightIn(min = 240.dp)
-                .dockSurface(DockTheme.shapes.card, DockTheme.colors.inset)
-                .drawBehind {
-                    // Subtle grid so the surface reads as a pad, and so motion has reference.
-                    val step = 32.dp.toPx()
-                    val line = gridColor.copy(alpha = 0.06f)
-                    var x = step
-                    while (x < size.width) { drawLine(line, Offset(x, 0f), Offset(x, size.height), 1f); x += step }
-                    var y = step
-                    while (y < size.height) { drawLine(line, Offset(0f, y), Offset(size.width, y), 1f); y += step }
-                    // Pressed state is read here, so a touch only redraws.
-                    if (pressed) drawRect(pressTint.copy(alpha = 0.10f))
-                }
-                .pointerInput(connected) {
-                    if (!connected) return@pointerInput
-                    var travelled = 0f
-                    detectDragGestures(
-                        onDragStart = { travelled = 0f },
-                    ) { change, drag ->
-                        change.consume()
-                        // 1.6x so a short phone drag crosses a large display.
-                        cursorX = (cursorX + drag.x * 1.6f).coerceAtLeast(0f)
-                        cursorY = (cursorY + drag.y * 1.6f).coerceAtLeast(0f)
-                        ConnectionManager.sendRemote("mouse_move") {
-                            it.put("x", cursorX.toDouble()).put("y", cursorY.toDouble())
+    // A landscape phone is wide but short (the shell shows a rail). Stacked, the fixed
+    // controls took all the height and left the trackpad 0 dp tall, so go side by side there.
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val sideBySide = maxWidth > maxHeight && maxHeight < 560.dp
+        val hint: @Composable () -> Unit = {
+            Text(
+                if (connected) t("Drag to move · tap to click · long-press to right-click")
+                else t("Not connected to your Mac."),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (connected) scheme.onSurfaceVariant else scheme.error,
+            )
+        }
+        val pad: @Composable (Modifier) -> Unit = { padModifier ->
+            // The trackpad is the point of this screen: it takes all the slack
+            // (about two thirds of the page) and is floored at a size worth dragging on.
+            var pressed by remember { mutableStateOf(false) }
+            val gridColor = scheme.onSurface
+            val pressTint = scheme.primary
+            Box(
+                modifier = padModifier
+                    .dockSurface(DockTheme.shapes.card, DockTheme.colors.inset)
+                    .drawBehind {
+                        // Subtle grid so the surface reads as a pad, and so motion has reference.
+                        val step = 32.dp.toPx()
+                        val line = gridColor.copy(alpha = 0.06f)
+                        var x = step
+                        while (x < size.width) { drawLine(line, Offset(x, 0f), Offset(x, size.height), 1f); x += step }
+                        var y = step
+                        while (y < size.height) { drawLine(line, Offset(0f, y), Offset(size.width, y), 1f); y += step }
+                        // Pressed state is read here, so a touch only redraws.
+                        if (pressed) drawRect(pressTint.copy(alpha = 0.10f))
+                    }
+                    .pointerInput(connected) {
+                        if (!connected) return@pointerInput
+                        var travelled = 0f
+                        detectDragGestures(
+                            onDragStart = { travelled = 0f },
+                        ) { change, drag ->
+                            change.consume()
+                            // 1.6x so a short phone drag crosses a large display.
+                            cursorX = (cursorX + drag.x * 1.6f).coerceAtLeast(0f)
+                            cursorY = (cursorY + drag.y * 1.6f).coerceAtLeast(0f)
+                            ConnectionManager.sendRemote("mouse_move") {
+                                it.put("x", cursorX.toDouble()).put("y", cursorY.toDouble())
+                            }
+                            // A detent every ~96 px of travel, like a notched wheel.
+                            travelled += kotlin.math.abs(drag.x) + kotlin.math.abs(drag.y)
+                            if (travelled > 96f) { travelled = 0f; haptics.frequentTick() }
                         }
-                        // A detent every ~96 px of travel, like a notched wheel.
-                        travelled += kotlin.math.abs(drag.x) + kotlin.math.abs(drag.y)
-                        if (travelled > 96f) { travelled = 0f; haptics.frequentTick() }
+                    }
+                    .pointerInput(connected) {
+                        if (!connected) return@pointerInput
+                        detectTapGestures(
+                            onPress = { pressed = true; tryAwaitRelease(); pressed = false },
+                            onTap = {
+                                // A tap while dragging ends the drag instead of clicking.
+                                if (downSent) {
+                                    if (locked) { haptics.gestureEnd(); releaseHold() }
+                                    return@detectTapGestures
+                                }
+                                haptics.tap().also { if (style != UiStyle.LIQUID_GLASS && style != UiStyle.MINIMAL_MONO) haptics.select() }
+                                ConnectionManager.sendRemote("mouse_click") { it.put("button", "left") }
+                            },
+                            onLongPress = {
+                                if (downSent) return@detectTapGestures
+                                haptics.longPress()
+                                ConnectionManager.sendRemote("mouse_click") { it.put("button", "right") }
+                            }
+                        )
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Outlined.Mouse, null, tint = scheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.size(32.dp))
+                    Spacer(Modifier.height(sp.s))
+                    Text(t("Trackpad"), style = MaterialTheme.typography.labelMedium,
+                        color = scheme.onSurfaceVariant.copy(alpha = 0.7f))
+                }
+            }
+        }
+        val hold: @Composable () -> Unit = {
+            if (dragCap && connected) {
+                HoldButton(
+                    holdPressed = holdPressed,
+                    locked = locked,
+                    onDown = {
+                        holdPressed = true; downSent = true
+                        ConnectionManager.sendRemoteButton(true); haptics.confirm()
+                    },
+                    onUp = { holdPressed = false; if (!locked) { haptics.gestureEnd(); releaseHold() } },
+                    onLock = {
+                        // Double-tap: the button goes down now and stays down.
+                        locked = true; downSent = true
+                        ConnectionManager.sendRemoteButton(true); haptics.threshold()
+                    },
+                    onUnlock = { haptics.gestureEnd(); releaseHold() },
+                )
+            }
+        }
+        val keys: @Composable () -> Unit = {
+            // Arrows as a d-pad: a cross is the shape the fingers already expect.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(sp.l),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(sp.xs)
+                ) {
+                    ArrowKey(Icons.Outlined.KeyboardArrowUp, t("Up"), haptics, "up")
+                    Row(horizontalArrangement = Arrangement.spacedBy(sp.xs)) {
+                        ArrowKey(Icons.Outlined.KeyboardArrowLeft, t("Left"), haptics, "left")
+                        ArrowKey(Icons.Outlined.KeyboardArrowDown, t("Down"), haptics, "down")
+                        ArrowKey(Icons.Outlined.KeyboardArrowRight, t("Right"), haptics, "right")
                     }
                 }
-                .pointerInput(connected) {
-                    if (!connected) return@pointerInput
-                    detectTapGestures(
-                        onPress = { pressed = true; tryAwaitRelease(); pressed = false },
-                        onTap = {
-                            // A tap while dragging ends the drag instead of clicking.
-                            if (downSent) {
-                                if (locked) { haptics.gestureEnd(); releaseHold() }
-                                return@detectTapGestures
-                            }
-                            haptics.tap().also { if (style != UiStyle.LIQUID_GLASS && style != UiStyle.MINIMAL_MONO) haptics.select() }
-                            ConnectionManager.sendRemote("mouse_click") { it.put("button", "left") }
-                        },
-                        onLongPress = {
-                            if (downSent) return@detectTapGestures
-                            haptics.longPress()
-                            ConnectionManager.sendRemote("mouse_click") { it.put("button", "right") }
-                        }
-                    )
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Outlined.Mouse, null, tint = scheme.onSurfaceVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.size(32.dp))
-                Spacer(Modifier.height(sp.s))
-                Text(t("Trackpad"), style = MaterialTheme.typography.labelMedium,
-                    color = scheme.onSurfaceVariant.copy(alpha = 0.7f))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(sp.xs)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(sp.xs)) {
+                        RemoteKey("Enter", Modifier.weight(1f), keyFeel) { sendKey("enter") }
+                        RemoteKey("Esc", Modifier.weight(1f), keyFeel) { sendKey("escape") }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(sp.xs)) {
+                        RemoteKey("Space", Modifier.weight(1f), keyFeel) { sendKey("space") }
+                        RemoteKey("Tab", Modifier.weight(1f), keyFeel) { sendKey("tab") }
+                    }
+                }
             }
         }
+        val typing: @Composable () -> Unit = {
+            // Media transport lives on the Home Now Playing card, next to the title it acts on.
 
-        if (dragCap && connected) {
-            HoldButton(
-                holdPressed = holdPressed,
-                locked = locked,
-                onDown = {
-                    holdPressed = true; downSent = true
-                    ConnectionManager.sendRemoteButton(true); haptics.confirm()
-                },
-                onUp = { holdPressed = false; if (!locked) { haptics.gestureEnd(); releaseHold() } },
-                onLock = {
-                    // Double-tap: the button goes down now and stays down.
-                    locked = true; downSent = true
-                    ConnectionManager.sendRemoteButton(true); haptics.threshold()
-                },
-                onUnlock = { haptics.gestureEnd(); releaseHold() },
-            )
-        }
-
-        // Arrows as a d-pad: a cross is the shape the fingers already expect.
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(sp.l),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(sp.xs)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(sp.s)
             ) {
-                ArrowKey(Icons.Outlined.KeyboardArrowUp, t("Up"), haptics, "up")
-                Row(horizontalArrangement = Arrangement.spacedBy(sp.xs)) {
-                    ArrowKey(Icons.Outlined.KeyboardArrowLeft, t("Left"), haptics, "left")
-                    ArrowKey(Icons.Outlined.KeyboardArrowDown, t("Down"), haptics, "down")
-                    ArrowKey(Icons.Outlined.KeyboardArrowRight, t("Right"), haptics, "right")
-                }
-            }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(sp.xs)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(sp.xs)) {
-                    RemoteKey("Enter", Modifier.weight(1f), keyFeel) { sendKey("enter") }
-                    RemoteKey("Esc", Modifier.weight(1f), keyFeel) { sendKey("escape") }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(sp.xs)) {
-                    RemoteKey("Space", Modifier.weight(1f), keyFeel) { sendKey("space") }
-                    RemoteKey("Tab", Modifier.weight(1f), keyFeel) { sendKey("tab") }
-                }
+                OutlinedTextField(
+                    value = typed,
+                    onValueChange = { typed = it },
+                    placeholder = { Text(t("Type on the Mac"), style = MaterialTheme.typography.bodyMedium) },
+                    singleLine = true,
+                    shape = DockTheme.shapes.field, colors = com.droiddock.app.ui.components.dockFieldColors(),
+                    modifier = Modifier.weight(1f)
+                )
+                val canSend = connected && typed.isNotBlank()
+                DockIconButton(
+                    icon = Icons.Outlined.Send,
+                    contentDescription = t("Send text"),
+                    enabled = canSend,
+                    tint = if (canSend) scheme.primary else scheme.onSurfaceVariant,
+                    onClick = {
+                        haptics.confirm()
+                        ConnectionManager.sendRemote("text") { it.put("text", typed) }
+                        typed = ""
+                    },
+                )
             }
         }
-
-        // Media transport lives on the Home Now Playing card, next to the title it acts on.
-
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(sp.s)
-        ) {
-            OutlinedTextField(
-                value = typed,
-                onValueChange = { typed = it },
-                placeholder = { Text(t("Type on the Mac"), style = MaterialTheme.typography.bodyMedium) },
-                singleLine = true,
-                shape = DockTheme.shapes.field,
-                modifier = Modifier.weight(1f)
-            )
-            val canSend = connected && typed.isNotBlank()
-            DockIconButton(
-                icon = Icons.Outlined.Send,
-                contentDescription = t("Send text"),
-                enabled = canSend,
-                tint = if (canSend) scheme.primary else scheme.onSurfaceVariant,
-                onClick = {
-                    haptics.confirm()
-                    ConnectionManager.sendRemote("text") { it.put("text", typed) }
-                    typed = ""
-                },
-            )
+        val outer = Modifier
+            .fillMaxSize()
+            .padding(horizontal = sp.gutter)
+            .padding(top = sp.s, bottom = shell.calculateBottomPadding() + sp.m)
+        if (sideBySide) {
+            Row(outer, horizontalArrangement = Arrangement.spacedBy(sp.l)) {
+                Column(Modifier.weight(1.15f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(sp.s)) {
+                    hint()
+                    pad(Modifier.fillMaxWidth().weight(1f))
+                }
+                Column(
+                    Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(sp.m),
+                ) {
+                    hold()
+                    keys()
+                    typing()
+                }
+            }
+        } else {
+            Column(outer, verticalArrangement = Arrangement.spacedBy(sp.m)) {
+                hint()
+                // The trackpad takes all the slack, floored at a size worth dragging on.
+                pad(Modifier.fillMaxWidth().weight(1f).heightIn(min = 240.dp))
+                hold()
+                keys()
+                typing()
+            }
         }
     }
 }

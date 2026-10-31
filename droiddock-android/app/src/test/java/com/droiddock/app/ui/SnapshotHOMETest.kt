@@ -39,7 +39,12 @@ class SnapshotHOMETest {
                 DroidDockTheme(
                     Appearance(style = style, themeMode = if (dark) ThemeMode.DARK else ThemeMode.LIGHT),
                     dynamicColor = false,
-                ) { Box(Modifier.fillMaxSize().dockPageBackground()) { content() } }
+                ) {
+                    // Final frame of the entrance stagger, not frame zero.
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        com.droiddock.app.ui.theme.LocalDockMotion provides com.droiddock.app.ui.theme.LocalDockMotion.current.snapped(),
+                    ) { Box(Modifier.fillMaxSize().dockPageBackground()) { content() } }
+                }
             }
         }
     }
