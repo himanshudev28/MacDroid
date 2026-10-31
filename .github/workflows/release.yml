@@ -63,9 +63,39 @@ jobs:
             echo "CHANGELOG_EOF"
           } >> "$GITHUB_OUTPUT"
 
-      # Ad-hoc signed (right-click → Open the first time). Developer ID signing
-      # and notarization are a paid decision, not made yet; set CODESIGN_ID to
-      # a Developer ID identity here once there is one.
+      # Signed with DroidDock's own long-lived certificate (not Apple's paid
+      # Developer ID, so first launch still needs Privacy & Security → Open
+      # Anyway). The point is a stable identity: macOS keeps the Accessibility
+      # grant across updates, and the in-app updater only installs an update
+      # signed by the same certificate as the installed app. So a release
+      # without it would be refused by every install: fail here instead.
+      # The p12 is ~/.droiddock-release/codesign.p12 (docs/PLAN-stable-codesign.md).
+      - name: Import the code-signing certificate
+        env:
+          DD_CODESIGN_P12_B64: ${{ secrets.DD_CODESIGN_P12_B64 }}
+          DD_CODESIGN_P12_PASSWORD: ${{ secrets.DD_CODESIGN_P12_PASSWORD }}
+        run: |
+          if [ -z "$DD_CODESIGN_P12_B64" ] || [ -z "$DD_CODESIGN_P12_PASSWORD" ]; then
+            echo "::error::DD_CODESIGN_P12_B64 / DD_CODESIGN_P12_PASSWORD are not set. An unsigned build would be refused by the in-app updater of every installed copy, so this release stops here."
+            exit 1
+          fi
+          KC="$RUNNER_TEMP/droiddock-codesign.keychain-db"
+          KP="$(openssl rand -hex 16)"
+          echo "::add-mask::$KP"
+          echo "$DD_CODESIGN_P12_B64" | base64 --decode > "$RUNNER_TEMP/codesign.p12"
+          security create-keychain -p "$KP" "$KC"
+          security set-keychain-settings -lut 3600 "$KC"
+          security unlock-keychain -p "$KP" "$KC"
+          security import "$RUNNER_TEMP/codesign.p12" -k "$KC" -P "$DD_CODESIGN_P12_PASSWORD" -T /usr/bin/codesign >/dev/null
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KP" "$KC" >/dev/null
+          rm -f "$RUNNER_TEMP/codesign.p12"
+          ID="$(security find-identity -p codesigning "$KC" | awk '/"DroidDock Code Signing"/ { print $2; exit }')"
+          if [ -z "$ID" ]; then
+            echo "::error::The p12 has no \"DroidDock Code Signing\" identity."
+            exit 1
+          fi
+          { echo "CODESIGN_ID=$ID"; echo "CODESIGN_KEYCHAIN=$KC"; } >> "$GITHUB_ENV"
+
       - name: Build the app
         run: droiddock-native/scripts/build.sh
 
@@ -75,6 +105,32 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           cp "droiddock-native/build/DroidDock-$VERSION.dmg" "$GITHUB_WORKSPACE/"
           ditto -c -k --keepParent droiddock-native/build/DroidDock.app "$GITHUB_WORKSPACE/DroidDock-$VERSION-mac.zip"
+
+      # Signs the zip so the app can install updates itself.
+      #
+      # The app only installs a zip whose Ed25519 signature checks out against
+      # the public key baked into core/src/updater.rs. The seed is the
+      # DD_UPDATE_SIGNING_KEY secret (set it from ~/.droiddock-release/update-signing-key).
+      # Without the secret the zip would ship unsigned and no installed copy
+      # could update itself (it would only offer the release page), so the
+      # release stops here instead.
+      # Built in its own step with NO secret in the environment, so build scripts
+      # and proc-macros compiled along the way can never read the signing key.
+      - name: Build the update signer
+        run: |
+          cd droiddock-native/core
+          cargo build --profile signer --target aarch64-apple-darwin --example sign_update
+
+      - name: Sign the zip for in-app updates
+        env:
+          DD_UPDATE_SIGNING_KEY: ${{ secrets.DD_UPDATE_SIGNING_KEY }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [ -z "$DD_UPDATE_SIGNING_KEY" ]; then
+            echo "::error::DD_UPDATE_SIGNING_KEY is not set. Without it the zip is unsigned and installed copies can't update themselves, so this release stops here."
+            exit 1
+          fi
+          droiddock-native/core/target/aarch64-apple-darwin/signer/examples/sign_update sign "$GITHUB_WORKSPACE/DroidDock-$VERSION-mac.zip"
 
       # Crash symbols for this exact build (the shipped binary is stripped).
       - name: Keep the dSYM
@@ -92,9 +148,14 @@ jobs:
           files: |
             DroidDock-*.dmg
             DroidDock-*-mac.zip
+            DroidDock-*-mac.zip.sig
           # MUST match the android job's `draft`: both jobs write this release.
           draft: false
           prerelease: false
+
+      - name: Remove the signing keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/droiddock-codesign.keychain-db" 2>/dev/null || true
 
   android:
     name: Build DroidDock Android (APK)

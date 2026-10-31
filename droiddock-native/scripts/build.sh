@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$ROOT/build/DroidDock.app"
 ID="${CODESIGN_ID:--}"
+# Optional dedicated keychain holding CODESIGN_ID (docs/PLAN-stable-codesign.md at the repo root),
+# unlocked with CODESIGN_KEYCHAIN_PASSWORD when set.
+KEYCHAIN="${CODESIGN_KEYCHAIN:-}"
 
 echo "==> cargo build (core)"
 ( cd "$ROOT/core" && MACOSX_DEPLOYMENT_TARGET=14.0 cargo build --release --target aarch64-apple-darwin )
@@ -27,6 +30,20 @@ for d in "$ROOT"/mac/Sources/DroidDock/Resources/*.lproj; do cp -R "$d" "$APP/Co
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 echo "==> codesign (identity: $ID)"
-codesign --force --sign "$ID" --identifier com.droiddock.mac --options runtime "$APP"
+SIGN_ARGS=()
+if [ -n "$KEYCHAIN" ]; then
+  # codesign only finds identities in keychains on the user search list: add ours for the
+  # signing step and put the original list back afterwards, failure included.
+  [ -n "${CODESIGN_KEYCHAIN_PASSWORD:-}" ] && security unlock-keychain -p "$CODESIGN_KEYCHAIN_PASSWORD" "$KEYCHAIN"
+  ORIG_KEYCHAINS=()
+  while IFS= read -r k; do
+    k="${k#"${k%%[![:space:]]*}"}"; k="${k#\"}"; k="${k%\"}"
+    [ -n "$k" ] && ORIG_KEYCHAINS+=("$k")
+  done < <(security list-keychains -d user)
+  trap 'security list-keychains -d user -s ${ORIG_KEYCHAINS[@]+"${ORIG_KEYCHAINS[@]}"}' EXIT
+  security list-keychains -d user -s ${ORIG_KEYCHAINS[@]+"${ORIG_KEYCHAINS[@]}"} "$KEYCHAIN"
+  SIGN_ARGS=(--keychain "$KEYCHAIN")
+fi
+codesign --force --sign "$ID" ${SIGN_ARGS[@]+"${SIGN_ARGS[@]}"} --identifier com.droiddock.mac --options runtime "$APP"
 codesign --verify --strict --verbose=1 "$APP"
 echo "==> built $APP"
