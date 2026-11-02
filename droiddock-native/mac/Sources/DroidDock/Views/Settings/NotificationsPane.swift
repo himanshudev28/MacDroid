@@ -111,7 +111,7 @@ struct NotificationsSettingsPane: View {
             }
 
             DDSection(tr("App notifications"), symbol: "square.grid.2x2",
-                      footer: tr("Off keeps an app out of banners; it still appears in the Notifications list. The gear opens that app's options.")) {
+                      footer: tr("Off hides an app everywhere on your Mac: no banner, nothing in the Notifications list. To keep it in the list without banners, open the gear.")) {
                 if allApps.isEmpty {
                     HStack(spacing: DD.Space.md) {
                         Image(systemName: "bell.slash").foregroundStyle(DD.dim)
@@ -120,17 +120,23 @@ struct NotificationsSettingsPane: View {
                 } else {
                     HStack(spacing: DD.Space.md) {
                         TextField("", text: $search, prompt: Text(tr("Search apps"))).labelsHidden().textFieldStyle(.roundedBorder)
-                        Text(tr("All apps")).foregroundStyle(DD.dim)
-                        Toggle("", isOn: allAppsBinding).labelsHidden().toggleStyle(.switch)
-                            .help(tr("Turn banners on or off for every app in the list"))
-                            .accessibilityLabel(tr("All apps"))
+                        // A pull-down, not a switch: with some apps off, a switch had to read "off" and looked
+                        // like every app had been turned off.
+                        let offCount = shownApps.filter { tier($0.pkg).bannersOff }.count
+                        Text(offCount == 0 ? tr("All on") : tr("{n} off", ["n": offCount])).foregroundStyle(DD.dim)
+                        Menu(tr("All apps")) {
+                            Button(tr("Turn all on")) { setAll(on: true) }.disabled(offCount == 0)
+                            Button(tr("Turn all off everywhere")) { setAll(on: false) }.disabled(offCount == shownApps.count)
+                        }
+                        .fixedSize()
+                        .help(tr("Turn every app in the list on, or off everywhere"))
                     }
                     if shownApps.isEmpty {
                         Text(tr("No apps match.")).foregroundStyle(DD.dim)
                     } else {
                         ForEach(shownApps) { a in
                             NotificationAppRow(app: a, tier: tier(a.pkg),
-                                               onToggle: { setTier(a.pkg, $0 ? (tier(a.pkg) == .muted ? .alert : tier(a.pkg)) : .muted) },
+                                               onToggle: { setTier(a.pkg, $0 ? (tier(a.pkg).bannersOff ? .alert : tier(a.pkg)) : .hidden) },
                                                setTier: { setTier(a.pkg, $0) })
                         }
                     }
@@ -148,13 +154,10 @@ struct NotificationsSettingsPane: View {
         #endif
     }
 
-    private var allAppsBinding: Binding<Bool> {
-        Binding(get: { !shownApps.isEmpty && shownApps.allSatisfy { tier($0.pkg) != .muted } },
-                set: { on in
-            var t = tiers
-            for a in shownApps { t[a.pkg] = on ? (tier(a.pkg) == .muted ? "alert" : tier(a.pkg).rawValue) : "muted" }
-            model.setSetting("notifTiers", t)
-        })
+    private func setAll(on: Bool) {
+        var t = tiers
+        for a in shownApps { t[a.pkg] = on ? (tier(a.pkg).bannersOff ? "alert" : tier(a.pkg).rawValue) : "hidden" }
+        model.setSetting("notifTiers", t)
     }
 
     private func setTier(_ pkg: String, _ tier: NotifTier) {
@@ -189,7 +192,7 @@ private struct NotificationAppRow: View {
             PhoneAppIcon(pkg: app.pkg, name: app.name, size: 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(app.name).lineLimit(1)
-                Text(tier == .muted ? tr("Banners off") : (tier == .silent ? tr("Silent") : app.pkg))
+                Text(tier == .hidden ? tr("Off everywhere") : tier == .muted ? tr("Banners off") : (tier == .silent ? tr("Silent") : app.pkg))
                     .font(DD.Font.caption).foregroundStyle(DD.dim).lineLimit(1).truncationMode(.middle)
             }
             Spacer(minLength: DD.Space.sm)
@@ -199,7 +202,7 @@ private struct NotificationAppRow: View {
                 .popover(isPresented: $showOptions, arrowEdge: .trailing) {
                     AppNotifOptions(app: app, tier: tier, setTier: setTier)
                 }
-            Toggle("", isOn: Binding(get: { tier != .muted }, set: onToggle))
+            Toggle("", isOn: Binding(get: { !tier.bannersOff }, set: onToggle))
                 .labelsHidden().toggleStyle(.switch)
                 .accessibilityLabel(tr("Notifications from {app}", ["app": app.name]))
         }
@@ -237,7 +240,7 @@ private struct AppNotifOptions: View {
                 }
             }
             Divider()
-            Toggle(tr("Show on Mac"), isOn: Binding(get: { tier != .muted }, set: { setTier($0 ? .alert : .muted) }))
+            Toggle(tr("Show on Mac"), isOn: Binding(get: { !tier.bannersOff }, set: { setTier($0 ? (tier.bannersOff ? .alert : tier) : .hidden) }))
             LabeledContent(tr("When clicked")) {
                 Picker("", selection: $clickMode) {
                     if NotificationClickActions.shared.windowSerial != nil { Text(tr("Open app in its own window")).tag("window") }
@@ -252,7 +255,8 @@ private struct AppNotifOptions: View {
                     Picker("", selection: Binding(get: { tier }, set: setTier)) {
                         Text(tr("Banner")).tag(NotifTier.alert)
                         Text(tr("Silent – list only")).tag(NotifTier.silent)
-                        Text(tr("Off")).tag(NotifTier.muted)
+                        Text(tr("Off – keep in list")).tag(NotifTier.muted)
+                        Text(tr("Off everywhere")).tag(NotifTier.hidden)
                     }.labelsHidden().fixedSize()
                 }
                 Toggle(tr("Play sound"), isOn: bind(\.sound))

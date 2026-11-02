@@ -286,7 +286,9 @@ pub struct Config {
     pub muted_apps: Vec<String>,
 
     /// Per-app notification tier: `"alert"` (banner, the default), `"silent"`
-    /// (listed in the app, no banner) or `"muted"`. An entry here wins over
+    /// (listed in the app, no banner), `"muted"` (listed, no banner) or
+    /// `"hidden"` (dropped on arrival: no banner, not listed, not counted in the
+    /// menu-bar badge). An entry here wins over
     /// `muted_apps`; a package with no entry is `"muted"` if it is in
     /// `muted_apps` (the pre-tiers setting) and `"alert"` otherwise.
     #[serde(default)]
@@ -385,10 +387,10 @@ pub fn now_ms() -> i64 {
 }
 
 impl Config {
-    /// Effective notification tier for a package: `"alert"|"silent"|"muted"`.
+    /// Effective notification tier for a package: `"alert"|"silent"|"muted"|"hidden"`.
     pub fn notif_tier(&self, pkg: &str) -> &str {
         match self.notif_tiers.get(pkg).map(String::as_str) {
-            Some(t @ ("alert" | "silent" | "muted")) => t,
+            Some(t @ ("alert" | "silent" | "muted" | "hidden")) => t,
             _ if self.muted_apps.iter().any(|p| p == pkg) => "muted",
             _ => "alert",
         }
@@ -597,6 +599,8 @@ mod tests {
         assert_eq!(cfg.notif_tier("b"), "silent", "explicit tier wins");
         assert_eq!(cfg.notif_tier("c"), "alert", "invalid tier ignored");
         assert_eq!(cfg.notif_tier("z"), "alert");
+        cfg.notif_tiers.insert("a".into(), "hidden".into());
+        assert_eq!(cfg.notif_tier("a"), "hidden", "hidden wins over the legacy muted list");
         let back: Config = serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
         assert_eq!(back.notif_tiers.get("b").map(String::as_str), Some("silent"));
     }

@@ -50,6 +50,7 @@
 "All apps" = "सभी ऐप्स";
 "All caught up" = "सब देख लिया";
 "All contacts" = "सभी संपर्क";
+"All on" = "सभी चालू";
 "Allow" = "अनुमति दें";
 "Allow Bluetooth" = "ब्लूटूथ की अनुमति दें";
 "Allow Bluetooth to finish setting up Wi-Fi fallback" = "Wi-Fi फ़ॉलबैक सेट अप पूरा करने के लिए ब्लूटूथ की अनुमति दें";
@@ -643,6 +644,7 @@
 "Not linked — connect your phone first" = "जुड़ा नहीं — पहले अपना फ़ोन कनेक्ट करें";
 "Not responding" = "जवाब नहीं दे रहा";
 "Not set" = "सेट नहीं";
+"Not shown on your Mac at all" = "आपके Mac पर बिल्कुल नहीं दिखेगा";
 "Nothing" = "कुछ नहीं";
 "Nothing here" = "यहाँ कुछ नहीं";
 "Nothing in flight" = "कुछ चल नहीं रहा";
@@ -667,9 +669,11 @@
 "Off" = "बंद";
 "Off by default on purpose: a bug on the write path damages files on the phone." = "जानबूझकर डिफ़ॉल्ट रूप से बंद: राइट पाथ में बग होने पर फ़ोन की फ़ाइलें खराब हो सकती हैं।";
 "Off by default on purpose: a bug on this path damages files on your phone, where a bug on the read path only shows a wrong listing. Takes effect the next time you mount." = "जानबूझकर डिफ़ॉल्ट रूप से बंद: इस रास्ते की गड़बड़ी आपके फ़ोन की फ़ाइलें बिगाड़ती है, जबकि पढ़ने वाले रास्ते की गड़बड़ी बस ग़लत सूची दिखाती है। अगली बार माउंट करने पर लागू होगा।";
-"Off keeps an app out of banners; it still appears in the Notifications list. The gear opens that app's options." = "बंद करने पर ऐप बैनर में नहीं आता, पर सूचना सूची में दिखता है। गियर से उसके विकल्प खुलते हैं।";
+"Off everywhere" = "हर जगह बंद";
+"Off hides an app everywhere on your Mac: no banner, nothing in the Notifications list. To keep it in the list without banners, open the gear." = "बंद करने पर ऐप आपके Mac पर हर जगह से छिप जाता है: न बैनर, न नोटिफ़िकेशन सूची में कुछ। बिना बैनर के सूची में रखने के लिए गियर खोलें।";
 "Off pops the phone out into its own window." = "बंद करने पर फ़ोन अलग विंडो में निकल आता है।";
 "Off starts DroidDock quietly in the menu bar." = "बंद होने पर DroidDock चुपचाप मेनू बार में शुरू होता है।";
+"Off – keep in list" = "बंद – सूची में रखें";
 "Offline" = "ऑफ़लाइन";
 "On" = "चालू";
 "On a call" = "कॉल पर";
@@ -1214,7 +1218,9 @@
 "Tries the last wireless address again" = "पिछला वायरलेस पता फिर आज़माता है";
 "Try Again" = "फिर कोशिश करें";
 "Try again" = "फिर कोशिश करें";
-"Turn banners on or off for every app in the list" = "सूची के सभी ऐप्स के बैनर चालू या बंद करें";
+"Turn all off everywhere" = "सभी को हर जगह बंद करें";
+"Turn all on" = "सभी चालू करें";
+"Turn every app in the list on, or off everywhere" = "सूची के सभी ऐप चालू करें, या हर जगह बंद करें";
 "Turn off sync" = "सिंक बंद करें";
 "Turn on DroidDock's accessibility service on your phone to control it from the Mac" = "Mac से फ़ोन को नियंत्रित करने के लिए अपने फ़ोन पर DroidDock की एक्सेसिबिलिटी सेवा चालू करें";
 "Turn on photo sync in Settings to back up automatically" = "अपने-आप बैकअप के लिए सेटिंग्स में फ़ोटो सिंक चालू करें";
@@ -1375,6 +1381,7 @@
 "your phone's files" = "आपके फ़ोन की फ़ाइलें";
 "your photos" = "आपकी फ़ोटो";
 "{app} call" = "{app} कॉल";
+"{app} is off everywhere. Turn it back on in Settings › Notifications." = "{app} हर जगह बंद है। सेटिंग्स › नोटिफ़िकेशन में इसे फिर से चालू करें।";
 "{done} of {total}" = "{total} में से {done}";
 "{done} of {total} photos" = "{total} में से {done} फ़ोटो";
 "{done} received" = "{done} मिले";
@@ -1402,6 +1409,7 @@
 "{n} item" = "{n} आइटम";
 "{n} items" = "{n} आइटम";
 "{n} min ago" = "{n} मि पहले";
+"{n} off" = "{n} बंद";
 "{n} permissions are missing — some features will do nothing until they are granted." = "{n} अनुमतियाँ नहीं दी गई हैं — जब तक वे नहीं मिलतीं, कुछ सुविधाएँ काम नहीं करेंगी।";
 "{n} report" = "{n} रिपोर्ट";
 "{n} reports" = "{n} रिपोर्ट";

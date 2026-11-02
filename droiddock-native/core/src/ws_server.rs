@@ -1362,6 +1362,13 @@ async fn route_text(app: &AppHandle, state: &SharedState, raw: Value, origin: Li
 
         // Notifications: native banner (+ dedupe) and in-app panel list.
         "notification" => {
+            // "Off everywhere" for this app: drop it before the banner, the
+            // menu-bar badge and the in-app list ever see it.
+            if let Some(pkg) = raw.get("pkg").and_then(Value::as_str) {
+                if live_config(app).notif_tier(pkg) == "hidden" {
+                    return;
+                }
+            }
             // wifi.js: onForward('notification', { ...msg, time: msg.when || Date.now() }).
             let mut m = raw.clone();
             if m.get("time").is_none() {

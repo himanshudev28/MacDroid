@@ -13,7 +13,7 @@ final class AppModel {
     private(set) var appVersion = "dev"
 
     // Config / pairing
-    private(set) var config: DroidConfig?
+    private(set) var config: DroidConfig? { didSet { dropHiddenNotifications() } }
     private(set) var pairing: PairingInfo?
 
     // Link
@@ -504,7 +504,22 @@ final class AppModel {
         if notifications.contains(where: { $0.type == "call" }) { setNotifications(notifications.filter { $0.type != "call" }) }
     }
 
+    /// Apps set to "Off everywhere" leave the list (and their delivered banners) as soon as the setting lands.
+    private func dropHiddenNotifications() {
+        guard let config, notifications.contains(where: { $0.type != "call" && NotifTier.current(for: $0.pkg, config: config) == .hidden })
+        else { return }
+        var kept: [PhoneNotification] = []
+        for n in notifications {
+            if n.type != "call", NotifTier.current(for: n.pkg, config: config) == .hidden {
+                NotificationService.shared.remove(id: n.key)
+            } else { kept.append(n) }
+        }
+        setNotifications(kept)
+    }
+
     private func putNotification(_ n: PhoneNotification) {
+        // The core already drops these; this covers a config that lands mid-flight.
+        if n.type != "call", NotifTier.current(for: n.pkg, config: config) == .hidden { return }
         if let p = n.pkg, n.type != "call" { KnownNotifApps.record(pkg: p, name: n.app) }
         var list = notifications
         list.removeAll { $0.key == n.key }

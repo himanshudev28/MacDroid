@@ -50,6 +50,7 @@
 "All apps" = "모든 앱";
 "All caught up" = "모두 확인함";
 "All contacts" = "모든 연락처";
+"All on" = "모두 켜짐";
 "Allow" = "허용";
 "Allow Bluetooth" = "Bluetooth 허용";
 "Allow Bluetooth to finish setting up Wi-Fi fallback" = "Wi-Fi 대체 연결 설정을 마치려면 Bluetooth를 허용하세요";
@@ -643,6 +644,7 @@
 "Not linked — connect your phone first" = "연결되지 않음 — 먼저 휴대폰을 연결하세요";
 "Not responding" = "응답 없음";
 "Not set" = "설정 안 됨";
+"Not shown on your Mac at all" = "Mac에 전혀 표시되지 않음";
 "Nothing" = "없음";
 "Nothing here" = "여기에는 아무것도 없습니다";
 "Nothing in flight" = "진행 중인 항목 없음";
@@ -667,9 +669,11 @@
 "Off" = "꺼짐";
 "Off by default on purpose: a bug on the write path damages files on the phone." = "의도적으로 기본값을 꺼 두었습니다. 쓰기 경로에 버그가 있으면 휴대폰의 파일이 손상될 수 있기 때문입니다.";
 "Off by default on purpose: a bug on this path damages files on your phone, where a bug on the read path only shows a wrong listing. Takes effect the next time you mount." = "일부러 기본값을 끔으로 두었습니다. 쓰기 경로의 버그는 휴대폰의 파일을 손상시키지만, 읽기 경로의 버그는 목록이 잘못 보이는 정도에 그칩니다. 다음에 마운트할 때 적용됩니다.";
-"Off keeps an app out of banners; it still appears in the Notifications list. The gear opens that app's options." = "끄면 배너가 표시되지 않지만 알림 목록에는 남습니다. 톱니바퀴로 앱 옵션을 엽니다.";
+"Off everywhere" = "모든 곳에서 끄기";
+"Off hides an app everywhere on your Mac: no banner, nothing in the Notifications list. To keep it in the list without banners, open the gear." = "끄면 Mac의 모든 곳에서 앱이 숨겨집니다. 배너도 없고 알림 목록에도 표시되지 않습니다. 배너 없이 목록에 두려면 톱니바퀴를 여세요.";
 "Off pops the phone out into its own window." = "끄면 휴대폰이 별도의 창으로 분리됩니다.";
 "Off starts DroidDock quietly in the menu bar." = "끄면 DroidDock이 메뉴 막대에서 조용히 시작됩니다.";
+"Off – keep in list" = "끄기 – 목록에는 유지";
 "Offline" = "오프라인";
 "On" = "켜짐";
 "On a call" = "통화 중";
@@ -1214,7 +1218,9 @@
 "Tries the last wireless address again" = "마지막 무선 주소로 다시 시도합니다";
 "Try Again" = "다시 시도";
 "Try again" = "다시 시도";
-"Turn banners on or off for every app in the list" = "목록의 모든 앱 배너 켜기/끄기";
+"Turn all off everywhere" = "모든 곳에서 모두 끄기";
+"Turn all on" = "모두 켜기";
+"Turn every app in the list on, or off everywhere" = "목록의 모든 앱 켜기 또는 모든 곳에서 끄기";
 "Turn off sync" = "동기화 끄기";
 "Turn on DroidDock's accessibility service on your phone to control it from the Mac" = "Mac에서 휴대전화를 제어하려면 휴대전화에서 DroidDock의 접근성 서비스를 켜세요";
 "Turn on photo sync in Settings to back up automatically" = "자동으로 백업하려면 설정에서 사진 동기화를 켜세요";
@@ -1375,6 +1381,7 @@
 "your phone's files" = "휴대폰의 파일";
 "your photos" = "내 사진";
 "{app} call" = "{app} 통화";
+"{app} is off everywhere. Turn it back on in Settings › Notifications." = "{app}이(가) 모든 곳에서 꺼졌습니다. 설정 › 알림에서 다시 켤 수 있습니다.";
 "{done} of {total}" = "{done}/{total}";
 "{done} of {total} photos" = "사진 {total}장 중 {done}장";
 "{done} received" = "{done} 받음";
@@ -1402,6 +1409,7 @@
 "{n} item" = "항목 {n}개";
 "{n} items" = "항목 {n}개";
 "{n} min ago" = "{n}분 전";
+"{n} off" = "{n}개 꺼짐";
 "{n} permissions are missing — some features will do nothing until they are granted." = "권한 {n}개가 없습니다 — 허용하기 전까지 일부 기능이 동작하지 않습니다.";
 "{n} report" = "보고서 {n}개";
 "{n} reports" = "보고서 {n}개";

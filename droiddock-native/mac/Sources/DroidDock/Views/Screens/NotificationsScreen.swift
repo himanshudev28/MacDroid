@@ -224,7 +224,12 @@ struct NotificationsScreen: View {
             Menu(tr("Notification Level")) {
                 Picker(tr("Notification Level"), selection: Binding(
                     get: { NotifTier.current(for: pkg, config: model.config) },
-                    set: { NotifTier.set($0, for: pkg, config: model.config) })) {
+                    set: { t in
+                        NotifTier.set(t, for: pkg, config: model.config)
+                        if t == .hidden {
+                            model.toast(.info, tr("{app} is off everywhere. Turn it back on in Settings › Notifications.", ["app": app]))
+                        }
+                    })) {
                     ForEach(NotifTier.allCases) { t in Label("\(t.title): \(t.detail)", systemImage: t.symbol).tag(t) }
                 }
                 .pickerStyle(.inline).labelsHidden()

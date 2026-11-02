@@ -131,7 +131,7 @@ pub fn set_setting(app: AppHandle, state: State<AppState>, key: String, value: V
                 cfg.notif_tiers.insert(p, "muted".into());
             }
         }
-        // `{pkg: "alert"|"silent"|"muted"}`. `muted_apps` is kept in step (it is
+        // `{pkg: "alert"|"silent"|"muted"|"hidden"}`. `muted_apps` is kept in step (it is
         // the pre-tiers list); unknown tier values are dropped.
         "notifTiers" => {
             cfg.notif_tiers = value
@@ -140,7 +140,7 @@ pub fn set_setting(app: AppHandle, state: State<AppState>, key: String, value: V
                     o.iter()
                         .filter_map(|(k, v)| {
                             let t = v.as_str()?;
-                            matches!(t, "alert" | "silent" | "muted")
+                            matches!(t, "alert" | "silent" | "muted" | "hidden")
                                 .then(|| (k.clone(), t.to_string()))
                         })
                         .collect()

@@ -68,13 +68,14 @@ func isNumberOnly(_ s: String) -> Bool {
 // MARK: - Notification levels (#15)
 
 enum NotifTier: String, CaseIterable, Identifiable {
-    case alert, silent, muted
+    case alert, silent, muted, hidden
     var id: String { rawValue }
     var title: String {
         switch self {
         case .alert: tr("Alert")
         case .silent: tr("Silent")
         case .muted: tr("Muted")
+        case .hidden: tr("Off everywhere")
         }
     }
     var symbol: String {
@@ -82,6 +83,7 @@ enum NotifTier: String, CaseIterable, Identifiable {
         case .alert: "bell.badge"
         case .silent: "bell"
         case .muted: "bell.slash"
+        case .hidden: "eye.slash"
         }
     }
     var detail: String {
@@ -89,8 +91,12 @@ enum NotifTier: String, CaseIterable, Identifiable {
         case .alert: tr("Banner and sound on your Mac")
         case .silent: tr("Banner without sound")
         case .muted: tr("Only listed here")
+        case .hidden: tr("Not shown on your Mac at all")
         }
     }
+
+    /// True for every level that keeps banners away (the settings switch reads "off").
+    var bannersOff: Bool { self == .muted || self == .hidden }
 
     /// Current level for a package: `notifTiers[pkg]`, else the legacy `mutedApps` list, else Alert.
     @MainActor static func current(for pkg: String?, config: DroidConfig?) -> NotifTier {

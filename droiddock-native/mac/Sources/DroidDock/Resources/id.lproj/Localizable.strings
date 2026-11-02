@@ -50,6 +50,7 @@
 "All apps" = "Semua app";
 "All caught up" = "Semua sudah dilihat";
 "All contacts" = "Semua kontak";
+"All on" = "Semua aktif";
 "Allow" = "Izinkan";
 "Allow Bluetooth" = "Izinkan Bluetooth";
 "Allow Bluetooth to finish setting up Wi-Fi fallback" = "Izinkan Bluetooth untuk menyelesaikan penyiapan cadangan Wi-Fi";
@@ -643,6 +644,7 @@
 "Not linked — connect your phone first" = "Belum terhubung — sambungkan ponsel Anda dulu";
 "Not responding" = "Tidak merespons";
 "Not set" = "Belum diatur";
+"Not shown on your Mac at all" = "Sama sekali tidak ditampilkan di Mac Anda";
 "Nothing" = "Tidak ada";
 "Nothing here" = "Tidak ada apa-apa di sini";
 "Nothing in flight" = "Tidak ada yang berlangsung";
@@ -667,9 +669,11 @@
 "Off" = "Mati";
 "Off by default on purpose: a bug on the write path damages files on the phone." = "Sengaja dinonaktifkan secara default: bug pada jalur tulis dapat merusak berkas di ponsel.";
 "Off by default on purpose: a bug on this path damages files on your phone, where a bug on the read path only shows a wrong listing. Takes effect the next time you mount." = "Sengaja mati secara bawaan: bug di jalur ini bisa merusak berkas di ponsel Anda, sementara bug di jalur baca hanya menampilkan daftar yang keliru. Berlaku saat Anda mengaitkan berikutnya.";
-"Off keeps an app out of banners; it still appears in the Notifications list. The gear opens that app's options." = "Mati menjauhkan app dari banner; tetap muncul di daftar Notifikasi. Roda gigi membuka opsinya.";
+"Off everywhere" = "Mati di mana saja";
+"Off hides an app everywhere on your Mac: no banner, nothing in the Notifications list. To keep it in the list without banners, open the gear." = "Mati menyembunyikan aplikasi di mana saja di Mac Anda: tanpa banner, tidak ada di daftar Notifikasi. Untuk tetap di daftar tanpa banner, buka ikon roda gigi.";
 "Off pops the phone out into its own window." = "Jika mati, ponsel dibuka di jendelanya sendiri.";
 "Off starts DroidDock quietly in the menu bar." = "Mati memulai DroidDock diam-diam di bilah menu.";
+"Off – keep in list" = "Mati – tetap di daftar";
 "Offline" = "Offline";
 "On" = "Aktif";
 "On a call" = "Sedang dalam panggilan";
@@ -1214,7 +1218,9 @@
 "Tries the last wireless address again" = "Mencoba lagi alamat nirkabel terakhir";
 "Try Again" = "Coba Lagi";
 "Try again" = "Coba lagi";
-"Turn banners on or off for every app in the list" = "Aktifkan atau matikan banner untuk semua app dalam daftar";
+"Turn all off everywhere" = "Matikan semua di mana saja";
+"Turn all on" = "Nyalakan semua";
+"Turn every app in the list on, or off everywhere" = "Nyalakan semua aplikasi di daftar, atau matikan di mana saja";
 "Turn off sync" = "Matikan sinkronisasi";
 "Turn on DroidDock's accessibility service on your phone to control it from the Mac" = "Aktifkan layanan aksesibilitas DroidDock di ponsel Anda untuk mengendalikannya dari Mac";
 "Turn on photo sync in Settings to back up automatically" = "Aktifkan sinkronisasi foto di Pengaturan untuk mencadangkan otomatis";
@@ -1375,6 +1381,7 @@
 "your phone's files" = "berkas ponsel Anda";
 "your photos" = "foto Anda";
 "{app} call" = "Panggilan {app}";
+"{app} is off everywhere. Turn it back on in Settings › Notifications." = "{app} dimatikan di mana saja. Nyalakan lagi di Pengaturan › Notifikasi.";
 "{done} of {total}" = "{done} dari {total}";
 "{done} of {total} photos" = "{done} dari {total} foto";
 "{done} received" = "{done} diterima";
@@ -1402,6 +1409,7 @@
 "{n} item" = "{n} item";
 "{n} items" = "{n} item";
 "{n} min ago" = "{n} mnt lalu";
+"{n} off" = "{n} mati";
 "{n} permissions are missing — some features will do nothing until they are granted." = "{n} izin belum diberikan — sebagian fitur tidak akan berfungsi sampai izin-izin itu diberikan.";
 "{n} report" = "{n} laporan";
 "{n} reports" = "{n} laporan";

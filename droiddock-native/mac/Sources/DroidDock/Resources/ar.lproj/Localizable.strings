@@ -50,6 +50,7 @@
 "All apps" = "كل التطبيقات";
 "All caught up" = "لا جديد";
 "All contacts" = "كل جهات الاتصال";
+"All on" = "الكل مفعّل";
 "Allow" = "سماح";
 "Allow Bluetooth" = "السماح بالبلوتوث";
 "Allow Bluetooth to finish setting up Wi-Fi fallback" = "اسمح بالبلوتوث لإكمال إعداد الاحتياطي عبر Wi-Fi";
@@ -643,6 +644,7 @@
 "Not linked — connect your phone first" = "غير مرتبط — وصّل هاتفك أولًا";
 "Not responding" = "لا يستجيب";
 "Not set" = "غير مضبوط";
+"Not shown on your Mac at all" = "لا يظهر على جهاز Mac إطلاقًا";
 "Nothing" = "لا شيء";
 "Nothing here" = "لا شيء هنا";
 "Nothing in flight" = "لا شيء قيد النقل";
@@ -667,9 +669,11 @@
 "Off" = "إيقاف";
 "Off by default on purpose: a bug on the write path damages files on the phone." = "متوقف افتراضيًا عن قصد: أي خطأ في مسار الكتابة قد يتلف ملفات الهاتف.";
 "Off by default on purpose: a bug on this path damages files on your phone, where a bug on the read path only shows a wrong listing. Takes effect the next time you mount." = "الإيقاف الافتراضي مقصود: أي خلل في هذا المسار يتلف ملفات هاتفك، بينما خلل مسار القراءة لا يعرض سوى قائمة خاطئة. ويسري المفعول عند التوصيل التالي.";
-"Off keeps an app out of banners; it still appears in the Notifications list. The gear opens that app's options." = "الإيقاف يُبعد التطبيق عن الأشرطة لكنه يبقى في قائمة الإشعارات. يفتح الترس خيارات التطبيق.";
+"Off everywhere" = "إيقاف في كل مكان";
+"Off hides an app everywhere on your Mac: no banner, nothing in the Notifications list. To keep it in the list without banners, open the gear." = "الإيقاف يخفي التطبيق في كل مكان على جهاز Mac: لا شريط ولا شيء في قائمة الإشعارات. لإبقائه في القائمة دون أشرطة، افتح الترس.";
 "Off pops the phone out into its own window." = "عند الإيقاف يُخرج الهاتف في نافذة مستقلة.";
 "Off starts DroidDock quietly in the menu bar." = "الإيقاف يبدأ DroidDock بهدوء في شريط القائمة.";
+"Off – keep in list" = "إيقاف – إبقاء في القائمة";
 "Offline" = "غير متصل";
 "On" = "تشغيل";
 "On a call" = "في مكالمة";
@@ -1214,7 +1218,9 @@
 "Tries the last wireless address again" = "يعيد المحاولة بآخر عنوان لاسلكي";
 "Try Again" = "حاول مرة أخرى";
 "Try again" = "أعد المحاولة";
-"Turn banners on or off for every app in the list" = "تشغيل أو إيقاف الأشرطة لكل تطبيق في القائمة";
+"Turn all off everywhere" = "إيقاف الكل في كل مكان";
+"Turn all on" = "تشغيل الكل";
+"Turn every app in the list on, or off everywhere" = "تشغيل كل التطبيقات في القائمة، أو إيقافها في كل مكان";
 "Turn off sync" = "إيقاف المزامنة";
 "Turn on DroidDock's accessibility service on your phone to control it from the Mac" = "فعّل خدمة إمكانية الوصول الخاصة بـ DroidDock على هاتفك للتحكم به من جهاز Mac";
 "Turn on photo sync in Settings to back up automatically" = "فعّل مزامنة الصور في الإعدادات للنسخ الاحتياطي تلقائيًا";
@@ -1375,6 +1381,7 @@
 "your phone's files" = "ملفات هاتفك";
 "your photos" = "صورك";
 "{app} call" = "مكالمة {app}";
+"{app} is off everywhere. Turn it back on in Settings › Notifications." = "تم إيقاف {app} في كل مكان. أعد تشغيله من الإعدادات › الإشعارات.";
 "{done} of {total}" = "{done} من {total}";
 "{done} of {total} photos" = "{done} من {total} صورة";
 "{done} received" = "استُلم {done}";
@@ -1402,6 +1409,7 @@
 "{n} item" = "{n} عنصر";
 "{n} items" = "{n} عناصر";
 "{n} min ago" = "قبل {n} د";
+"{n} off" = "{n} متوقف";
 "{n} permissions are missing — some features will do nothing until they are granted." = "{n} صلاحيات مفقودة — لن تعمل بعض الميزات حتى يتم منحها.";
 "{n} report" = "{n} تقرير";
 "{n} reports" = "{n} تقارير";

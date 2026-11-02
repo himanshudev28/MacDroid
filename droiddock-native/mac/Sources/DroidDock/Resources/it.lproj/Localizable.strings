@@ -50,6 +50,7 @@
 "All apps" = "Tutte le app";
 "All caught up" = "Tutto in ordine";
 "All contacts" = "Tutti i contatti";
+"All on" = "Tutte attive";
 "Allow" = "Consenti";
 "Allow Bluetooth" = "Consenti Bluetooth";
 "Allow Bluetooth to finish setting up Wi-Fi fallback" = "Consenti il Bluetooth per completare la configurazione del ripiego Wi-Fi";
@@ -643,6 +644,7 @@
 "Not linked — connect your phone first" = "Non collegato — collega prima il telefono";
 "Not responding" = "Non risponde";
 "Not set" = "Non impostato";
+"Not shown on your Mac at all" = "Non compare affatto sul Mac";
 "Nothing" = "Nessuno";
 "Nothing here" = "Niente qui";
 "Nothing in flight" = "Niente in corso";
@@ -667,9 +669,11 @@
 "Off" = "Disattivato";
 "Off by default on purpose: a bug on the write path damages files on the phone." = "Disattivato di proposito per impostazione predefinita: un bug in scrittura danneggia i file sul telefono.";
 "Off by default on purpose: a bug on this path damages files on your phone, where a bug on the read path only shows a wrong listing. Takes effect the next time you mount." = "Disattivato di default di proposito: un bug su questo percorso danneggia i file sul telefono, mentre un bug in lettura al massimo mostra un elenco sbagliato. Ha effetto al prossimo montaggio.";
-"Off keeps an app out of banners; it still appears in the Notifications list. The gear opens that app's options." = "Disattivato esclude l'app dai banner, ma resta nell'elenco Notifiche. L'ingranaggio apre le sue opzioni.";
+"Off everywhere" = "Disattivate ovunque";
+"Off hides an app everywhere on your Mac: no banner, nothing in the Notifications list. To keep it in the list without banners, open the gear." = "Disattivato nasconde un’app ovunque sul Mac: nessun banner, niente nell’elenco delle notifiche. Per tenerla nell’elenco senza banner, apri l’ingranaggio.";
 "Off pops the phone out into its own window." = "Disattivato: il telefono si apre in una finestra a sé.";
 "Off starts DroidDock quietly in the menu bar." = "Disattivato avvia DroidDock in silenzio nella barra dei menu.";
+"Off – keep in list" = "Disattivate – tieni nell’elenco";
 "Offline" = "Offline";
 "On" = "Attivo";
 "On a call" = "In chiamata";
@@ -1214,7 +1218,9 @@
 "Tries the last wireless address again" = "Riprova l'ultimo indirizzo wireless";
 "Try Again" = "Riprova";
 "Try again" = "Riprova";
-"Turn banners on or off for every app in the list" = "Attiva o disattiva i banner per tutte le app dell'elenco";
+"Turn all off everywhere" = "Disattiva tutte ovunque";
+"Turn all on" = "Attiva tutte";
+"Turn every app in the list on, or off everywhere" = "Attiva tutte le app dell’elenco o disattivale ovunque";
 "Turn off sync" = "Disattiva la sincronizzazione";
 "Turn on DroidDock's accessibility service on your phone to control it from the Mac" = "Attiva il servizio di accessibilità di DroidDock sul telefono per controllarlo dal Mac";
 "Turn on photo sync in Settings to back up automatically" = "Attiva la sincronizzazione foto in Impostazioni per fare il backup automaticamente";
@@ -1375,6 +1381,7 @@
 "your phone's files" = "i file del telefono";
 "your photos" = "le tue foto";
 "{app} call" = "Chiamata {app}";
+"{app} is off everywhere. Turn it back on in Settings › Notifications." = "{app} è disattivata ovunque. Riattivala in Impostazioni › Notifiche.";
 "{done} of {total}" = "{done} di {total}";
 "{done} of {total} photos" = "{done} di {total} foto";
 "{done} received" = "{done} ricevuti";
@@ -1402,6 +1409,7 @@
 "{n} item" = "{n} elemento";
 "{n} items" = "{n} elementi";
 "{n} min ago" = "{n} min fa";
+"{n} off" = "{n} disattivate";
 "{n} permissions are missing — some features will do nothing until they are granted." = "Mancano {n} autorizzazioni — alcune funzioni non faranno nulla finché non vengono concesse.";
 "{n} report" = "{n} rapporto";
 "{n} reports" = "{n} rapporti";
