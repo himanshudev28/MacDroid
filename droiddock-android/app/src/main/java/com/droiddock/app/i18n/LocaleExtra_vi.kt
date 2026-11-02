@@ -169,6 +169,7 @@ internal val extra_vi: Map<String, String> = mapOf(
     "Slow and gentle" to "Chậm và nhẹ nhàng",
     "Springy and playful" to "Nảy và vui nhộn",
     "Standard" to "Chuẩn",
+    "Stop searching" to "Dừng tìm kiếm",
     "Stream your phone camera over local Wi-Fi — use it as a webcam on your Mac. Start from Mac's 'Camera' tab." to "Truyền camera điện thoại qua Wi-Fi cục bộ để dùng làm webcam trên Mac. Bắt đầu từ tab 'Camera' của Mac.",
     "Stream your screen over local Wi-Fi. No USB or Developer Options needed. Start from Mac's 'Screen Mirror' tab." to "Truyền màn hình qua Wi-Fi cục bộ. Không cần USB hay Tùy chọn nhà phát triển. Bắt đầu từ tab 'Phản chiếu màn hình' của Mac.",
     "Strong" to "Mạnh",

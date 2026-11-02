@@ -169,6 +169,7 @@ internal val extra_id: Map<String, String> = mapOf(
     "Slow and gentle" to "Lambat dan lembut",
     "Springy and playful" to "Lentur dan ceria",
     "Standard" to "Standar",
+    "Stop searching" to "Berhenti mencari",
     "Stream your phone camera over local Wi-Fi — use it as a webcam on your Mac. Start from Mac's 'Camera' tab." to "Streaming kamera ponsel lewat Wi-Fi lokal, gunakan sebagai webcam di Mac Anda. Mulai dari tab 'Kamera' di Mac.",
     "Stream your screen over local Wi-Fi. No USB or Developer Options needed. Start from Mac's 'Screen Mirror' tab." to "Streaming layar Anda lewat Wi-Fi lokal. Tanpa USB atau Opsi Pengembang. Mulai dari tab 'Cermin Layar' di Mac.",
     "Strong" to "Kuat",

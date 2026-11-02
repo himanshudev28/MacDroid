@@ -169,6 +169,7 @@ internal val extra_ko: Map<String, String> = mapOf(
     "Slow and gentle" to "느리고 부드럽게",
     "Springy and playful" to "탄력 있고 경쾌하게",
     "Standard" to "표준",
+    "Stop searching" to "검색 중지",
     "Stream your phone camera over local Wi-Fi — use it as a webcam on your Mac. Start from Mac's 'Camera' tab." to "휴대전화 카메라를 로컬 Wi-Fi로 스트리밍하여 Mac의 웹캠으로 사용하세요. Mac의 '카메라' 탭에서 시작하세요.",
     "Stream your screen over local Wi-Fi. No USB or Developer Options needed. Start from Mac's 'Screen Mirror' tab." to "화면을 로컬 Wi-Fi로 스트리밍합니다. USB나 개발자 옵션이 필요 없습니다. Mac의 '화면 미러링' 탭에서 시작하세요.",
     "Strong" to "강하게",

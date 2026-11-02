@@ -139,6 +139,7 @@ internal fun HomeTab(
                 secure = secure, identityChanged = identityChanged, securityProblem = securityProblem,
                 onPause = onPause, onResume = onResume,
                 onQuickConnect = onQuickConnect, onGoConnect = onGoToConnect, onGoToFiles = onGoToFiles,
+                onStopSearching = onDisconnect,
             ) }
         }
 
@@ -214,6 +215,8 @@ internal fun ConnectionHeroCard(
     secure: Boolean? = null,
     identityChanged: Boolean = false,
     securityProblem: LinkSecurity.Problem? = null,
+    /** Stops the Wi-Fi + Bluetooth search until the user resumes (same as the tile's Disconnect). */
+    onStopSearching: (() -> Unit)? = null,
 ) {
     // Radar only for the first 30 s of a search; after that a calm "offline" (no endless loop).
     var searchSettled by remember(connected, paired, disconnected) { mutableStateOf(false) }
@@ -272,8 +275,19 @@ internal fun ConnectionHeroCard(
         primaryLabel = primaryLabel,
         primaryIcon = primaryIcon,
         onPrimary = onPrimary,
-        secondaryLabel = if (connected && !isPaused) t("Pause") else null,
-        onSecondary = if (connected && !isPaused) onPause else null,
+        // While searching there must be a way out: without it the phone looks for the Mac forever.
+        secondaryLabel = when {
+            isPaused -> null
+            connected -> t("Pause")
+            paired && onStopSearching != null -> t("Stop searching")
+            else -> null
+        },
+        onSecondary = when {
+            isPaused -> null
+            connected -> onPause
+            paired -> onStopSearching
+            else -> null
+        },
     )
 }
 

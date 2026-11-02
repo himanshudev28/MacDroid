@@ -457,6 +457,7 @@ internal fun DroidDockScreen(
                 onPause = { showPause = true },
                 onResume = { ConnectionManager.resume(ctx) },
                 onQuickConnect = { ConnectionManager.quickConnect(ctx) },
+                onStopSearching = { ConnectionManager.disconnect(ctx) },
                 onGoToConnect = { currentTab = "connect" },
                 onNavigate = { currentTab = it },
                 settingsBadge = newRelease != null,
@@ -660,6 +661,7 @@ private fun HubDest(
     onPause: () -> Unit,
     onResume: () -> Unit,
     onQuickConnect: () -> Unit,
+    onStopSearching: () -> Unit,
     onGoToConnect: () -> Unit,
     onNavigate: (String) -> Unit,
     settingsBadge: Boolean,
@@ -680,7 +682,8 @@ private fun HubDest(
         HeroState.UNPAIRED -> Triple(t("Pair a Mac"), Icons.Rounded.Add, onGoToConnect)
         HeroState.PAUSED -> Triple(t("Resume"), Icons.Rounded.PlayArrow, onResume)
         HeroState.CONNECTED -> Triple(t("Pause"), Icons.Rounded.Pause, onPause)
-        else -> Triple(t("Connect"), Icons.Rounded.Link, onQuickConnect)
+        // Not connected and not paused = the phone is searching: offer the way to stop it.
+        else -> Triple(t("Stop searching"), Icons.Rounded.Pause, onStopSearching)
     }
     val hero = HeroModel(
         title = macName ?: t("DroidDock"), status = status, state = state,

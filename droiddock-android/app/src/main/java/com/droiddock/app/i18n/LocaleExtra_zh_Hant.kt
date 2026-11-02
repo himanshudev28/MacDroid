@@ -169,6 +169,7 @@ internal val extra_zh_Hant: Map<String, String> = mapOf(
     "Slow and gentle" to "緩慢柔和",
     "Springy and playful" to "彈性十足，活潑靈動",
     "Standard" to "標準",
+    "Stop searching" to "停止搜尋",
     "Stream your phone camera over local Wi-Fi — use it as a webcam on your Mac. Start from Mac's 'Camera' tab." to "透過本機 Wi-Fi 串流手機相機，在 Mac 上用作網路攝影機。請從 Mac 的「相機」分頁開始。",
     "Stream your screen over local Wi-Fi. No USB or Developer Options needed. Start from Mac's 'Screen Mirror' tab." to "透過本機 Wi-Fi 串流螢幕。不需要 USB 或開發人員選項。請從 Mac 的「螢幕鏡像」分頁開始。",
     "Strong" to "強",

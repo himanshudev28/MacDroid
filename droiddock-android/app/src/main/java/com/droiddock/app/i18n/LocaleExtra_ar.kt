@@ -169,6 +169,7 @@ internal val extra_ar: Map<String, String> = mapOf(
     "Slow and gentle" to "بطيء ولطيف",
     "Springy and playful" to "مرن وممتع",
     "Standard" to "قياسي",
+    "Stop searching" to "إيقاف البحث",
     "Stream your phone camera over local Wi-Fi — use it as a webcam on your Mac. Start from Mac's 'Camera' tab." to "أرسل كاميرا هاتفك عبر Wi-Fi المحلي لاستخدامها ككاميرا ويب على الـ Mac. ابدأ من علامة تبويب \"الكاميرا\" في Mac.",
     "Stream your screen over local Wi-Fi. No USB or Developer Options needed. Start from Mac's 'Screen Mirror' tab." to "بُثّ شاشتك عبر Wi-Fi المحلي. بدون USB أو خيارات المطور. ابدأ من علامة تبويب \"مرآة الشاشة\" في Mac.",
     "Strong" to "قوي",

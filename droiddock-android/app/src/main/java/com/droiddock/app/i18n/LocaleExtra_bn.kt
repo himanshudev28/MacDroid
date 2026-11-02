@@ -169,6 +169,7 @@ internal val extra_bn: Map<String, String> = mapOf(
     "Slow and gentle" to "ধীর ও কোমল",
     "Springy and playful" to "নমনীয় ও মজাদার",
     "Standard" to "স্ট্যান্ডার্ড",
+    "Stop searching" to "খোঁজা বন্ধ করুন",
     "Stream your phone camera over local Wi-Fi — use it as a webcam on your Mac. Start from Mac's 'Camera' tab." to "লোকাল Wi-Fi-এ আপনার ফোনের ক্যামেরা স্ট্রিম করুন এবং Mac-এ ওয়েবক্যাম হিসেবে ব্যবহার করুন। Mac-এর 'ক্যামেরা' ট্যাব থেকে শুরু করুন।",
     "Stream your screen over local Wi-Fi. No USB or Developer Options needed. Start from Mac's 'Screen Mirror' tab." to "লোকাল Wi-Fi-এ আপনার স্ক্রিন স্ট্রিম করুন। USB বা ডেভেলপার অপশন লাগে না। Mac-এর 'স্ক্রিন মিরর' ট্যাব থেকে শুরু করুন।",
     "Strong" to "জোরালো",
