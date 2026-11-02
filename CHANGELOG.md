@@ -8,6 +8,17 @@ to a generic body.
 
 ---
 
+## v3.5.1
+
+- **Mac: turn an app off everywhere.** In Settings › Notifications, switching an app off now
+  hides it completely: no banner and nothing in the Notifications list. To keep an app in the
+  list without banners, open its gear and pick "Off – keep in list".
+- **Mac: the "All apps" control is clearer.** It shows how many apps are off ("All on", "2 off")
+  and a menu turns every app on, or off everywhere. Before, one app being off made it look as if
+  all were off.
+- **Android: stop searching for your Mac.** While the app looks for your Mac, Home now has a
+  "Stop searching" button. It stops Wi-Fi and Bluetooth reconnects until you tap Resume.
+
 ## v3.5.0
 
 Encrypted Wi-Fi link, a command bar, updates that install themselves, and an app identity
