@@ -537,6 +537,9 @@ final class AppModel {
         switch ev.name {
         case "config":
             if let c = decode(DroidConfig.self, ev) { set(\.config, c) }
+        case "pairing-changed":
+            // The Mac's LAN addresses changed: re-read them for the QR and address rows.
+            Task { await refreshPairing() }
         case "wifi-status":
             guard let s = decode(WifiStatus.self, ev) else { return }
             let wasConnected = wifi.connected

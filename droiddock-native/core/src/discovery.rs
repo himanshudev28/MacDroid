@@ -6,27 +6,29 @@ use tokio::net::UdpSocket;
 /// we reply `DROIDDOCK:HERE` so it learns our current IP without re-pairing.
 /// Byte-for-byte match to wifi.js — see CLAUDE.md's compatibility mandate.
 pub async fn run(app: AppHandle, discovery_port: u16) {
-    let mut socket = None;
-    for _ in 0..10 {
+    // Keep retrying forever (backoff up to 30 s): an old process may still
+    // hold the port after a relaunch. Log once.
+    let mut delay = std::time::Duration::from_millis(500);
+    let mut logged = false;
+    let socket = loop {
         match UdpSocket::bind(("0.0.0.0", discovery_port)).await {
-            Ok(s) => {
-                socket = Some(s);
-                break;
+            Ok(s) => break s,
+            Err(_) => {
+                if !logged {
+                    eprintln!("discovery: 0.0.0.0:{discovery_port} busy, retrying in the background");
+                    logged = true;
+                }
+                tokio::time::sleep(delay).await;
+                delay = (delay * 2).min(std::time::Duration::from_secs(30));
             }
-            Err(_) => tokio::time::sleep(std::time::Duration::from_millis(500)).await,
-        }
-    }
-    let socket = match socket {
-        Some(s) => s,
-        None => {
-            eprintln!("discovery: failed to bind 0.0.0.0:{discovery_port}");
-            return;
         }
     };
 
     let mut buf = [0u8; 256];
     loop {
         let Ok((len, addr)) = socket.recv_from(&mut buf).await else {
+            // Don't spin hot if the socket is persistently erroring.
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             continue;
         };
         let Ok(text) = std::str::from_utf8(&buf[..len]) else {

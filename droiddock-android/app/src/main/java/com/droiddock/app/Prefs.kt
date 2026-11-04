@@ -236,6 +236,15 @@ object Prefs {
         writeDevices(ctx, applySeen(knownDevices(ctx), token, workingIp, macName, System.currentTimeMillis()))
     }
 
+    /** Put [ip] first in the ACTIVE pairing's stored addresses, if [token] is the
+     *  active one. Touches only `ips`, so name, port and pin are never clobbered. */
+    fun promoteActiveIp(ctx: Context, token: String, ip: String) {
+        val sp = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+        if (sp.getString("token", null) != token) return
+        val cur = (sp.getString("ips", "") ?: "").split(",").filter { it.isNotBlank() }
+        sp.edit().putString("ips", trimAddresses(listOf(ip) + cur, 4).joinToString(",")).apply()
+    }
+
     /** Store the Mac's TLS pin (from a verified `tls-pin` message). */
     /** Returns true only if the pin was actually stored (known device, no pin yet, list readable). */
     fun setPin(ctx: Context, token: String, fp: String): Boolean {

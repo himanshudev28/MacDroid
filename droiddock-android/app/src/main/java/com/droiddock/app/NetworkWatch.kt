@@ -54,6 +54,8 @@ object NetworkWatch {
     )
 
     @Volatile private var started = false
+    /** The current default network, so a late onLost for an old one is ignored. */
+    @Volatile private var current: Network? = null
 
     fun start(ctx: Context) {
         if (started) return
@@ -62,6 +64,7 @@ object NetworkWatch {
             .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
+                current = network
                 _online.value = true
                 // The single most valuable wake-up there is: Wi-Fi just came
                 // back, which usually means the Mac is reachable again.
@@ -81,10 +84,16 @@ object NetworkWatch {
                 _online.value = true
             }
 
+            override fun onLinkPropertiesChanged(network: Network, lp: android.net.LinkProperties) {
+                poke()
+            }
+
             override fun onLost(network: Network) {
+                if (current != null && network != current) return
                 // Only the *default* network is watched, so losing it means
                 // there is nothing to reach the Mac over. A replacement arrives
                 // as its own onAvailable.
+                current = null
                 _online.value = false
             }
         }
@@ -107,9 +116,17 @@ object NetworkWatch {
         online.first { it }
     }
 
-    /** Sleep up to [ms], returning early if the network changed underneath us. */
-    suspend fun sleepOrWake(ms: Long) {
-        if (ms <= 0) return
-        withTimeoutOrNull(ms) { wake.first() }
+    /** Park until online, or until [lanUp] says a LAN interface (hotspot/tether)
+     *  appeared. Interfaces raise no callback here, so re-check once a minute. */
+    suspend fun awaitOnlineOrLan(lanUp: () -> Boolean) {
+        while (!online.value && !lanUp()) {
+            withTimeoutOrNull(60_000) { online.first { it } }
+        }
+    }
+
+    /** Sleep up to [ms]; true if woken early because the network changed. */
+    suspend fun sleepOrWake(ms: Long): Boolean {
+        if (ms <= 0) return false
+        return withTimeoutOrNull(ms) { wake.first(); true } ?: false
     }
 }

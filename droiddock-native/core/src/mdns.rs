@@ -97,12 +97,14 @@ pub async fn run(app: AppHandle, port: u16) {
         let iface = app.state::<crate::AppState>().config.lock().unwrap().server_iface.clone();
         let ips = selected_ipv4s(&iface);
 
-        if ips != advertised {
+        if !same_set(&ips, &advertised) {
             // The LAN changed under us (not the first pass): any adb reconnect
             // back-off was earned on the old network.
             if !advertised.is_empty() {
                 crate::pacing::poke_reconnect();
             }
+            // Tell the UI so the pairing QR / address row follow the new LAN.
+            let _ = app.emit("pairing-changed", serde_json::json!({}));
             if let Some(old) = fullname.take() {
                 let _ = daemon.unregister(&old);
                 if let Some(advert) = ADVERT.lock().unwrap().as_mut() {
@@ -194,7 +196,7 @@ pub fn selected_ipv4s(iface: &str) -> Vec<IpAddr> {
         ips.sort();
         ips.dedup();
         if !ips.is_empty() {
-            return ips;
+            return primary_first(ips);
         }
     }
     lan_ipv4s()
@@ -214,7 +216,41 @@ pub(crate) fn lan_ipv4s() -> Vec<IpAddr> {
     // order the OS happened to enumerate interfaces in this time.
     ips.sort();
     ips.dedup();
+    primary_first(ips)
+}
+
+/// The source address the OS would use to reach the internet/default route.
+/// A UDP connect sends nothing; it only picks a route.
+fn primary_ipv4() -> Option<IpAddr> {
+    let sock = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    sock.connect("203.0.113.1:9").ok()?;
+    let ip = sock.local_addr().ok()?.ip();
+    (!ip.is_unspecified() && !ip.is_loopback()).then_some(ip)
+}
+
+/// Move `primary` to the front; nothing is dropped. Fixes a stale address
+/// (old DHCP lease still on the interface) being listed before the live one.
+fn order_with_primary(mut ips: Vec<IpAddr>, primary: Option<IpAddr>) -> Vec<IpAddr> {
+    if let Some(p) = primary {
+        if let Some(pos) = ips.iter().position(|i| *i == p) {
+            let ip = ips.remove(pos);
+            ips.insert(0, ip);
+        }
+    }
     ips
+}
+
+fn primary_first(ips: Vec<IpAddr>) -> Vec<IpAddr> {
+    order_with_primary(ips, primary_ipv4())
+}
+
+/// Compare as sets: order may change without the network changing.
+fn same_set(a: &[IpAddr], b: &[IpAddr]) -> bool {
+    let mut a = a.to_vec();
+    let mut b = b.to_vec();
+    a.sort();
+    b.sort();
+    a == b
 }
 
 /// DNS labels allow letters, digits and hyphens — a device name like
@@ -234,7 +270,27 @@ fn sanitize_host(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_host;
+    use super::{order_with_primary, same_set, sanitize_host};
+    use std::net::IpAddr;
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn primary_goes_first_and_nothing_is_dropped() {
+        let ips = vec![ip("10.131.164.254"), ip("192.168.31.50")];
+        let out = order_with_primary(ips.clone(), Some(ip("192.168.31.50")));
+        assert_eq!(out, vec![ip("192.168.31.50"), ip("10.131.164.254")]);
+        assert_eq!(order_with_primary(ips.clone(), Some(ip("10.0.0.9"))), ips);
+        assert_eq!(order_with_primary(ips.clone(), None), ips);
+    }
+
+    #[test]
+    fn set_compare_ignores_order() {
+        assert!(same_set(&[ip("1.1.1.1"), ip("2.2.2.2")], &[ip("2.2.2.2"), ip("1.1.1.1")]));
+        assert!(!same_set(&[ip("1.1.1.1")], &[ip("2.2.2.2")]));
+    }
 
     #[test]
     fn host_labels_are_dns_legal() {

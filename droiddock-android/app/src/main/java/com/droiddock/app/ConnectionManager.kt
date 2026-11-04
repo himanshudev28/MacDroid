@@ -24,6 +24,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -322,6 +325,13 @@ object ConnectionManager {
     /** Drop [token] from the address book, keeping the flow in step. */
     fun forget(ctx: Context, token: String) {
         appCtx = ctx.applicationContext
+        if (Prefs.load(appCtx)?.token == token) {
+            // The active Mac: clearing only the book would let the legacy keys re-add it unpinned.
+            Prefs.clear(appCtx)
+            knownDevices.value = Prefs.knownDevices(appCtx)
+            shutdown()
+            return
+        }
         Prefs.forgetDevice(appCtx, token)
         knownDevices.value = Prefs.knownDevices(appCtx)
     }
@@ -358,8 +368,7 @@ object ConnectionManager {
      *  makes a discovered Mac actually connectable. Matched on address rather
      *  than name because the name is cosmetic and the address is what changed. */
     fun knownFor(mac: DiscoveredMac): KnownDevice? =
-        knownDevices.value.firstOrNull { it.ips.contains(mac.ip) && it.port == mac.port }
-            ?: knownDevices.value.firstOrNull { it.macName.equals(mac.name, ignoreCase = true) }
+        matchKnown(knownDevices.value, mac.ips, mac.port, mac.name)
 
     /** Point the active pairing at a freshly-discovered address for a Mac we
      *  already hold a token for — the "it changed IP" recovery. */
@@ -367,7 +376,7 @@ object ConnectionManager {
         onPaired(
             ctx,
             known.toPairing().copy(
-                ips = listOf(mac.ip) + known.ips.filter { it != mac.ip },
+                ips = trimAddresses(mac.ips + known.ips, 4),
                 port = mac.port,
             )
         )
@@ -388,7 +397,7 @@ object ConnectionManager {
         LinkSecurity.clearProblems()
         loopJob?.cancel()
         loopJob = null
-        runCatching { ws?.close(1000, "unpaired") }
+        ws?.let { s -> runCatching { s.close(1000, "unpaired") }; cleanup(s) }
         ws = null
         wsLink = null
         runCatching { bleLink?.close() }
@@ -411,7 +420,7 @@ object ConnectionManager {
         pausedUntil.value = until
         // best-effort: tell the Mac to stop its mDNS/reconnect attempts, then drop the link
         runCatching { currentPrimary()?.sendJson(JSONObject().put("type", "pause").put("until", until)) }
-        runCatching { ws?.close(1000, "paused") }
+        ws?.let { s -> runCatching { s.close(1000, "paused") }; cleanup(s) }
         ws = null
         wsLink = null
         runCatching { bleLink?.close() }
@@ -478,10 +487,12 @@ object ConnectionManager {
             // one is the single most expensive thing this app used to do:
             // four TCP dials, a UDP broadcast and a live mDNS browse, on a
             // 15s ceiling, all night, in airplane mode. Park instead.
-            if (!NetworkWatch.online.value) {
+            // A hotspot or USB-tether phone with mobile data off has no default
+            // network, yet the Mac is reachable on the tether interface.
+            if (!NetworkWatch.online.value && !LanAddrs.hasPrivateLan()) {
                 refreshState()
                 lastEvent.value = "waiting for a network"
-                NetworkWatch.awaitOnline()
+                NetworkWatch.awaitOnlineOrLan { LanAddrs.hasPrivateLan() }
                 // A fresh network deserves a fresh, fast retry.
                 backoff = 2_000L
             }
@@ -491,6 +502,8 @@ object ConnectionManager {
             var tried = 0
             var mismatched = 0
             suspend fun tryIp(addr: String): Boolean {
+                // A cancelled loop (re-pair, forget) must not dial the old pairing.
+                currentCoroutineContext().ensureActive()
                 val ok = attempt(addr, pairing)
                 tried++
                 if (!ok && lastAttemptMismatch) mismatched++
@@ -503,7 +516,21 @@ object ConnectionManager {
             // probes even start, which is most of why a reconnect could take
             // half a minute. A parallel TCP knock finds who is actually home
             // in about one timeout, and only that address gets a real session.
+            // Addresses already dialed this round; discovery only adds new ones.
+            val triedThisRound = mutableSetOf<String>()
+            suspend fun tryNew(addrs: List<String>, note: String): Boolean {
+                for (addr in notTriedYet(addrs, triedThisRound)) {
+                    triedThisRound += addr
+                    lastEvent.value = "found Mac at $addr$note"
+                    // The working address is persisted at welcome (onWsWelcome).
+                    if (tryIp(addr)) {
+                        return true
+                    }
+                }
+                return false
+            }
             for (ip in reachableFirst(pairing)) {
+                triedThisRound += ip
                 if (tryIp(ip)) {
                     linked = true
                     break
@@ -512,51 +539,21 @@ object ConnectionManager {
             // A tls-pin may have been stored on a socket that never got a welcome (Mac refused plain):
             // reconnect over wss right now instead of probing/backing off.
             if (tlsUpgradeNow.getAndSet(false)) { backoff = 2_000L; continue }
-            // "Expand networking": both probes below are link-local — the UDP
-            // broadcast never leaves the subnet and mDNS multicast doesn't
-            // traverse a tailnet — so off-LAN they can only ever burn ~4.5s per
-            // round before failing. Skipping them makes retrying the stored
-            // Tailscale address the whole loop, which is the point.
+            // "Expand networking": both probes below are link-local, so off-LAN
+            // they only burn time. Skipping them makes retrying the stored
+            // Tailscale address the whole loop.
             val lanOnlyProbes = !Prefs.expandNetworking(appCtx)
 
             // Known IPs failed — broadcast on the LAN to find the Mac's current IP.
-            // Handles WiFi-switch without re-pairing: both devices on new network,
-            // Mac answers the broadcast, phone saves the fresh IP.
-            var broadcastIp: String? = null
             if (!linked && lanOnlyProbes) {
-                broadcastIp = discoverViaBroadcast(pairing.token, pairing.port + 1)
-                if (broadcastIp != null && !pairing.ips.contains(broadcastIp)) {
-                    lastEvent.value = "found Mac at $broadcastIp"
-                    if (tryIp(broadcastIp)) {
-                        linked = true
-                        Prefs.save(
-                            appCtx,
-                            pairing.copy(
-                                ips = trimAddresses(listOf(broadcastIp) + pairing.ips, 4)
-                            )
-                        )
-                    }
-                }
+                val b = discoverViaBroadcast(pairing.token, pairing.port + 1)
+                if (b != null && tryNew(listOf(b), "")) linked = true
             }
-            // Tier C: last resort. Some routers drop directed broadcast or
-            // isolate clients, so the probe above never gets an answer even
-            // though the Mac is right there — multicast usually still works.
-            // Auth is unchanged: this only supplies an address to try. Skip any
-            // address the two paths above already exhausted this round.
+            // Tier C: mDNS, for networks that drop broadcast. Supplies addresses
+            // only; auth is unchanged. The Mac may resolve to several (a stale
+            // one plus the live one), so every new one is tried.
             if (!linked && lanOnlyProbes) {
-                val viaMdns = MdnsDiscovery.find(appCtx)
-                if (viaMdns != null && viaMdns != broadcastIp && !pairing.ips.contains(viaMdns)) {
-                    lastEvent.value = "found Mac at $viaMdns (mDNS)"
-                    if (tryIp(viaMdns)) {
-                        linked = true
-                        Prefs.save(
-                            appCtx,
-                            pairing.copy(
-                                ips = trimAddresses(listOf(viaMdns) + pairing.ips, 4)
-                            )
-                        )
-                    }
-                }
+                if (tryNew(MdnsDiscovery.find(appCtx, pairing.macName), " (mDNS)")) linked = true
             }
             if (!linked) {
                 // One full round (knock, broadcast, mDNS) found nothing: the fallback may now start advertising.
@@ -570,7 +567,7 @@ object ConnectionManager {
             // becomes reachable again, and waiting out the rest of a 15s
             // backoff to discover that is the difference between a reconnect
             // that feels instant and one that feels broken.
-            NetworkWatch.sleepOrWake(backoff)
+            if (NetworkWatch.sleepOrWake(backoff)) backoff = 2_000L
         }
     }
 
@@ -589,7 +586,7 @@ object ConnectionManager {
      * permanently unreachable because of it.
      */
     private suspend fun reachableFirst(pairing: Pairing): List<String> {
-        val ips = pairing.ips
+        val ips = orderBySubnet(pairing.ips, LanAddrs.localSubnets())
         if (ips.size < 2) return ips
         val alive = coroutineScope {
             ips.map { ip ->
@@ -608,6 +605,7 @@ object ConnectionManager {
             }.awaitAll()
         }
         val (up, down) = alive.partition { it.second }
+        // alive keeps the subnet order, so same-subnet stays ahead within each group.
         return up.map { it.first } + down.map { it.first }
     }
 
@@ -615,6 +613,8 @@ object ConnectionManager {
     private suspend fun attempt(ip: String, pairing: Pairing): Boolean {
         val closed = CompletableDeferred<Unit>()
         var didConnect = false
+        // Per-attempt, so a late failure from an older socket can't touch it.
+        val mismatch = java.util.concurrent.atomic.AtomicBoolean(false)
         lastEvent.value = "connecting to $ip…"
 
         // A pinned Mac is reached over wss:// with its key pinned, and never over ws://.
@@ -688,7 +688,7 @@ object ConnectionManager {
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 // Wrong key from a pinned Mac: say so, and keep to TLS (the next attempt is wss:// again).
                 if (LinkTls.isPinMismatch(t)) {
-                    lastAttemptMismatch = true
+                    mismatch.set(true)
                     lastEvent.value = LinkTls.IDENTITY_CHANGED
                 } else if (overTls && LinkTls.looksLikeNonTlsServer(t)) {
                     // Best-effort: a pinned Mac that answers TLS with plain bytes.
@@ -734,6 +734,7 @@ object ConnectionManager {
         } finally {
             socket.cancel()
         }
+        lastAttemptMismatch = mismatch.get()
         return didConnect
     }
 
@@ -1498,6 +1499,7 @@ object ConnectionManager {
         lastEvent.value = "linked"
         refreshState()
         runCatching {
+            Prefs.promoteActiveIp(appCtx, pairing.token, ip)
             Prefs.markSeen(appCtx, pairing.token, ip, macName.value)
             knownDevices.value = Prefs.knownDevices(appCtx)
         }
@@ -1811,29 +1813,31 @@ object ConnectionManager {
         }
     }
 
-    /** Broadcast on 255.255.255.255:<discoveryPort> with the pairing token.
-     *  The Mac replies with "DROIDDOCK:HERE" from its current IP — we return that IP.
-     *  Returns null if nothing replies within 1.5 s (Mac not on this network). */
-    private fun discoverViaBroadcast(token: String, discoveryPort: Int): String? = try {
-        java.net.DatagramSocket().use { socket ->
+    /** Broadcast the pairing token to 255.255.255.255 and to each local
+     *  interface's directed broadcast (the global one follows the default route,
+     *  which on a hotspot phone is cellular and never reaches the tethered Mac).
+     *  The Mac replies "DROIDDOCK:HERE" from its IP; we return that IP, or null
+     *  if nothing replies within 1.5 s. */
+    private suspend fun discoverViaBroadcast(token: String, discoveryPort: Int): String? = try {
+        withContext(Dispatchers.IO) { java.net.DatagramSocket().use { socket ->
             socket.broadcast = true
             socket.soTimeout = 1500
             val payload = "DROIDDOCK:DISCOVER:$token".toByteArray()
-            socket.send(
-                java.net.DatagramPacket(
-                    payload, payload.size,
-                    java.net.InetAddress.getByName("255.255.255.255"),
-                    discoveryPort
-                )
-            )
+            val targets = listOf(java.net.InetAddress.getByName("255.255.255.255")) +
+                LanAddrs.broadcastAddresses()
+            for (t in targets) {
+                runCatching {
+                    socket.send(java.net.DatagramPacket(payload, payload.size, t, discoveryPort))
+                }
+            }
             val buf = ByteArray(64)
             val resp = java.net.DatagramPacket(buf, buf.size)
             socket.receive(resp)
             if (String(resp.data, 0, resp.length).trim() == "DROIDDOCK:HERE")
                 resp.address.hostAddress
             else null
-        }
-    } catch (_: Exception) { null }
+        } }
+    } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
 
     /** The name sent in `hello` — the user's own if they set one, else the
      *  hardware name every previous build sent. */

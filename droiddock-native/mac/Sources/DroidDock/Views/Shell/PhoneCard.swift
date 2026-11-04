@@ -26,6 +26,7 @@ struct PhoneCard: View {
             .popover(isPresented: $showDetails, arrowEdge: .bottom) { ConnectionDetails() }
         if case .pairing = cardModel.state {
             LockedQRView { card }
+                .task { await model.refreshPairing() }
         } else {
             card
         }

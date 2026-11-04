@@ -29,16 +29,18 @@ data class DiscoveredMac(
     val port: Int,
     /** How it was found, shown as a tag in the UI. */
     val via: String = "mDNS",
+    /** Every IPv4 the service resolved to, same-subnet first. [ip] is the head. */
+    val ips: List<String> = listOf(ip),
 )
 
 object MdnsDiscovery {
     private const val SERVICE_TYPE = "_droiddock._tcp."
 
-    /** First reachable IPv4 advertised on this LAN, or null within [timeoutMs].
-     *  Returns as soon as one resolves — this is on the reconnect path, so it
-     *  must not sit out the full timeout when the answer arrived immediately. */
-    suspend fun find(ctx: Context, timeoutMs: Long = 3_000): String? =
-        sweep(ctx, timeoutMs, stopOnFirst = true).firstOrNull()?.ip
+    /** Every IPv4 the first-answering Mac advertised (same-subnet first), empty
+     *  within [timeoutMs] if none. Returns shortly after the first answer — this
+     *  is on the reconnect path, so it must not sit out the full timeout. */
+    suspend fun find(ctx: Context, preferName: String? = null, timeoutMs: Long = 3_000): List<String> =
+        candidateAddresses(sweep(ctx, timeoutMs, stopOnFirst = true, preferName = preferName), preferName)
 
     /**
      * Every Mac advertising on this LAN, for the "Available Devices" list.
@@ -57,9 +59,11 @@ object MdnsDiscovery {
         ctx: Context,
         timeoutMs: Long,
         stopOnFirst: Boolean,
+        preferName: String? = null,
     ): List<DiscoveredMac> {
         val nsd = ctx.getSystemService(Context.NSD_SERVICE) as? NsdManager ?: return emptyList()
         val found = CompletableDeferred<String?>()
+        // Keyed by service name: one Mac can resolve to several addresses.
         val seen = java.util.concurrent.ConcurrentHashMap<String, DiscoveredMac>()
         val firstResolved = java.util.concurrent.atomic.AtomicReference<String?>(null)
 
@@ -84,9 +88,10 @@ object MdnsDiscovery {
                 // A browse result carries no address — it has to be resolved.
                 resolve(nsd, service, infoCallbacks) { resolved ->
                     if (resolved != null) {
-                        seen[resolved.ip] = resolved
-                        firstResolved.compareAndSet(null, resolved.ip)
-                        if (stopOnFirst) found.complete(resolved.ip)
+                        seen[resolved.name] = resolved
+                        firstResolved.compareAndSet(null, resolved.name)
+                        if (stopOnFirst && (preferName == null || resolved.name.equals(preferName, ignoreCase = true)))
+                            found.complete(resolved.name)
                     }
                 }
             }
@@ -96,7 +101,9 @@ object MdnsDiscovery {
             nsd.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener)
             // In list mode nothing ever completes `found`, so this always runs
             // the clock out and returns null — which is the intent.
-            withTimeoutOrNull(timeoutMs) { found.await() }
+            val first = withTimeoutOrNull(timeoutMs) { found.await() }
+            // Brief grace so a second address record for the same Mac can land.
+            if (first != null) kotlinx.coroutines.delay(250)
         } catch (_: Exception) {
             // fall through to whatever was collected before the failure
         } finally {
@@ -113,7 +120,7 @@ object MdnsDiscovery {
         // never replied.
         val winner = firstResolved.get()
         return if (winner == null) byName
-        else byName.sortedByDescending { it.ip == winner }
+        else byName.sortedByDescending { it.name == winner }
     }
 
     private fun resolve(
@@ -155,20 +162,21 @@ object MdnsDiscovery {
     /** A resolved service → a displayable entry, or null if it carried no IPv4
      *  yet (which happens on the first update or two). */
     private fun toMac(info: NsdServiceInfo): DiscoveredMac? {
-        val ip = firstIpv4(info) ?: return null
+        val ips = orderBySubnet(allIpv4(info), LanAddrs.localSubnets())
+        val ip = ips.firstOrNull() ?: return null
         val port = info.port.takeIf { it > 0 } ?: 48484
         // NSD hands back the Bonjour instance name, which is what the Mac chose
         // to call itself. Blank on some OEM stacks, hence the fallback.
         val name = info.serviceName?.takeIf { it.isNotBlank() } ?: "Mac"
-        return DiscoveredMac(name = name, ip = ip, port = port)
+        return DiscoveredMac(name = name, ip = ip, port = port, ips = ips)
     }
 
     /** The Mac advertises v4 only, but a resolve can still surface link-local v6. */
-    private fun firstIpv4(info: NsdServiceInfo): String? =
+    private fun allIpv4(info: NsdServiceInfo): List<String> =
         if (Build.VERSION.SDK_INT >= 34) {
-            info.hostAddresses.firstOrNull { it is Inet4Address }?.hostAddress
+            info.hostAddresses.filterIsInstance<Inet4Address>().mapNotNull { it.hostAddress }
         } else {
             @Suppress("DEPRECATION")
-            (info.host as? Inet4Address)?.hostAddress
+            listOfNotNull((info.host as? Inet4Address)?.hostAddress)
         }
 }

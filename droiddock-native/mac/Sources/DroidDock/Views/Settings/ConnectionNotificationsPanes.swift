@@ -45,6 +45,7 @@ struct ConnectionSettingsPane: View {
                         if let p = model.pairing { SettingsQRCode(text: p.url) }
                         else { ProgressView().frame(width: 176, height: 176) }
                     }
+                    .task { await model.refreshPairing() }
                     VStack(alignment: .leading, spacing: DD.Space.sm) {
                         Text(tr("Scan with the DroidDock app")).font(DD.Font.headline)
                         Text(tr("Open DroidDock on your phone and scan this code. Both devices need to be on the same Wi-Fi."))
