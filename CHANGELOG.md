@@ -8,6 +8,29 @@ to a generic body.
 
 ---
 
+## v3.5.2
+
+- **Fixed: the phone couldn't find the Mac after a network change.** This happened most
+  often when the Mac joined the phone's own hotspot. Three things combined:
+  - The Mac's pairing QR kept the address from when the app was opened. Re-scanning it saved a
+    dead address again. The QR now updates when the network changes.
+  - When the Mac still held an old address from the previous Wi-Fi, the phone only tried that
+    one. The phone now tries every address the Mac announces, starting with the ones on its own
+    network. The Mac also lists its current address first.
+  - The phone's search didn't reach a Mac on the phone's hotspot, and stopped completely when
+    the phone had no mobile data. Both now work.
+- **Android: faster reconnects.** The phone retries quickly as soon as the network changes, and
+  remembers a working address as soon as it connects, not when the link ends.
+- **Android: Pause and Disconnect clean up properly.** A Mac-files browse or transfer that was
+  running no longer hangs, and the Home card no longer shows stale Mac battery or lock status.
+- **Android: safer Mac matching.** With two Macs on the network, or two with the same name, the
+  phone no longer picks the wrong one. Forgetting the active Mac now fully unpairs it.
+- **Mac: discovery recovers after a relaunch.** If the old app was still closing, the Mac used
+  to stop answering the phone's search until the next launch. It now keeps retrying.
+- **Mac: Second screen keeps working with the phone locked.** While a second screen or app
+  window is open, the phone stays awake with its own screen off and still locked, so the
+  window doesn't go black. There's a new Apps button, and Recents opens right away.
+
 ## v3.5.1
 
 - **Mac: turn an app off everywhere.** In Settings › Notifications, switching an app off now
