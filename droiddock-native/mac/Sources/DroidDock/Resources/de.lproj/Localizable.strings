@@ -232,6 +232,7 @@
 "Connect the phone over ADB to use desktop mode" = "Verbinde das Telefon über ADB, um den Desktop-Modus zu nutzen";
 "Connect via QR" = "Per QR verbinden";
 "Connect your phone first" = "Verbinde zuerst dein Telefon";
+"Connect your phone to list apps" = "Verbinde dein Telefon, um Apps aufzulisten";
 "Connected over {t}" = "Verbunden über {t}";
 "Connected to {name}" = "Mit {name} verbunden";
 "Connecting over Bluetooth…" = "Verbindung über Bluetooth wird hergestellt …";
@@ -477,6 +478,7 @@
 "Keep running after quit" = "Nach dem Beenden weiterlaufen";
 "Keep the other device unlocked and nearby." = "Lass das andere Gerät entsperrt und in der Nähe.";
 "Keep the phone awake" = "Telefon wach halten";
+"Keep working while the phone is locked" = "Bei gesperrtem Telefon weiterarbeiten";
 "Keeps scrcpy windows above other Mac windows." = "Hält scrcpy-Fenster über anderen Mac-Fenstern.";
 "Keeps the virtual display's launcher, status and nav bars around a single app opened on this Mac. Off makes the window read as that app rather than a phone screen." = "Behält Launcher, Status- und Navigationsleiste des virtuellen Displays rund um eine einzelne App bei, die auf diesem Mac geöffnet ist. Aus wirkt das Fenster wie diese App und nicht wie ein Telefonbildschirm.";
 "Keyboard shortcuts" = "Tastaturkurzbefehle";
@@ -1185,6 +1187,7 @@
 "The phone reported no launchable apps." = "Das Telefon meldet keine startbaren Apps.";
 "The phone still responds; it just isn't showing anything." = "Das Telefon reagiert noch, zeigt aber nichts an.";
 "The phone's own layout, scaled up to the window." = "Das eigene Layout des Telefons, auf die Fenstergröße skaliert.";
+"The second screen and app windows stay on while your phone stays locked with its screen off. Press the phone's power button twice to use it." = "Zweiter Bildschirm und App-Fenster bleiben an, während dein Telefon gesperrt und sein Bildschirm aus bleibt. Drücke zweimal die Ein/Aus-Taste, um es zu benutzen.";
 "The stream ended unexpectedly." = "Der Stream wurde unerwartet beendet.";
 "The transfer failed." = "Die Übertragung ist fehlgeschlagen.";
 "The update installed but the app didn't relaunch. Quit and reopen DroidDock." = "Das Update wurde installiert, aber die App ist nicht neu gestartet. Beende DroidDock und öffne es erneut.";

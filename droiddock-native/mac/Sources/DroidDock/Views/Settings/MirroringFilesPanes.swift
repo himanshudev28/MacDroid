@@ -78,6 +78,9 @@ struct MirroringSettingsPane: View {
                 DescribedToggle(tr("Show Android bars in app windows"), isOn: model.cfg(\.appWindowChrome, "appWindowChrome"))
                 DescribedToggle(tr("Keep apps running when the window closes"), detail: tr("Hands the app back to the phone. scrcpy 3.1 or newer."),
                                 isOn: model.cfg(\.appWindowKeepAlive, "appWindowKeepAlive"))
+                DescribedToggle(tr("Keep working while the phone is locked"),
+                                detail: tr("The second screen and app windows stay on while your phone stays locked with its screen off. Press the phone's power button twice to use it."),
+                                isOn: model.cfg(\.vdKeepAwake, "vdKeepAwake"))
             }
 
             DDSection(tr("scrcpy")) {

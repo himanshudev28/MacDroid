@@ -417,6 +417,7 @@ pub fn shutdown_blocking(app: &AppHandle) {
 /// The PID list can't point at a reused PID: an entry is only removed after
 /// the process is waited on, and until then the kernel keeps the PID reserved.
 fn close_windows() {
+    vd_keepers_stop_all();
     let pids = OPEN_WINDOWS.lock().unwrap().clone();
     if pids.is_empty() {
         return;
@@ -1424,6 +1425,7 @@ struct MirrorPrefs {
     flex: bool,
     app_window_chrome: bool,
     app_window_keep_alive: bool,
+    vd_keep_awake: bool,
     codec: String,
     audio: bool,
     uhid: bool,
@@ -1439,6 +1441,7 @@ fn mirror_prefs(app: &AppHandle) -> MirrorPrefs {
         flex: cfg.desktop_flex,
         app_window_chrome: cfg.app_window_chrome,
         app_window_keep_alive: cfg.app_window_keep_alive,
+        vd_keep_awake: cfg.vd_keep_awake,
         codec: cfg.mirror_codec,
         audio: cfg.mirror_audio,
         uhid: cfg.scrcpy_uhid,
@@ -2511,6 +2514,150 @@ struct AppWin {
 static APP_WINDOWS: std::sync::LazyLock<Mutex<HashMap<String, AppWin>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
+// ── Keep virtual-display windows alive while the phone is locked ──
+//
+// A virtual display shares the phone's power state: once the phone sleeps, the window goes black and
+// ignores input. While the lock screen shows, Android puts the phone to sleep after ~5 s without input
+// (whatever the screen timeout says), so a second screen on a locked phone dies within seconds.
+//
+// One "keeper" per phone runs a small loop on the phone itself while any such window is open:
+// - phone asleep for ~4 s and locked → wake it, switch its own panel off (`cmd display power-off 0`,
+//   Android 15+; older phones just keep the lock screen lit) and keep it awake with a harmless Shift
+//   key on the virtual display every 2 s. The phone stays locked the whole time. The panel-off is
+//   re-sent each round: sent while the phone is still waking up, the wake turns the panel back on.
+// - the user wakes the phone themselves (lock screen lit) → leave it alone; it sleeps on its own and
+//   is picked up again ~4 s later. That 4 s grace is also what lets the power button work: one press
+//   sleeps the dark phone, a second press wakes it normally.
+// - phone unlocked → never kept awake by us (its own timeout and lock still apply); if we had its
+//   panel off, it's switched back on.
+// - lock state not readable (or no lock screen) → it is put back to sleep and the keeper stops
+//   reviving until it next sees the phone awake and locked.
+// The loop exits on its own when the display is gone (two misses in a row, so one failed `cmd` can't
+// end it), and when stopped it hands the panel back. If it is ever left running without its window,
+// the display check ends it; and without the Shift key a locked phone sleeps within ~5 s.
+
+/// Phone-side loop. `__VD__` is the virtual display id to send the keep-awake key to.
+const VD_KEEPER_SCRIPT: &str = r#"V=__VD__; own=0; slept=4; revive=1; gone=0
+locked() { dumpsys window policy 2>/dev/null | grep -qE '^ *(mIsShowing|mShowingLockscreen|isKeyguardShowing)=true'; }
+# On the way out, never leave the panel forced off: a dark locked phone goes to sleep normally, an
+# unlocked one gets its panel back.
+fin() { if [ $own = 1 ]; then if locked; then input keyevent KEYCODE_SLEEP; else cmd display power-reset 0 >/dev/null 2>&1; fi; own=0; fi; }
+trap 'fin; exit 0' HUP TERM INT
+while [ $gone -lt 2 ]; do
+  if cmd display get-displays -i 2>/dev/null | grep -qx "$V"; then gone=0; else gone=$((gone+1)); sleep 2; continue; fi
+  case "$(dumpsys power 2>/dev/null | grep -m1 mWakefulness=)" in
+  *=Awake*)
+    slept=0
+    if locked; then
+      revive=1
+      if [ $own = 1 ]; then
+        cmd display power-off 0 >/dev/null 2>&1
+        input -d $V keyevent KEYCODE_SHIFT_LEFT
+      fi
+    elif [ $own = 1 ]; then
+      cmd display power-reset 0 >/dev/null 2>&1; own=0
+    fi;;
+  *)
+    own=0; slept=$((slept+2))
+    if [ $revive = 1 ] && [ $slept -ge 4 ]; then
+      slept=0
+      input keyevent KEYCODE_WAKEUP
+      sleep 1
+      if locked; then
+        own=1
+        cmd display power-off 0 >/dev/null 2>&1
+        input -d $V keyevent KEYCODE_SHIFT_LEFT
+      else
+        input keyevent KEYCODE_SLEEP; revive=0
+      fi
+    fi;;
+  esac
+  sleep 2
+done
+fin"#;
+
+/// The keeper for one phone, tied to the window whose display it pokes.
+struct VdKeeper {
+    pid: u32,
+    window_key: String,
+}
+
+/// serial → its keeper.
+static VD_KEEPERS: std::sync::LazyLock<Mutex<HashMap<String, VdKeeper>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Start the phone's keeper for this window, unless one already runs for the phone.
+fn vd_keeper_start(adb: &str, serial: &str, window_key: &str, display_id: u32) {
+    let mut keepers = VD_KEEPERS.lock().unwrap();
+    if keepers.contains_key(serial) || crate::shutdown::quitting() {
+        return;
+    }
+    let script = VD_KEEPER_SCRIPT.replace("__VD__", &display_id.to_string());
+    let child = std::process::Command::new(adb)
+        .args(["-s", serial, "shell", &script])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    let Ok(mut child) = child else { return };
+    let pid = child.id();
+    keepers.insert(serial.to_string(), VdKeeper { pid, window_key: window_key.to_string() });
+    drop(keepers);
+    let serial = serial.to_string();
+    // Reap it, and forget it once it has exited (so a stored pid is never a reused one).
+    std::thread::spawn(move || {
+        let _ = child.wait();
+        let mut keepers = VD_KEEPERS.lock().unwrap();
+        if keepers.get(&serial).is_some_and(|k| k.pid == pid) {
+            keepers.remove(&serial);
+        }
+    });
+}
+
+/// A window closed: if the phone's keeper was poking its display, stop it and hand over to another
+/// window still open on that phone.
+fn vd_keeper_window_closed(adb: &str, serial: &str, window_key: &str) {
+    // Signalled under the lock: the reaper removes the entry (under the same lock) once the process
+    // has been waited on, so a pid still in the map can't have been reused.
+    let pid = {
+        let keepers = VD_KEEPERS.lock().unwrap();
+        match keepers.get(serial) {
+            Some(k) if k.window_key == window_key => {
+                send_signal(k.pid, Signal::Term);
+                Some(k.pid)
+            }
+            // Another window's keeper is running: nothing to do.
+            Some(_) => return,
+            // None running (it already exited, e.g. the adb link blipped): still hand over below.
+            None => None,
+        }
+    };
+    if let Some(pid) = pid {
+        // Wait for the reaper to forget it, so the handover below isn't refused as "already running".
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline && VD_KEEPERS.lock().unwrap().get(serial).is_some_and(|k| k.pid == pid) {
+            std::thread::sleep(Duration::from_millis(30));
+        }
+    }
+    let next = APP_WINDOWS
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|(k, _)| k.as_str() != window_key && k.strip_prefix(serial).is_some_and(|r| r.starts_with('|')))
+        .map(|(k, w)| (k.clone(), w.display_id));
+    if let Some((key, display_id)) = next {
+        vd_keeper_start(adb, serial, &key, display_id);
+    }
+}
+
+/// App quit: stop every keeper (each phone then falls asleep on its own within seconds).
+fn vd_keepers_stop_all() {
+    // Under the lock, for the same pid-reuse reason as in `vd_keeper_window_closed`.
+    for k in VD_KEEPERS.lock().unwrap().values() {
+        send_signal(k.pid, Signal::Term);
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppWindowOpened {
@@ -2671,10 +2818,14 @@ async fn open_vd_window(app: AppHandle, state: &AdbState, w: VdWindow) -> Result
     let (tx, rx) = std::sync::mpsc::channel::<Result<u32, String>>();
     let announced_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     // First sighting of the display id (stdout or stderr reader): record it and tell the Mac.
+    let keep_awake = prefs.vd_keep_awake;
     let announce = {
-        let (key, serial, app, package) = (key.clone(), serial.clone(), app.clone(), package.clone());
+        let (key, serial, app, package, adb) = (key.clone(), serial.clone(), app.clone(), package.clone(), adb.clone());
         move |id: u32| {
             APP_WINDOWS.lock().unwrap().insert(key.clone(), AppWin { display_id: id, pid });
+            if keep_awake {
+                vd_keeper_start(&adb, &serial, &key, id);
+            }
             let _ = app.emit(
                 "vd-window",
                 serde_json::json!({ "pid": pid, "displayId": id, "serial": serial, "kind": kind, "decorations": decorations, "package": package }),
@@ -2695,7 +2846,7 @@ async fn open_vd_window(app: AppHandle, state: &AdbState, w: VdWindow) -> Result
             }
         });
     }
-    let (wkey, wapp) = (key.clone(), app.clone());
+    let (wkey, wapp, wadb, wserial) = (key.clone(), app.clone(), adb.clone(), serial.clone());
     std::thread::spawn(move || {
         use std::io::{BufRead, BufReader};
         let started = Instant::now();
@@ -2721,6 +2872,11 @@ async fn open_vd_window(app: AppHandle, state: &AdbState, w: VdWindow) -> Result
         }
         drop(map);
         let _ = wapp.emit("vd-window-closed", serde_json::json!({ "pid": pid }));
+        {
+            // Can wait up to 2 s for the old keeper to exit: not on this thread.
+            let (adb, serial, key) = (wadb.clone(), wserial.clone(), wkey.clone());
+            std::thread::spawn(move || vd_keeper_window_closed(&adb, &serial, &key));
+        }
         if !announced_flag.load(std::sync::atomic::Ordering::SeqCst) {
             let _ = tx.send(Err(if tail.is_empty() { "scrcpy exited before creating the display".into() } else { tail.clone() }));
         }

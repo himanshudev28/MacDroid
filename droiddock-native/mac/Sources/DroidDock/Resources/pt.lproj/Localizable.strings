@@ -232,6 +232,7 @@
 "Connect the phone over ADB to use desktop mode" = "Conecte o celular por ADB para usar o modo computador";
 "Connect via QR" = "Conectar por QR";
 "Connect your phone first" = "Conecte seu celular primeiro";
+"Connect your phone to list apps" = "Conecte o telefone para listar os apps";
 "Connected over {t}" = "Conectado por {t}";
 "Connected to {name}" = "Conectado a {name}";
 "Connecting over Bluetooth…" = "A ligar por Bluetooth…";
@@ -477,6 +478,7 @@
 "Keep running after quit" = "Continuar em execução após sair";
 "Keep the other device unlocked and nearby." = "Mantenha o outro dispositivo desbloqueado e por perto.";
 "Keep the phone awake" = "Manter o celular acordado";
+"Keep working while the phone is locked" = "Continuar com o telefone bloqueado";
 "Keeps scrcpy windows above other Mac windows." = "Mantém as janelas do scrcpy acima das demais janelas do Mac.";
 "Keeps the virtual display's launcher, status and nav bars around a single app opened on this Mac. Off makes the window read as that app rather than a phone screen." = "Mantém o launcher e as barras de status e navegação da tela virtual em volta de um app aberto neste Mac. Desligado, a janela parece o próprio app e não uma tela de celular.";
 "Keyboard shortcuts" = "Atalhos de teclado";
@@ -1185,6 +1187,7 @@
 "The phone reported no launchable apps." = "O celular não informou nenhum app que possa ser aberto.";
 "The phone still responds; it just isn't showing anything." = "O celular ainda responde; só não está mostrando nada.";
 "The phone's own layout, scaled up to the window." = "O layout do próprio celular, ampliado até a janela.";
+"The second screen and app windows stay on while your phone stays locked with its screen off. Press the phone's power button twice to use it." = "A segunda tela e as janelas de apps continuam ativas enquanto o telefone fica bloqueado com a tela apagada. Pressione duas vezes o botão liga/desliga do telefone para usá-lo.";
 "The stream ended unexpectedly." = "A transmissão terminou inesperadamente.";
 "The transfer failed." = "A transferência falhou.";
 "The update installed but the app didn't relaunch. Quit and reopen DroidDock." = "A atualização foi instalada, mas o app não reabriu. Encerre e abra o DroidDock de novo.";

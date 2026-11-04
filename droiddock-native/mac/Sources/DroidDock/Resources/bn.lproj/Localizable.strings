@@ -232,6 +232,7 @@
 "Connect the phone over ADB to use desktop mode" = "ডেস্কটপ মোড ব্যবহার করতে ফোনটি ADB-তে সংযুক্ত করুন";
 "Connect via QR" = "QR দিয়ে কানেক্ট করুন";
 "Connect your phone first" = "আগে আপনার ফোন সংযুক্ত করুন";
+"Connect your phone to list apps" = "অ্যাপের তালিকা দেখতে ফোন সংযুক্ত করুন";
 "Connected over {t}" = "{t}-এর মাধ্যমে সংযুক্ত";
 "Connected to {name}" = "{name}-এর সাথে সংযুক্ত";
 "Connecting over Bluetooth…" = "ব্লুটুথে সংযোগ হচ্ছে…";
@@ -477,6 +478,7 @@
 "Keep running after quit" = "বের হওয়ার পরেও চলতে থাকুক";
 "Keep the other device unlocked and nearby." = "অন্য ডিভাইস আনলক ও কাছে রাখুন।";
 "Keep the phone awake" = "ফোন জেগে রাখুন";
+"Keep working while the phone is locked" = "ফোন লক থাকলেও কাজ চালিয়ে যান";
 "Keeps scrcpy windows above other Mac windows." = "scrcpy উইন্ডোগুলিকে Mac-এর অন্য উইন্ডোর উপরে রাখে।";
 "Keeps the virtual display's launcher, status and nav bars around a single app opened on this Mac. Off makes the window read as that app rather than a phone screen." = "এই Mac-এ খোলা একটিমাত্র অ্যাপের চারপাশে ভার্চুয়াল ডিসপ্লের লঞ্চার, স্ট্যাটাস ও নেভিগেশন বার রেখে দেয়। বন্ধ রাখলে উইন্ডোটি ফোনের স্ক্রিন নয়, ওই অ্যাপ বলেই মনে হয়।";
 "Keyboard shortcuts" = "কীবোর্ড শর্টকাট";
@@ -1185,6 +1187,7 @@
 "The phone reported no launchable apps." = "ফোন জানিয়েছে, চালু করার মতো কোনও অ্যাপ নেই।";
 "The phone still responds; it just isn't showing anything." = "ফোন এখনো সাড়া দিচ্ছে; শুধু কিছু দেখাচ্ছে না।";
 "The phone's own layout, scaled up to the window." = "ফোনের নিজের লেআউট, উইন্ডো অনুযায়ী বড় করা।";
+"The second screen and app windows stay on while your phone stays locked with its screen off. Press the phone's power button twice to use it." = "ফোন লক থাকা এবং স্ক্রিন বন্ধ থাকা অবস্থায়ও দ্বিতীয় স্ক্রিন ও অ্যাপ উইন্ডো চালু থাকে। ফোন ব্যবহার করতে এর পাওয়ার বোতাম দুবার চাপুন।";
 "The stream ended unexpectedly." = "স্ট্রিম হঠাৎ শেষ হয়ে গেছে।";
 "The transfer failed." = "ট্রান্সফার ব্যর্থ হয়েছে।";
 "The update installed but the app didn't relaunch. Quit and reopen DroidDock." = "আপডেট ইনস্টল হয়েছে কিন্তু অ্যাপটি আবার চালু হয়নি। DroidDock বন্ধ করে আবার খুলুন।";

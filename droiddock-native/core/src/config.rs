@@ -212,6 +212,10 @@ pub struct Config {
     /// instead of killing it. Needs scrcpy 3.1+.
     #[serde(default = "default_true")]
     pub app_window_keep_alive: bool,
+    /// While a second screen or app window is open, keep the phone awake with
+    /// its own screen off and still locked, so the window never goes black.
+    #[serde(default = "default_true")]
+    pub vd_keep_awake: bool,
 
     // ── scrcpy passthrough (all opt-in; absent flags = scrcpy's own default) ──
     /// `h264` (scrcpy's default — the flag is not passed at all) or `h265`.
@@ -451,6 +455,7 @@ impl Default for Config {
             // bar sits under it), and closing it never moves the app onto the phone.
             app_window_chrome: false,
             app_window_keep_alive: false,
+            vd_keep_awake: true,
             mirror_codec: default_mirror_codec(),
             mirror_audio: true,
             scrcpy_uhid: false,

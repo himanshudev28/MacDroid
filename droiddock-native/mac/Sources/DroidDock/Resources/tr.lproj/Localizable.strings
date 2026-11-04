@@ -232,6 +232,7 @@
 "Connect the phone over ADB to use desktop mode" = "Masaüstü modunu kullanmak için telefonu ADB ile bağlayın";
 "Connect via QR" = "QR ile bağlan";
 "Connect your phone first" = "Önce telefonunu bağla";
+"Connect your phone to list apps" = "Uygulamaları listelemek için telefonunuzu bağlayın";
 "Connected over {t}" = "{t} üzerinden bağlı";
 "Connected to {name}" = "{name} aygıtına bağlı";
 "Connecting over Bluetooth…" = "Bluetooth ile bağlanılıyor…";
@@ -477,6 +478,7 @@
 "Keep running after quit" = "Çıkıştan sonra çalışmaya devam et";
 "Keep the other device unlocked and nearby." = "Diğer aygıtı kilidi açık ve yakında tutun.";
 "Keep the phone awake" = "Telefonu uyanık tut";
+"Keep working while the phone is locked" = "Telefon kilitliyken çalışmaya devam et";
 "Keeps scrcpy windows above other Mac windows." = "scrcpy pencerelerini diğer Mac pencerelerinin üstünde tutar.";
 "Keeps the virtual display's launcher, status and nav bars around a single app opened on this Mac. Off makes the window read as that app rather than a phone screen." = "Bu Mac'te açılan tek bir uygulamanın çevresinde sanal ekranın başlatıcısını, durum ve gezinme çubuklarını korur. Kapalıyken pencere, telefon ekranı gibi değil, doğrudan o uygulama gibi görünür.";
 "Keyboard shortcuts" = "Klavye kısayolları";
@@ -1185,6 +1187,7 @@
 "The phone reported no launchable apps." = "Telefon, başlatılabilir uygulama olmadığını bildirdi.";
 "The phone still responds; it just isn't showing anything." = "Telefon hâlâ yanıt veriyor; yalnızca hiçbir şey göstermiyor.";
 "The phone's own layout, scaled up to the window." = "Telefonun kendi düzeni, pencereye göre büyütülmüş.";
+"The second screen and app windows stay on while your phone stays locked with its screen off. Press the phone's power button twice to use it." = "Telefonunuz kilitli ve ekranı kapalı kalırken ikinci ekran ve uygulama pencereleri açık kalır. Telefonu kullanmak için güç düğmesine iki kez basın.";
 "The stream ended unexpectedly." = "Akış beklenmedik şekilde sona erdi.";
 "The transfer failed." = "Aktarım başarısız oldu.";
 "The update installed but the app didn't relaunch. Quit and reopen DroidDock." = "Güncelleme kuruldu ama uygulama yeniden açılmadı. DroidDock'tan çıkıp yeniden açın.";

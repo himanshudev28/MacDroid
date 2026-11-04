@@ -232,6 +232,7 @@
 "Connect the phone over ADB to use desktop mode" = "डेस्कटॉप मोड इस्तेमाल करने के लिए फ़ोन को ADB से कनेक्ट करें";
 "Connect via QR" = "QR से कनेक्ट करें";
 "Connect your phone first" = "पहले अपना फ़ोन कनेक्ट करें";
+"Connect your phone to list apps" = "ऐप्स की सूची देखने के लिए फ़ोन कनेक्ट करें";
 "Connected over {t}" = "{t} से कनेक्ट";
 "Connected to {name}" = "{name} से कनेक्ट";
 "Connecting over Bluetooth…" = "ब्लूटूथ से कनेक्ट हो रहा है…";
@@ -477,6 +478,7 @@
 "Keep running after quit" = "छोड़ने के बाद भी चलता रहे";
 "Keep the other device unlocked and nearby." = "दूसरे डिवाइस को अनलॉक और पास में रखें।";
 "Keep the phone awake" = "फ़ोन जगा हुआ रखें";
+"Keep working while the phone is locked" = "फ़ोन लॉक रहते हुए भी चलता रहे";
 "Keeps scrcpy windows above other Mac windows." = "scrcpy की विंडो को बाकी Mac विंडो के ऊपर रखता है।";
 "Keeps the virtual display's launcher, status and nav bars around a single app opened on this Mac. Off makes the window read as that app rather than a phone screen." = "इस Mac पर खुले किसी एक ऐप के चारों ओर वर्चुअल डिस्प्ले का लॉन्चर, स्टेटस और नेविगेशन बार बनाए रखता है। बंद करने पर विंडो फ़ोन स्क्रीन नहीं, बल्कि उसी ऐप जैसी लगती है।";
 "Keyboard shortcuts" = "कीबोर्ड शॉर्टकट";
@@ -1185,6 +1187,7 @@
 "The phone reported no launchable apps." = "फ़ोन ने खोलने लायक कोई ऐप नहीं बताया।";
 "The phone still responds; it just isn't showing anything." = "फ़ोन अब भी जवाब दे रहा है; बस कुछ दिखा नहीं रहा।";
 "The phone's own layout, scaled up to the window." = "फ़ोन का अपना लेआउट, विंडो के आकार तक बड़ा किया हुआ।";
+"The second screen and app windows stay on while your phone stays locked with its screen off. Press the phone's power button twice to use it." = "फ़ोन लॉक और उसकी स्क्रीन बंद रहने पर भी दूसरी स्क्रीन और ऐप विंडो चालू रहती हैं। फ़ोन इस्तेमाल करने के लिए उसका पावर बटन दो बार दबाएँ।";
 "The stream ended unexpectedly." = "स्ट्रीम अचानक खत्म हो गई।";
 "The transfer failed." = "ट्रांसफ़र विफल रहा।";
 "The update installed but the app didn't relaunch. Quit and reopen DroidDock." = "अपडेट इंस्टॉल हो गया पर ऐप दोबारा नहीं खुला। DroidDock बंद करके फिर खोलें।";

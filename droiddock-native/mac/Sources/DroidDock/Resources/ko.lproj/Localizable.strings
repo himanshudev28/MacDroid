@@ -232,6 +232,7 @@
 "Connect the phone over ADB to use desktop mode" = "데스크톱 모드를 사용하려면 휴대폰을 ADB로 연결하세요";
 "Connect via QR" = "QR로 연결";
 "Connect your phone first" = "먼저 휴대전화를 연결하세요";
+"Connect your phone to list apps" = "앱 목록을 보려면 휴대전화를 연결하세요";
 "Connected over {t}" = "{t}(으)로 연결됨";
 "Connected to {name}" = "{name}에 연결됨";
 "Connecting over Bluetooth…" = "Bluetooth로 연결하는 중…";
@@ -477,6 +478,7 @@
 "Keep running after quit" = "종료 후에도 계속 실행";
 "Keep the other device unlocked and nearby." = "상대 기기의 잠금을 해제하고 가까이에 두세요.";
 "Keep the phone awake" = "휴대폰 화면 켜 두기";
+"Keep working while the phone is locked" = "휴대전화가 잠겨 있어도 계속 사용";
 "Keeps scrcpy windows above other Mac windows." = "scrcpy 윈도우를 다른 Mac 윈도우 위에 유지합니다.";
 "Keeps the virtual display's launcher, status and nav bars around a single app opened on this Mac. Off makes the window read as that app rather than a phone screen." = "이 Mac에서 연 앱 하나에 가상 디스플레이의 런처, 상태 표시줄, 내비게이션 바를 함께 표시합니다. 끄면 윈도우가 휴대폰 화면이 아니라 그 앱 자체처럼 보입니다.";
 "Keyboard shortcuts" = "키보드 단축키";
@@ -1185,6 +1187,7 @@
 "The phone reported no launchable apps." = "휴대폰에서 실행할 수 있는 앱이 없다고 알려 왔습니다.";
 "The phone still responds; it just isn't showing anything." = "휴대폰은 응답하고 있지만 아무것도 표시하지 않고 있습니다.";
 "The phone's own layout, scaled up to the window." = "휴대폰 자체 레이아웃을 윈도우 크기에 맞춰 키웁니다.";
+"The second screen and app windows stay on while your phone stays locked with its screen off. Press the phone's power button twice to use it." = "휴대전화가 잠기고 화면이 꺼진 상태에서도 보조 화면과 앱 창이 계속 켜져 있습니다. 휴대전화를 쓰려면 전원 버튼을 두 번 누르세요.";
 "The stream ended unexpectedly." = "스트림이 예기치 않게 종료되었습니다.";
 "The transfer failed." = "전송에 실패했습니다.";
 "The update installed but the app didn't relaunch. Quit and reopen DroidDock." = "업데이트는 설치됐지만 앱이 다시 실행되지 않았습니다. DroidDock을 종료했다가 다시 여세요.";

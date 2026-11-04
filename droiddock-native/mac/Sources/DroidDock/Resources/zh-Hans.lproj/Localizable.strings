@@ -232,6 +232,7 @@
 "Connect the phone over ADB to use desktop mode" = "请通过 ADB 连接手机以使用桌面模式";
 "Connect via QR" = "扫码连接";
 "Connect your phone first" = "请先连接手机";
+"Connect your phone to list apps" = "连接手机以列出应用";
 "Connected over {t}" = "通过 {t} 连接";
 "Connected to {name}" = "已连接到 {name}";
 "Connecting over Bluetooth…" = "正在通过蓝牙连接…";
@@ -477,6 +478,7 @@
 "Keep running after quit" = "退出后继续运行";
 "Keep the other device unlocked and nearby." = "请保持另一台设备解锁并在附近。";
 "Keep the phone awake" = "保持手机常亮";
+"Keep working while the phone is locked" = "手机锁定时继续使用";
 "Keeps scrcpy windows above other Mac windows." = "让 scrcpy 窗口始终位于其他 Mac 窗口之上。";
 "Keeps the virtual display's launcher, status and nav bars around a single app opened on this Mac. Off makes the window read as that app rather than a phone screen." = "在本机打开单个应用时，保留虚拟显示器的启动器、状态栏和导航栏。关闭后，窗口看起来就是该应用本身，而不是一块手机屏幕。";
 "Keyboard shortcuts" = "键盘快捷键";
@@ -1185,6 +1187,7 @@
 "The phone reported no launchable apps." = "手机未报告任何可启动的应用。";
 "The phone still responds; it just isn't showing anything." = "手机仍有响应，只是没有显示任何内容。";
 "The phone's own layout, scaled up to the window." = "手机自身的布局，按窗口大小放大。";
+"The second screen and app windows stay on while your phone stays locked with its screen off. Press the phone's power button twice to use it." = "手机保持锁定且屏幕关闭时，第二屏幕和应用窗口仍保持开启。要使用手机，请按两次电源键。";
 "The stream ended unexpectedly." = "串流意外结束。";
 "The transfer failed." = "传输失败。";
 "The update installed but the app didn't relaunch. Quit and reopen DroidDock." = "更新已安装，但应用没有重新启动。请退出并重新打开 DroidDock。";

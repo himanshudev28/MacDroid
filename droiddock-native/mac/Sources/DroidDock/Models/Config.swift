@@ -36,6 +36,7 @@ struct DroidConfig: Codable, Sendable, Equatable {
     var desktopFlex = true
     var appWindowChrome = false
     var appWindowKeepAlive = false
+    var vdKeepAwake = true
     var mirrorCodec = "h264"             // h264 | h265
     var mirrorAudio = true
     var scrcpyUhid = false
@@ -62,7 +63,7 @@ struct DroidConfig: Codable, Sendable, Equatable {
         case quickShareEnabled, macFsRoots, encryptLink, remoteControl, macInfoSync, macMediaSync
         case macMediaBrowser, mutedApps, menubarText, menubarBatteryStyle, menubarMaxLen, menubarAlbumArt
         case lowBatteryAlert, lowBatteryPct, desktopDisplaySize, desktopUiMode, desktopFlex
-        case appWindowChrome, appWindowKeepAlive, mirrorCodec, mirrorAudio, scrcpyUhid, scrcpyStayAwake
+        case appWindowChrome, appWindowKeepAlive, vdKeepAwake, mirrorCodec, mirrorAudio, scrcpyUhid, scrcpyStayAwake
         case scrcpyTurnScreenOff, scrcpyAlwaysOnTop, pinnedApps, openAppsOnMac, defaultMirrorMode
         case mirrorBitrateMbps, mirrorFps, mirrorMaxSize, widgetEnabled, autoCheckUpdates, lastUpdateCheck
     }
@@ -85,7 +86,7 @@ struct DroidConfig: Codable, Sendable, Equatable {
         lowBatteryAlert = c.get(.lowBatteryAlert, lowBatteryAlert); lowBatteryPct = c.get(.lowBatteryPct, lowBatteryPct)
         desktopDisplaySize = c.get(.desktopDisplaySize, desktopDisplaySize); desktopUiMode = c.get(.desktopUiMode, desktopUiMode)
         desktopFlex = c.get(.desktopFlex, desktopFlex); appWindowChrome = c.get(.appWindowChrome, appWindowChrome)
-        appWindowKeepAlive = c.get(.appWindowKeepAlive, appWindowKeepAlive)
+        appWindowKeepAlive = c.get(.appWindowKeepAlive, appWindowKeepAlive); vdKeepAwake = c.get(.vdKeepAwake, vdKeepAwake)
         mirrorCodec = c.get(.mirrorCodec, mirrorCodec); mirrorAudio = c.get(.mirrorAudio, mirrorAudio)
         scrcpyUhid = c.get(.scrcpyUhid, scrcpyUhid); scrcpyStayAwake = c.get(.scrcpyStayAwake, scrcpyStayAwake)
         scrcpyTurnScreenOff = c.get(.scrcpyTurnScreenOff, scrcpyTurnScreenOff)

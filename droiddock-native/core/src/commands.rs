@@ -96,6 +96,7 @@ pub fn set_setting(app: AppHandle, state: State<AppState>, key: String, value: V
         "desktopFlex" => cfg.desktop_flex = value.as_bool().unwrap_or(true),
         "appWindowChrome" => cfg.app_window_chrome = value.as_bool().unwrap_or(false),
         "appWindowKeepAlive" => cfg.app_window_keep_alive = value.as_bool().unwrap_or(true),
+        "vdKeepAwake" => cfg.vd_keep_awake = value.as_bool().unwrap_or(true),
         "mirrorCodec" => cfg.mirror_codec = str_setting(&value, "h264"),
         "mirrorAudio" => cfg.mirror_audio = value.as_bool().unwrap_or(true),
         "scrcpyUhid" => cfg.scrcpy_uhid = value.as_bool().unwrap_or(false),

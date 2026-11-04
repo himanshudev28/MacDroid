@@ -232,6 +232,7 @@
 "Connect the phone over ADB to use desktop mode" = "Kết nối điện thoại qua ADB để dùng chế độ máy tính";
 "Connect via QR" = "Kết nối bằng QR";
 "Connect your phone first" = "Hãy kết nối điện thoại trước";
+"Connect your phone to list apps" = "Kết nối điện thoại để xem danh sách ứng dụng";
 "Connected over {t}" = "Đã kết nối qua {t}";
 "Connected to {name}" = "Đã kết nối với {name}";
 "Connecting over Bluetooth…" = "Đang kết nối qua Bluetooth…";
@@ -477,6 +478,7 @@
 "Keep running after quit" = "Tiếp tục chạy sau khi thoát";
 "Keep the other device unlocked and nearby." = "Giữ thiết bị kia ở trạng thái mở khóa và ở gần.";
 "Keep the phone awake" = "Giữ điện thoại không ngủ";
+"Keep working while the phone is locked" = "Vẫn hoạt động khi điện thoại khóa";
 "Keeps scrcpy windows above other Mac windows." = "Giữ cửa sổ scrcpy nằm trên các cửa sổ Mac khác.";
 "Keeps the virtual display's launcher, status and nav bars around a single app opened on this Mac. Off makes the window read as that app rather than a phone screen." = "Giữ lại màn hình chính, thanh trạng thái và thanh điều hướng của màn hình ảo quanh một ứng dụng đơn lẻ mở trên máy Mac này. Tắt thì cửa sổ trông như chính ứng dụng đó chứ không phải một màn hình điện thoại.";
 "Keyboard shortcuts" = "Phím tắt";
@@ -1185,6 +1187,7 @@
 "The phone reported no launchable apps." = "Điện thoại báo là không có ứng dụng nào khởi chạy được.";
 "The phone still responds; it just isn't showing anything." = "Điện thoại vẫn phản hồi; chỉ là không hiện gì.";
 "The phone's own layout, scaled up to the window." = "Bố cục gốc của chính điện thoại, phóng to cho vừa cửa sổ.";
+"The second screen and app windows stay on while your phone stays locked with its screen off. Press the phone's power button twice to use it." = "Màn hình thứ hai và cửa sổ ứng dụng vẫn bật trong khi điện thoại vẫn khóa và tắt màn hình. Nhấn nút nguồn của điện thoại hai lần để sử dụng.";
 "The stream ended unexpectedly." = "Luồng phát kết thúc bất ngờ.";
 "The transfer failed." = "Truyền tệp thất bại.";
 "The update installed but the app didn't relaunch. Quit and reopen DroidDock." = "Bản cập nhật đã được cài nhưng ứng dụng không tự mở lại. Hãy thoát và mở lại DroidDock.";

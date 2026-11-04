@@ -232,6 +232,7 @@
 "Connect the phone over ADB to use desktop mode" = "Hubungkan ponsel lewat ADB untuk memakai mode desktop";
 "Connect via QR" = "Sambungkan lewat QR";
 "Connect your phone first" = "Hubungkan ponselmu dulu";
+"Connect your phone to list apps" = "Hubungkan ponsel untuk melihat daftar aplikasi";
 "Connected over {t}" = "Terhubung lewat {t}";
 "Connected to {name}" = "Terhubung ke {name}";
 "Connecting over Bluetooth…" = "Menghubungkan lewat Bluetooth…";
@@ -477,6 +478,7 @@
 "Keep running after quit" = "Tetap berjalan setelah keluar";
 "Keep the other device unlocked and nearby." = "Biarkan perangkat lain tetap tidak terkunci dan berada di dekat.";
 "Keep the phone awake" = "Jaga ponsel tetap menyala";
+"Keep working while the phone is locked" = "Tetap jalan saat ponsel terkunci";
 "Keeps scrcpy windows above other Mac windows." = "Menjaga jendela scrcpy tetap di atas jendela Mac lainnya.";
 "Keeps the virtual display's launcher, status and nav bars around a single app opened on this Mac. Off makes the window read as that app rather than a phone screen." = "Mempertahankan launcher, bilah status, dan bilah navigasi dari layar virtual di sekitar satu aplikasi yang dibuka di Mac ini. Kalau mati, jendelanya terasa seperti aplikasi itu sendiri, bukan layar ponsel.";
 "Keyboard shortcuts" = "Pintasan keyboard";
@@ -1185,6 +1187,7 @@
 "The phone reported no launchable apps." = "Ponsel melaporkan tidak ada aplikasi yang bisa dijalankan.";
 "The phone still responds; it just isn't showing anything." = "Ponsel masih merespons; hanya saja tidak menampilkan apa pun.";
 "The phone's own layout, scaled up to the window." = "Tata letak asli ponsel, diperbesar mengikuti jendela.";
+"The second screen and app windows stay on while your phone stays locked with its screen off. Press the phone's power button twice to use it." = "Layar kedua dan jendela aplikasi tetap menyala selama ponsel tetap terkunci dengan layar mati. Tekan tombol daya ponsel dua kali untuk menggunakannya.";
 "The stream ended unexpectedly." = "Aliran berakhir tak terduga.";
 "The transfer failed." = "Transfer gagal.";
 "The update installed but the app didn't relaunch. Quit and reopen DroidDock." = "Pembaruan terpasang tapi aplikasi tidak terbuka lagi. Tutup lalu buka kembali DroidDock.";

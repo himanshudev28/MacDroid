@@ -39,6 +39,20 @@ final class PhoneIconStore {
 
     func cached(_ pkg: String) -> NSImage? { mem.object(forKey: pkg as NSString) }
 
+    /// Memory or disk only, never the phone: for menus that must open at once. With `fetchOnMiss`, a
+    /// miss starts a normal `load` in the background so the icon is there next time (keep that for
+    /// short lists: each fetch is a request to the phone).
+    func local(_ pkg: String, fetchOnMiss: Bool = true) async -> NSImage? {
+        if let hit = cached(pkg) { return hit }
+        let url = Self.file(pkg)
+        if let cg = await Task.detached(priority: .userInitiated, operation: { () -> CGImage? in
+            guard let d = try? Data(contentsOf: url) else { return nil }
+            return ImageCache.downsample(d, maxPixel: Self.pixels)
+        }).value { return store(cg, pkg) }
+        if fetchOnMiss { Task { _ = await load(pkg) } }
+        return nil
+    }
+
     func load(_ pkg: String) async -> NSImage? {
         if let hit = cached(pkg) { return hit }
         if let t = failedAt[pkg], Date().timeIntervalSince(t) < 60 { return nil }

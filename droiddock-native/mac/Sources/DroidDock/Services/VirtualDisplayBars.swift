@@ -25,8 +25,9 @@ struct VDTask: Codable, Sendable, Equatable {
 }
 
 /// Android has no navigation bar on a virtual display, so each such scrcpy window gets a small
-/// Back · Home · Recent bar of ours, kept just under the window (or inside its bottom edge when the
-/// window sits at the bottom of the screen). Tracking runs only while such a window is open.
+/// Back · Home · Recent bar of ours (plus Apps on the second screen, whose phone-side home has no app
+/// drawer), kept just under the window (or inside its bottom edge when the window sits at the bottom
+/// of the screen). Tracking runs only while such a window is open.
 @MainActor
 final class VirtualDisplayBars {
     static let shared = VirtualDisplayBars()
@@ -41,7 +42,7 @@ final class VirtualDisplayBars {
 
     func add(_ info: VDWindowInfo) {
         remove(pid: info.pid)
-        let width: CGFloat = 148
+        let width: CGFloat = VDNavBar.showsApps(info) ? 192 : 148
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: width, height: 38),
                             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         panel.isOpaque = false
@@ -50,7 +51,10 @@ final class VirtualDisplayBars {
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.becomesKeyOnlyIfNeeded = true
-        panel.contentView = NSHostingView(rootView: VDNavBar(info: info) { [weak self] in self?.showRecents(pid: info.pid) })
+        panel.contentView = NSHostingView(rootView: VDNavBar(
+            info: info,
+            onRecents: { [weak self] in self?.showRecents(pid: info.pid) },
+            onApps: { [weak self] in self?.showApps(pid: info.pid) }))
         bars[info.pid] = Bar(info: info, panel: panel)
         if timer == nil {
             let t = Timer(timeInterval: 0.2, repeats: true) { _ in MainActor.assumeIsolated { VirtualDisplayBars.shared.reposition() } }
@@ -116,16 +120,55 @@ final class VirtualDisplayBars {
                     Task { try? await Core.shared.adbVdSwitch(serial: info.serial, displayId: info.displayId, package: t.package) }
                 }
                 item.state = t.visible ? .on : .off
-                if let icon = await PhoneIconStore.shared.load(t.package) {
-                    let small = NSImage(size: NSSize(width: 18, height: 18))
-                    small.lockFocus(); icon.draw(in: NSRect(x: 0, y: 0, width: 18, height: 18)); small.unlockFocus()
-                    item.image = small
-                }
+                // Icons the Mac already has only: fetching one from the phone can take seconds, and the
+                // menu used to wait for every one of them before it appeared.
+                item.image = await Self.menuIcon(t.package)
                 menu.addItem(item)
             }
             guard let view = bar.panel.contentView else { return }
             menu.popUp(positioning: nil, at: NSPoint(x: view.bounds.maxX - 44, y: view.bounds.maxY + 4), in: view)
         }
+    }
+
+    /// "Apps": every app on the phone, opened on this display. The second screen's home (Samsung's
+    /// secondary launcher) shows only a few favourites and has no app drawer.
+    private func showApps(pid: Int) {
+        guard let bar = bars[pid] else { return }
+        let info = bar.info
+        Task { @MainActor in
+            var names = ShellState.shared.appNames
+            if names.isEmpty, let apps = try? await Core.shared.appsList() {
+                names = Dictionary(apps.map { ($0.pkg, $0.label) }, uniquingKeysWith: { a, _ in a })
+            }
+            let menu = NSMenu()
+            menu.autoenablesItems = false
+            if names.isEmpty {
+                let none = NSMenuItem(title: tr("Connect your phone to list apps"), action: nil, keyEquivalent: "")
+                none.isEnabled = false
+                menu.addItem(none)
+            }
+            let sorted = names.sorted { $0.value.localizedStandardCompare($1.value) == .orderedAscending }
+            for (pkg, name) in sorted {
+                let item = BlockMenuItem(title: name) {
+                    Task {
+                        do { try await Core.shared.adbVdSwitch(serial: info.serial, displayId: info.displayId, package: pkg) }
+                        catch { AppModel.shared.toast(.bad, error.localizedDescription) }
+                    }
+                }
+                // Disk icons only: a first open must not queue a request per app on the phone.
+                item.image = await Self.menuIcon(pkg, fetchOnMiss: false)
+                menu.addItem(item)
+            }
+            guard let view = bar.panel.contentView else { return }
+            menu.popUp(positioning: nil, at: NSPoint(x: view.bounds.maxX - 88, y: view.bounds.maxY + 4), in: view)
+        }
+    }
+
+    private static func menuIcon(_ pkg: String, fetchOnMiss: Bool = true) async -> NSImage? {
+        guard let icon = await PhoneIconStore.shared.local(pkg, fetchOnMiss: fetchOnMiss) else { return nil }
+        let small = NSImage(size: NSSize(width: 18, height: 18))
+        small.lockFocus(); icon.draw(in: NSRect(x: 0, y: 0, width: 18, height: 18)); small.unlockFocus()
+        return small
     }
 }
 
@@ -144,12 +187,19 @@ final class BlockMenuItem: NSMenuItem {
 private struct VDNavBar: View {
     let info: VDWindowInfo
     let onRecents: () -> Void
+    let onApps: () -> Void
+
+    /// Apps only where there is a home screen to come back to: the second screen.
+    static func showsApps(_ info: VDWindowInfo) -> Bool { info.kind == "second" }
 
     var body: some View {
         HStack(spacing: 2) {
             key("chevron.backward", tr("Back")) { send("back") }
             key("circle", tr("Home")) { send("home") }
             key("square.on.square", tr("Recent apps"), onRecents)
+            if Self.showsApps(info) {
+                key("square.grid.2x2", tr("Apps"), onApps)
+            }
         }
         .padding(3)
         .background(.regularMaterial, in: Capsule())

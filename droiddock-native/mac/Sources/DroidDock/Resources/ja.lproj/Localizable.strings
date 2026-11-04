@@ -232,6 +232,7 @@
 "Connect the phone over ADB to use desktop mode" = "デスクトップモードを使うには、スマートフォンを ADB で接続してください";
 "Connect via QR" = "QR コードで接続";
 "Connect your phone first" = "先にスマートフォンを接続してください";
+"Connect your phone to list apps" = "アプリ一覧を表示するにはスマホを接続してください";
 "Connected over {t}" = "{t} で接続中";
 "Connected to {name}" = "{name} に接続しました";
 "Connecting over Bluetooth…" = "Bluetooth で接続中…";
@@ -477,6 +478,7 @@
 "Keep running after quit" = "終了後も実行を続ける";
 "Keep the other device unlocked and nearby." = "もう一方のデバイスのロックを解除し、近くに置いておいてください。";
 "Keep the phone awake" = "スマートフォンをスリープさせない";
+"Keep working while the phone is locked" = "スマホのロック中も使い続ける";
 "Keeps scrcpy windows above other Mac windows." = "scrcpy のウインドウを他の Mac のウインドウより前面に保ちます。";
 "Keeps the virtual display's launcher, status and nav bars around a single app opened on this Mac. Off makes the window read as that app rather than a phone screen." = "この Mac で開いた 1 つのアプリの周囲に、仮想ディスプレイのランチャー、ステータスバー、ナビゲーションバーを残します。オフにすると、ウインドウはスマートフォンの画面ではなくそのアプリ自体のように見えます。";
 "Keyboard shortcuts" = "キーボードショートカット";
@@ -1185,6 +1187,7 @@
 "The phone reported no launchable apps." = "起動できるアプリはないとスマートフォンから報告されました。";
 "The phone still responds; it just isn't showing anything." = "スマートフォンは応答していますが、何も表示されていません。";
 "The phone's own layout, scaled up to the window." = "スマートフォン本来のレイアウトを、ウインドウに合わせて拡大します。";
+"The second screen and app windows stay on while your phone stays locked with its screen off. Press the phone's power button twice to use it." = "スマホをロックして画面をオフにしたまま、セカンドスクリーンとアプリウインドウを使い続けられます。スマホを使うときは電源ボタンを2回押してください。";
 "The stream ended unexpectedly." = "ストリームが予期せず終了しました。";
 "The transfer failed." = "転送に失敗しました。";
 "The update installed but the app didn't relaunch. Quit and reopen DroidDock." = "アップデートはインストールされましたが、アプリが再起動しませんでした。DroidDock を終了して開き直してください。";

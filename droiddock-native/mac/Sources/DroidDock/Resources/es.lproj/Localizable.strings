@@ -232,6 +232,7 @@
 "Connect the phone over ADB to use desktop mode" = "Conecta el teléfono por ADB para usar el modo escritorio";
 "Connect via QR" = "Conectar con QR";
 "Connect your phone first" = "Conecta primero tu teléfono";
+"Connect your phone to list apps" = "Conecta el teléfono para ver las apps";
 "Connected over {t}" = "Conectado por {t}";
 "Connected to {name}" = "Conectado a {name}";
 "Connecting over Bluetooth…" = "Conectando por Bluetooth…";
@@ -477,6 +478,7 @@
 "Keep running after quit" = "Seguir ejecutándose tras salir";
 "Keep the other device unlocked and nearby." = "Mantén el otro dispositivo desbloqueado y cerca.";
 "Keep the phone awake" = "Mantener el teléfono despierto";
+"Keep working while the phone is locked" = "Seguir funcionando con el teléfono bloqueado";
 "Keeps scrcpy windows above other Mac windows." = "Mantiene las ventanas de scrcpy por encima de las demás del Mac.";
 "Keeps the virtual display's launcher, status and nav bars around a single app opened on this Mac. Off makes the window read as that app rather than a phone screen." = "Conserva el lanzador y las barras de estado y navegación de la pantalla virtual alrededor de una app abierta en este Mac. Desactivado, la ventana se lee como esa app y no como una pantalla de teléfono.";
 "Keyboard shortcuts" = "Atajos de teclado";
@@ -1185,6 +1187,7 @@
 "The phone reported no launchable apps." = "El teléfono no ha informado de ninguna app que se pueda abrir.";
 "The phone still responds; it just isn't showing anything." = "El teléfono sigue respondiendo, pero no muestra nada.";
 "The phone's own layout, scaled up to the window." = "La disposición propia del teléfono, ampliada a la ventana.";
+"The second screen and app windows stay on while your phone stays locked with its screen off. Press the phone's power button twice to use it." = "La segunda pantalla y las ventanas de apps siguen activas mientras el teléfono sigue bloqueado y con la pantalla apagada. Pulsa dos veces el botón de encendido del teléfono para usarlo.";
 "The stream ended unexpectedly." = "La transmisión terminó inesperadamente.";
 "The transfer failed." = "La transferencia falló.";
 "The update installed but the app didn't relaunch. Quit and reopen DroidDock." = "La actualización se instaló pero la app no se reabrió. Cierra y vuelve a abrir DroidDock.";

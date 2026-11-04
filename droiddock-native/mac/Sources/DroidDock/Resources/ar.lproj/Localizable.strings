@@ -232,6 +232,7 @@
 "Connect the phone over ADB to use desktop mode" = "وصّل الهاتف عبر ADB لاستخدام وضع سطح المكتب";
 "Connect via QR" = "الاتصال عبر رمز QR";
 "Connect your phone first" = "اربط هاتفك أولًا";
+"Connect your phone to list apps" = "صِل هاتفك لعرض التطبيقات";
 "Connected over {t}" = "متصل عبر {t}";
 "Connected to {name}" = "متصل بـ {name}";
 "Connecting over Bluetooth…" = "جارٍ الاتصال عبر البلوتوث…";
@@ -477,6 +478,7 @@
 "Keep running after quit" = "الاستمرار في العمل بعد الإنهاء";
 "Keep the other device unlocked and nearby." = "أبقِ الجهاز الآخر مفتوحًا وقريبًا.";
 "Keep the phone awake" = "إبقاء الهاتف مستيقظًا";
+"Keep working while the phone is locked" = "يبقى يعمل والهاتف مقفل";
 "Keeps scrcpy windows above other Mac windows." = "يُبقي نوافذ scrcpy فوق نوافذ الـ Mac الأخرى.";
 "Keeps the virtual display's launcher, status and nav bars around a single app opened on this Mac. Off makes the window read as that app rather than a phone screen." = "يُبقي مشغّل التطبيقات وشريطي الحالة والتنقل الخاصة بالشاشة الافتراضية حول تطبيق واحد مفتوح على هذا الـ Mac. وإيقافه يجعل النافذة تبدو كذلك التطبيق لا كشاشة هاتف.";
 "Keyboard shortcuts" = "اختصارات لوحة المفاتيح";
@@ -1185,6 +1187,7 @@
 "The phone reported no launchable apps." = "أبلغ الهاتف بعدم وجود تطبيقات قابلة للتشغيل.";
 "The phone still responds; it just isn't showing anything." = "ما زال الهاتف يستجيب، لكنه لا يعرض أي شيء.";
 "The phone's own layout, scaled up to the window." = "تخطيط الهاتف نفسه، مكبَّرًا ليملأ النافذة.";
+"The second screen and app windows stay on while your phone stays locked with its screen off. Press the phone's power button twice to use it." = "تظل الشاشة الثانية ونوافذ التطبيقات تعمل بينما يبقى هاتفك مقفلاً وشاشته مطفأة. اضغط زر التشغيل في الهاتف مرتين لاستخدامه.";
 "The stream ended unexpectedly." = "انتهى البث بشكل غير متوقع.";
 "The transfer failed." = "فشل النقل.";
 "The update installed but the app didn't relaunch. Quit and reopen DroidDock." = "تم تثبيت التحديث لكن التطبيق لم يُعد التشغيل. أغلق DroidDock وافتحه من جديد.";
