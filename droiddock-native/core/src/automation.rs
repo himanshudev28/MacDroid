@@ -17,6 +17,7 @@
 //! droiddock://desktop             start desktop mode (needs ADB + scrcpy)
 //! droiddock://app/<package>       open one Android app in its own Mac window
 //! droiddock://clipboard/push      send the Mac clipboard to the phone now
+//! droiddock://commandbar        open the command bar
 //! droiddock://open                just focus the main window
 //! ```
 //!
@@ -45,6 +46,9 @@ pub fn handle_url(app: &AppHandle, url: &str) {
     let path = rest.split(['?', '#']).next().unwrap_or("").trim_matches('/');
     let mut parts = path.split('/');
     let head = parts.next().unwrap_or("");
+    // S10: any web page can fire these URLs. State-changing routes are
+    // rate-limited per route (`open` and `commandbar` never are) and tagged
+    // `confirm: true` so the UI can ask first.
 
     match head {
         "open" | "" => focus_main(app),
@@ -56,30 +60,69 @@ pub fn handle_url(app: &AppHandle, url: &str) {
             // on the phone, and a pop-out that appears with no visible cause is
             // worse than landing them on the tab that explains it.
             let action = if parts.next() == Some("adb") { "mirror-adb" } else { "mirror" };
-            let _ = app.emit("automation", serde_json::json!({ "action": action }));
+            if action == "mirror-adb" && !rate_ok("mirror-adb", std::time::Instant::now()) {
+                return;
+            }
+            let _ = app.emit(
+                "automation",
+                serde_json::json!({ "action": action, "confirm": action == "mirror-adb" }),
+            );
         }
         "desktop" => {
+            if !rate_ok("desktop", std::time::Instant::now()) {
+                return;
+            }
             focus_main(app);
-            let _ = app.emit("automation", serde_json::json!({ "action": "desktop" }));
+            let _ = app.emit("automation", serde_json::json!({ "action": "desktop", "confirm": true }));
         }
         "app" => {
             // `droiddock://app/com.whatsapp`
             let Some(pkg) = parts.next().filter(|p| is_package_name(p)) else {
                 return;
             };
+            if !rate_ok("app", std::time::Instant::now()) {
+                return;
+            }
             focus_main(app);
             let _ = app.emit(
                 "automation",
-                serde_json::json!({ "action": "app", "pkg": pkg }),
+                serde_json::json!({ "action": "app", "pkg": pkg, "confirm": true }),
             );
         }
+        "commandbar" => {
+            // Opens the command bar only; it changes nothing by itself, so no confirmation.
+            let _ = app.emit("automation", commandbar_event());
+        }
         "clipboard" => {
-            if parts.next() == Some("push") {
-                let _ = app.emit("automation", serde_json::json!({ "action": "clipboard-push" }));
+            if parts.next() == Some("push") && rate_ok("clipboard-push", std::time::Instant::now()) {
+                let _ = app.emit("automation", serde_json::json!({ "action": "clipboard-push", "confirm": true }));
             }
         }
         _ => {}
     }
+}
+
+/// The event for `droiddock://commandbar` (the Mac side shows the ⌥Space bar).
+fn commandbar_event() -> serde_json::Value {
+    serde_json::json!({ "action": "commandbar" })
+}
+
+static LAST_ROUTE: std::sync::Mutex<Vec<(&'static str, std::time::Instant)>> = std::sync::Mutex::new(Vec::new());
+const MIN_GAP: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// At most one call per `MIN_GAP` for each state-changing route.
+fn rate_ok(route: &'static str, now: std::time::Instant) -> bool {
+    let mut g = LAST_ROUTE.lock().unwrap_or_else(|e| e.into_inner());
+    match g.iter_mut().find(|(r, _)| *r == route) {
+        Some((_, t)) => {
+            if now.saturating_duration_since(*t) < MIN_GAP {
+                return false;
+            }
+            *t = now;
+        }
+        None => g.push((route, now)),
+    }
+    true
 }
 
 /// Bringing the main window forward is the host's job: it reacts to the
@@ -96,7 +139,7 @@ fn focus_main(app: &AppHandle) {
 /// between, so this is defence in depth rather than the only thing standing
 /// between a URL and a command injection. It also keeps a malformed URL from
 /// spawning a scrcpy that can only fail.
-fn is_package_name(s: &str) -> bool {
+pub(crate) fn is_package_name(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 255
         && s.split('.').all(|seg| {
@@ -106,7 +149,14 @@ fn is_package_name(s: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_package_name;
+    use super::{commandbar_event, is_package_name, rate_ok, MIN_GAP};
+
+    #[test]
+    fn commandbar_route_emits_unconfirmed_action() {
+        let e = commandbar_event();
+        assert_eq!(e["action"], "commandbar");
+        assert!(e.get("confirm").is_none());
+    }
 
     #[test]
     fn accepts_real_package_names() {
@@ -132,5 +182,14 @@ mod tests {
         assert!(!is_package_name("../../etc/passwd"));
         assert!(!is_package_name("com.what$app"));
         assert!(!is_package_name(&"a".repeat(300)));
+    }
+
+    #[test]
+    fn rate_limit_is_per_route() {
+        let t = std::time::Instant::now();
+        assert!(rate_ok("t-desktop", t));
+        assert!(!rate_ok("t-desktop", t));
+        assert!(rate_ok("t-app", t), "another route is independent");
+        assert!(rate_ok("t-desktop", t + MIN_GAP));
     }
 }

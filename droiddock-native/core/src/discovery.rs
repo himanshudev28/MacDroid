@@ -1,7 +1,8 @@
 use crate::host::{AppHandle, Manager};
 use tokio::net::UdpSocket;
 
-/// UDP discovery on `port + 1`: phone broadcasts `DROIDDOCK:DISCOVER:<token>`
+/// UDP discovery on `port + 1`: phone broadcasts `DROIDDOCK:DISCOVER2:<hmac>` (or the
+/// legacy `DROIDDOCK:DISCOVER:<token>` from older phones)
 /// when it can't reach any known IP (e.g. both devices switched networks);
 /// we reply `DROIDDOCK:HERE` so it learns our current IP without re-pairing.
 /// Byte-for-byte match to wifi.js — see CLAUDE.md's compatibility mandate.
@@ -47,9 +48,77 @@ pub async fn run(app: AppHandle, discovery_port: u16) {
             .unwrap()
             .token
             .clone();
-        let expected = format!("DROIDDOCK:DISCOVER:{token}");
-        if text.trim() == expected {
+        if probe_matches(text.trim(), &token, unix_now()) {
             let _ = socket.send_to(b"DROIDDOCK:HERE", addr).await;
         }
     }
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Lowercase hex of the first 16 bytes of HMAC-SHA256(key = token UTF-8,
+/// msg = "droiddock-discover:" + w), `w` a decimal 5-minute window number.
+pub fn discover2_tag(token: &str, w: u64) -> String {
+    use hmac::{digest::KeyInit, Hmac, Mac};
+    let mut m = Hmac::<sha2::Sha256>::new_from_slice(token.as_bytes()).expect("hmac accepts any key length");
+    m.update(format!("droiddock-discover:{w}").as_bytes());
+    let out = m.finalize().into_bytes();
+    out[..16].iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Accepts `DROIDDOCK:DISCOVER2:<hex>` for windows w-1..=w+1 (clock skew) and
+/// the legacy `DROIDDOCK:DISCOVER:<token>` (older phones). Constant-time compares.
+pub fn probe_matches(text: &str, token: &str, now_secs: u64) -> bool {
+    use crate::crypto::ct_eq;
+    if let Some(hex) = text.strip_prefix("DROIDDOCK:DISCOVER2:") {
+        let w = now_secs / 300;
+        let mut ok = false;
+        for cand in [w.saturating_sub(1), w, w + 1] {
+            ok |= ct_eq(hex.as_bytes(), discover2_tag(token, cand).as_bytes());
+        }
+        return ok;
+    }
+    if let Some(t) = text.strip_prefix("DROIDDOCK:DISCOVER:") {
+        return ct_eq(t.as_bytes(), token.as_bytes());
+    }
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Vector for the phone side: token "acad86c1-6041-408c-bce7-2495dd338711",
+    // now = 1_762_500_000 s -> w = 5_875_000.
+    #[test]
+    fn discover2_vector_and_window_skew() {
+        let tok = "acad86c1-6041-408c-bce7-2495dd338711";
+        let now = 1_762_500_000u64;
+        let w = now / 300;
+        let tag = discover2_tag(tok, w);
+        assert_eq!(tag.len(), 32);
+        assert_eq!(tag, VECTOR_W, "vector for w={w}");
+        let probe = |w: u64| format!("DROIDDOCK:DISCOVER2:{}", discover2_tag(tok, w));
+        assert!(probe_matches(&probe(w), tok, now));
+        assert!(probe_matches(&probe(w - 1), tok, now));
+        assert!(probe_matches(&probe(w + 1), tok, now));
+        assert!(!probe_matches(&probe(w - 2), tok, now));
+        assert!(!probe_matches(&probe(w + 2), tok, now));
+        assert!(!probe_matches(&probe(w), "other-token", now));
+        assert!(!probe_matches("DROIDDOCK:DISCOVER2:", tok, now));
+    }
+
+    #[test]
+    fn legacy_probe_still_answers() {
+        assert!(probe_matches("DROIDDOCK:DISCOVER:abc", "abc", 0));
+        assert!(!probe_matches("DROIDDOCK:DISCOVER:abd", "abc", 0));
+        assert!(!probe_matches("DROIDDOCK:DISCOVER:", "abc", 0));
+    }
+
+    const VECTOR_W: &str = "43a61c8666352254f2cd02f1979e0288";
 }

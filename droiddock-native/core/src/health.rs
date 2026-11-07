@@ -152,6 +152,20 @@ fn mac_items(app: &AppHandle) -> Vec<HealthItem> {
         None,
     ));
 
+    // The TLS identity failing is a persistent fault (the link silently stays
+    // unencrypted), not a one-time toast.
+    items.push(HealthItem::mac(
+        "mac-tls",
+        crate::tls::identity_ok(app),
+        "warn",
+        "Link encryption (this Mac)",
+        "This Mac couldn't create or save its encryption identity, so it accepts \
+         unencrypted connections from phones (the downgrade protection is off until this is \
+         fixed). Check that DroidDock can write to its application support folder \
+         and that the disk isn't full, then reopen this panel to retry.",
+        None,
+    ));
+
     // See the module doc: this one is a pointer, not a probe. It is here
     // because "phone notifications never appear on the Mac" is the single most
     // common report, and its usual cause is one switch in System Settings that

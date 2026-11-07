@@ -5,7 +5,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use crate::host::{AppHandle, Emitter, Manager};
@@ -23,6 +23,69 @@ const THUMB_TIMEOUT: Duration = Duration::from_secs(12);
 /// at `OUTBOX_CAP × CHUNK (256 KiB) ≈ 4 MiB` reproduces `transfer.js`'s
 /// `MAX_INFLIGHT` window — a full queue back-pressures `send_binary(...).await`.
 const OUTBOX_CAP: usize = 16;
+/// Pre-auth hardening (S8): at most `MAX_PRE_AUTH` sockets may be
+/// unauthenticated at once, at most `MAX_PRE_AUTH_PER_IP` of them from one
+/// address (so one LAN peer can't lock the real phone out), and an
+/// unauthenticated peer may send at most `PRE_AUTH_MAX_TEXT` bytes.
+const MAX_PRE_AUTH: usize = 64;
+const MAX_PRE_AUTH_PER_IP: usize = 4;
+const PRE_AUTH_MAX_TEXT: usize = 8 * 1024;
+/// OkHttp closes the phone's socket once its send queue passes 16 MiB, so no
+/// legitimate message is larger; tungstenite's default is 64 MiB. Leaves room
+/// for an 8 MiB clipboard image as base64 (~10.7 MB) and a 6 MiB screenshot.
+const MAX_WS_MESSAGE: usize = 16 * 1024 * 1024;
+
+#[derive(Default)]
+struct SlotTable {
+    total: usize,
+    by_ip: HashMap<std::net::IpAddr, usize>,
+}
+
+impl SlotTable {
+    fn try_take(&mut self, ip: std::net::IpAddr, global: usize, per_ip: usize) -> bool {
+        let n = self.by_ip.get(&ip).copied().unwrap_or(0);
+        if self.total >= global || n >= per_ip {
+            return false;
+        }
+        self.total += 1;
+        self.by_ip.insert(ip, n + 1);
+        true
+    }
+    fn release(&mut self, ip: std::net::IpAddr) {
+        self.total = self.total.saturating_sub(1);
+        match self.by_ip.get_mut(&ip) {
+            Some(n) if *n > 1 => *n -= 1,
+            _ => {
+                self.by_ip.remove(&ip);
+            }
+        }
+    }
+}
+
+static PRE_AUTH: std::sync::Mutex<Option<SlotTable>> = std::sync::Mutex::new(None);
+
+/// Releases the pre-auth slot exactly once, on auth or on drop.
+struct PreAuthSlot(Option<std::net::IpAddr>);
+impl PreAuthSlot {
+    fn take(ip: std::net::IpAddr) -> Option<Self> {
+        let mut g = PRE_AUTH.lock().unwrap_or_else(|e| e.into_inner());
+        g.get_or_insert_with(SlotTable::default)
+            .try_take(ip, MAX_PRE_AUTH, MAX_PRE_AUTH_PER_IP)
+            .then_some(Self(Some(ip)))
+    }
+    fn release(&mut self) {
+        if let Some(ip) = self.0.take() {
+            if let Some(t) = PRE_AUTH.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+                t.release(ip);
+            }
+        }
+    }
+}
+impl Drop for PreAuthSlot {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
 /// Phase 19: caps concurrent `mac-fs-pull` transfers a paired phone can have
 /// in flight at once — unlike the existing Mac-initiated fs-pull/fs-push
 /// paths (one at a time, from a user action), a phone can spam this request,
@@ -66,7 +129,6 @@ struct WsLink {
 struct BleLinkTx {
     id: u64,
     conn: Arc<crate::ble_policy::Conn>,
-    up_since_ms: i64,
 }
 
 struct PhoneHandle {
@@ -202,6 +264,19 @@ pub async fn kill_ws(state: &SharedState) {
     }
 }
 
+/// Drop every link of the current phone (Wi-Fi and Bluetooth) right now. Each
+/// connection's own cleanup then unregisters it. Used by "Reset pairing".
+pub async fn drop_phone(state: &SharedState) {
+    if let Some(p) = state.phone.lock().await.as_mut() {
+        if let Some(k) = p.ws.as_mut().and_then(|w| w.kill.take()) {
+            let _ = k.send(());
+        }
+        if let Some(b) = &p.ble {
+            b.conn.kill();
+        }
+    }
+}
+
 /// Park until a phone is linked, waking on the link itself rather than on a
 /// timer. Returns immediately when one already is.
 ///
@@ -257,15 +332,34 @@ pub async fn status(state: &SharedState) -> WifiStatus {
     }
 }
 
+/// An id → waiter table. One implementation for JSON requests (`u64` →
+/// family + sender) and binary thumbnails/icons (`u32` → sender).
+struct Pending<K, V>(Mutex<HashMap<K, V>>);
+
+impl<K, V> Default for Pending<K, V> {
+    fn default() -> Self {
+        Self(Mutex::new(HashMap::new()))
+    }
+}
+
+impl<K: std::hash::Hash + Eq, V> Pending<K, V> {
+    async fn add(&self, k: K, v: V) {
+        self.0.lock().await.insert(k, v);
+    }
+    async fn take(&self, k: &K) -> Option<V> {
+        self.0.lock().await.remove(k)
+    }
+}
+
 pub struct ServerState {
     phone: Mutex<Option<PhoneHandle>>,
     /// reqId → (expected reply family, waiter) for JSON request/response
     /// (sms, contacts, fs-list, …). The family is carried so a reply can only
     /// resolve the request it actually belongs to — see `reply_matches`.
-    pending: Mutex<HashMap<u64, (String, oneshot::Sender<Value>)>>,
+    pending: Pending<u64, (String, oneshot::Sender<Value>)>,
     req_seq: AtomicU64,
     /// Numeric thumb reqId → waiter, resolved by the KIND_THUMB binary frame.
-    pending_thumb: Mutex<HashMap<u32, oneshot::Sender<Result<Vec<u8>, String>>>>,
+    pending_thumb: Pending<u32, oneshot::Sender<Result<Vec<u8>, String>>>,
     thumb_seq: AtomicU32,
     /// transferId → in-flight file transfer, for binary chunk routing (Phase 5).
     pub transfers: TransferRegistry,
@@ -327,9 +421,9 @@ impl Default for ServerState {
     fn default() -> Self {
         Self {
             phone: Mutex::default(),
-            pending: Mutex::default(),
+            pending: Pending::default(),
             req_seq: AtomicU64::default(),
-            pending_thumb: Mutex::default(),
+            pending_thumb: Pending::default(),
             thumb_seq: AtomicU32::default(),
             transfers: TransferRegistry::default(),
             mac_fs_pull_limit: Semaphore::new(MAX_CONCURRENT_MAC_FS_PULLS),
@@ -409,14 +503,14 @@ pub async fn request(
     body.insert("reqId".into(), Value::from(req_id));
 
     let (tx, rx) = oneshot::channel();
-    state.pending.lock().await.insert(req_id, (family, tx));
+    state.pending.add(req_id, (family, tx)).await;
 
     match send_json_on(state, Value::Object(body), None).await {
         Some(kind) => {
             state.pending_link.lock().await.insert(req_id, kind);
         }
         None => {
-            state.pending.lock().await.remove(&req_id);
+            state.pending.take(&req_id).await;
             return Err("Phone not connected over Wi-Fi".into());
         }
     }
@@ -429,7 +523,7 @@ pub async fn request(
         }
         Ok(Ok(value)) => Ok(value),
         _ => {
-            state.pending.lock().await.remove(&req_id);
+            state.pending.take(&req_id).await;
             Err("Phone did not respond".into())
         }
     }
@@ -478,17 +572,17 @@ async fn request_binary_thumb(
 ) -> Result<Vec<u8>, String> {
     let req_id = (state.thumb_seq.fetch_add(1, Ordering::Relaxed) & 0x3fff_ffff) | 0x4000_0000;
     let (tx, rx) = oneshot::channel();
-    state.pending_thumb.lock().await.insert(req_id, tx);
+    state.pending_thumb.add(req_id, tx).await;
 
     if !send_json(state, build(req_id)).await {
-        state.pending_thumb.lock().await.remove(&req_id);
+        state.pending_thumb.take(&req_id).await;
         return Err("Phone not connected over Wi-Fi".into());
     }
 
     match tokio::time::timeout(THUMB_TIMEOUT, rx).await {
         Ok(Ok(result)) => result,
         _ => {
-            state.pending_thumb.lock().await.remove(&req_id);
+            state.pending_thumb.take(&req_id).await;
             Err("Thumbnail request timed out".into())
         }
     }
@@ -696,7 +790,7 @@ pub async fn run(app: AppHandle, state: SharedState, port: u16) {
     LISTENING.store(true, Ordering::Relaxed);
     loop {
         match listener.accept().await {
-            Ok((stream, _peer)) => {
+            Ok((stream, peer)) => {
                 // Nagle batches small writes for up to ~40ms waiting for more
                 // to coalesce. Almost everything on this socket is small and
                 // latency-shaped — a tap to inject, a keystroke, a clipboard
@@ -705,7 +799,7 @@ pub async fn run(app: AppHandle, state: SharedState, port: u16) {
                 // link never needs. File transfers already send 256 KiB
                 // chunks, which fill segments on their own.
                 let _ = stream.set_nodelay(true);
-                tokio::spawn(handle_connection(app.clone(), state.clone(), stream));
+                tokio::spawn(handle_connection(app.clone(), state.clone(), stream, peer.ip()));
             }
             Err(e) => {
                 eprintln!("[ws] accept error: {e}");
@@ -717,16 +811,32 @@ pub async fn run(app: AppHandle, state: SharedState, port: u16) {
 
 /// English template of the blocked-plain-link event; Swift localizes it via `tr(key, params)`.
 const BLOCKED_KEY: &str = "Blocked an unencrypted connection from {name}, which normally connects securely. Update DroidDock on the phone.";
+/// Same, for a hello with no `deviceId` (an old phone, or something pretending to be one).
+const BLOCKED_NO_ID_KEY: &str = "Blocked an unencrypted connection from {name}. If this is your phone, use Reset pairing in Settings and pair it again.";
 
-async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream) {
+async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream, peer_ip: std::net::IpAddr) {
     // One port, two protocols: a ClientHello (0x16) gets the TLS handshake first,
     // anything else is the plain WebSocket upgrade as before. A bare TCP probe
     // returns None here without a log line.
+    let Some(mut pre_auth) = PreAuthSlot::take(peer_ip) else {
+        eprintln!("[ws] too many unauthenticated connections; dropping one");
+        return;
+    };
     let Some(stream) = crate::tls::accept(&app, stream).await else { return };
     let secure = stream.is_tls();
     // A peer that sends one byte ("G") or goes silent after the TLS handshake
     // must not hold this task and its fd forever.
-    let upgraded = tokio::time::timeout(Duration::from_secs(10), tokio_tungstenite::accept_async(stream))
+    let upgraded = tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio_tungstenite::accept_async_with_config(
+            stream,
+            Some(
+                tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+                    .max_message_size(Some(MAX_WS_MESSAGE))
+                    .max_frame_size(Some(MAX_WS_MESSAGE)),
+            ),
+        ),
+    )
         .await
         .unwrap_or_else(|_| {
             Err(tokio_tungstenite::tungstenite::Error::Io(std::io::Error::new(
@@ -822,6 +932,10 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                     continue;
                 }
                 let Ok(text) = ws_msg.into_text() else { continue };
+                if !authed && text.len() > PRE_AUTH_MAX_TEXT {
+                    eprintln!("[ws] HANDSHAKE REJECT: oversized pre-auth message");
+                    break;
+                }
                 let Ok(raw): Result<Value, _> = serde_json::from_str(&text) else { continue };
 
                 if !authed {
@@ -832,7 +946,7 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                         tokio::time::sleep(Duration::from_millis(1000)).await;
                         break; // not a valid hello — close, matching wifi.js
                     };
-                    if token != live_config(&app).token {
+                    if !crate::crypto::ct_eq(token.as_bytes(), live_config(&app).token.as_bytes()) {
                         eprintln!("[ws] HANDSHAKE REJECT: token mismatch from {hello_name:?}");
                         tokio::time::sleep(Duration::from_millis(1000)).await;
                         break;
@@ -856,19 +970,6 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                                 // frame, so awaiting it means the pin was flushed first.
                                 let pin = crate::tls::pin_message(&token, &id.fp);
                                 let _ = outbox_tx.send(WsMessage::text(pin.to_string())).await;
-                                let _ = outbox_tx.send(close).await;
-                                let _ = tokio::time::timeout(Duration::from_secs(2), &mut writer).await;
-                                // Finish the WebSocket close handshake (read until the
-                                // peer's Close, end of stream, or 2 s) so dropping the
-                                // socket can't RST away the frames just sent.
-                                let _ = tokio::time::timeout(Duration::from_secs(2), async {
-                                    while let Some(Ok(m)) = read.next().await {
-                                        if m.is_close() {
-                                            break;
-                                        }
-                                    }
-                                })
-                                .await;
                             }
                             _ => {
                                 // Old phone (no `tls` cap) on the block list: offer the
@@ -885,35 +986,29 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                                         "action": "allow-plain",
                                     })),
                                     Some(_) => None,
-                                    None => Some(json!({
-                                        "kind": "bad",
-                                        "key": BLOCKED_KEY,
-                                        "params": { "name": hello_name },
-                                        "text": BLOCKED_KEY.replace("{name}", &hello_name),
-                                    })),
+                                    None => {
+                                        let key = if device_id.is_none() { BLOCKED_NO_ID_KEY } else { BLOCKED_KEY };
+                                        Some(json!({
+                                            "kind": "bad",
+                                            "key": key,
+                                            "params": { "name": hello_name },
+                                            "text": key.replace("{name}", &hello_name),
+                                        }))
+                                    }
                                 };
                                 if let Some(p) = payload {
                                     emit_event(&app, "wifi-event", &p);
                                 }
-                                let _ = outbox_tx.send(close).await;
-                                let _ = tokio::time::timeout(Duration::from_secs(2), &mut writer).await;
-                                // Finish the WebSocket close handshake (read until the
-                                // peer's Close, end of stream, or 2 s) so dropping the
-                                // socket can't RST away the frames just sent.
-                                let _ = tokio::time::timeout(Duration::from_secs(2), async {
-                                    while let Some(Ok(m)) = read.next().await {
-                                        if m.is_close() {
-                                            break;
-                                        }
-                                    }
-                                })
-                                .await;
                             }
                         }
+                        // The writer drains the outbox in order and stops after the close
+                        // frame, so awaiting it means anything queued above went out first.
+                        finish_blocked(&outbox_tx, &mut writer, &mut read, close).await;
                         break;
                     }
                     eprintln!("[ws] HANDSHAKE OK: {hello_name:?} caps={caps:?} deviceId={device_id:?} tls={secure}");
                     authed = true;
+                    pre_auth.release();
                     let phone_tls = caps.iter().any(|c| c == crate::tls::CAP);
 
                     // Tier C: encryption engages only when the phone asked for
@@ -960,15 +1055,20 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                         tls: secure,
                     };
                     my_link_id = Some(link.id);
-                    let reg = register_link(
+                    let Some(reg) = register_link(
                         &app,
                         &state,
                         hello_name.clone(),
                         device_id.clone(),
                         caps,
                         NewLink::Ws(link, enc_caps),
+                        Some(&token),
                     )
-                    .await;
+                    .await
+                    else {
+                        eprintln!("[ws] HANDSHAKE REJECT: token changed during the handshake");
+                        break;
+                    };
                     // Deliberately sent unsealed: it is the message that tells
                     // the phone encryption is on, so it cannot itself be
                     // encrypted. Everything after it is sealed.
@@ -1031,11 +1131,13 @@ async fn register_link(
     device_id: Option<String>,
     caps: Vec<String>,
     link: NewLink,
-) -> Registered {
+    // The token the hello presented; re-checked under the phone lock so a
+    // "Reset pairing" that lands mid-handshake can't register an old-token phone.
+    token: Option<&str>,
+) -> Option<Registered> {
     let enc_caps = if let NewLink::Ws(_, e) = &link { Some(e.clone()) } else { None };
     let mut fresh = true;
     let mut evicted: Option<PhoneHandle> = None;
-    let mut replaced_ws = false;
     let mut old_kills: Vec<oneshot::Sender<()>> = Vec::new();
     let mut old_ble: Option<Arc<crate::ble_policy::Conn>> = None;
     {
@@ -1043,6 +1145,11 @@ async fn register_link(
         // hellos can't both see "no previous" and leave a ghost connection
         // whose kill switch is never fired.
         let mut phone = state.phone.lock().await;
+        if let Some(t) = token {
+            if !crate::crypto::ct_eq(t.as_bytes(), live_config(app).token.as_bytes()) {
+                return None;
+            }
+        }
         let same = phone.as_ref().is_some_and(|p| match (&p.device_id, &device_id) {
             (Some(a), Some(b)) => a == b,
             (None, None) => p.name == name,
@@ -1050,13 +1157,24 @@ async fn register_link(
         });
         if same {
             let p = phone.as_mut().unwrap();
+            // Replacing a live Wi-Fi link: fail the OLD link's requests and
+            // transfers now, before the new link exists, so the sweep can't hit
+            // requests the new socket makes. (Its own cleanup is skipped: its
+            // link id is no longer the registered one.)
+            if matches!(link, NewLink::Ws(..)) && p.ws.is_some() {
+                state.transfers.abort_all().await;
+                fail_link_requests(state, LinkKind::Ws).await;
+                crate::audio::on_disconnect(app);
+                crate::mac_remote::release_all();
+                state.last_caps.lock().await.clear();
+                state.link_caps.lock().await.clear();
+            }
             p.caps = caps.clone();
             p.name = name.clone();
             match link {
                 NewLink::Ws(l, _) => {
                     fresh = p.ble.is_none();
                     if let Some(mut old) = p.ws.replace(l) {
-                        replaced_ws = true;
                         old_kills.extend(old.kill.take());
                     }
                 }
@@ -1095,17 +1213,13 @@ async fn register_link(
     if let Some(c) = old_ble {
         c.kill();
     }
-    if replaced_ws {
-        state.transfers.abort_all().await;
-    }
-
     let mut welcome_caps = feature_caps(app);
     if let Some(enc) = enc_caps {
         welcome_caps.extend(enc.iter().cloned());
         *state.link_caps.lock().await = enc;
     }
     *state.last_caps.lock().await = welcome_caps.clone();
-    Registered { fresh, welcome_caps, name, device_id, caps }
+    Some(Registered { fresh, welcome_caps, name, device_id, caps })
 }
 
 /// Everything that follows a successful hello/welcome. The fresh-session side
@@ -1185,6 +1299,28 @@ async fn finish_register(app: &AppHandle, state: &SharedState, reg: &Registered,
     crate::ble_policy::after_register(app, state).await;
 }
 
+/// Fail every request that was in flight on a dead link of `kind` (and, for
+/// Wi-Fi, the pending thumbnail waiters) instead of letting them time out.
+async fn fail_link_requests(state: &SharedState, kind: LinkKind) {
+    {
+        let mut links = state.pending_link.lock().await;
+        let dead: Vec<u64> = links.iter().filter(|(_, k)| **k == kind).map(|(r, _)| *r).collect();
+        let mut pending = state.pending.0.lock().await;
+        for r in dead {
+            links.remove(&r);
+            if let Some((_, tx)) = pending.remove(&r) {
+                let _ = tx.send(json!({ LINK_CLOSED_KEY: true }));
+            }
+        }
+    }
+    if kind == LinkKind::Ws {
+        let mut thumbs = state.pending_thumb.0.lock().await;
+        for (_, tx) in thumbs.drain() {
+            let _ = tx.send(Err("Connection changed — try again".into()));
+        }
+    }
+}
+
 /// Remove one link. The phone is only "disconnected" when the last link goes;
 /// losing Wi-Fi while Bluetooth is up still aborts the Wi-Fi-only machinery.
 async fn unregister_link(app: &AppHandle, state: &SharedState, kind: LinkKind, id: u64) {
@@ -1212,28 +1348,14 @@ async fn unregister_link(app: &AppHandle, state: &SharedState, kind: LinkKind, i
         }
     };
     // Requests that went out on the dead link fail now, not after 8 s.
-    {
-        let mut links = state.pending_link.lock().await;
-        let dead: Vec<u64> = links.iter().filter(|(_, k)| **k == kind).map(|(r, _)| *r).collect();
-        let mut pending = state.pending.lock().await;
-        for r in dead {
-            links.remove(&r);
-            if let Some((_, tx)) = pending.remove(&r) {
-                let _ = tx.send(json!({ LINK_CLOSED_KEY: true }));
-            }
-        }
-    }
-    if kind == LinkKind::Ws {
-        let mut thumbs = state.pending_thumb.lock().await;
-        for (_, tx) in thumbs.drain() {
-            let _ = tx.send(Err("Connection changed — try again".into()));
-        }
-    }
+    fail_link_requests(state, kind).await;
     if last {
         // Sends the background loops back to sleep. Set before `abort_all` so
         // nothing starts fresh per-tick work on the way down.
         let _ = state.connected.send(false);
         state.ws_primary.store(false, Ordering::Relaxed);
+        state.last_caps.lock().await.clear();
+        state.link_caps.lock().await.clear();
         // Fail any in-flight file transfers so their commands don't hang.
         state.transfers.abort_all().await;
         emit_status(app, false, None, Vec::new(), None);
@@ -1266,9 +1388,11 @@ pub(crate) async fn ble_attach(
         name,
         device_id,
         caps,
-        NewLink::Ble(BleLinkTx { id, conn, up_since_ms: now_ms() }),
+        NewLink::Ble(BleLinkTx { id, conn }),
+        None,
     )
-    .await;
+    .await
+    .expect("no token check on BLE");
     (id, reg)
 }
 
@@ -1336,7 +1460,7 @@ async fn route_text(app: &AppHandle, state: &SharedState, raw: Value, origin: Li
     //    type routing → transfer::on_control.)
     if let Some(req_id) = raw.get("reqId").and_then(reqid_key) {
         let ty = raw.get("type").and_then(Value::as_str).unwrap_or("");
-        let mut pending = state.pending.lock().await;
+        let mut pending = state.pending.0.lock().await;
         // Only resolve when the reply belongs to the request family that
         // allocated this reqId. Without that check, a phone could craft a
         // message with a small numeric reqId and have it delivered as the
@@ -1504,62 +1628,25 @@ async fn route_text(app: &AppHandle, state: &SharedState, raw: Value, origin: Li
         // both `req_seq`'s numeric reqIds and the `phone-push*` string reqIds
         // — never look it up in `state.pending`.
         "mac-fs-list" => {
-            let Some(req_id) = raw.get("reqId").and_then(Value::as_str).map(str::to_string) else {
-                return;
-            };
-            let cfg = live_config(app);
-            if !cfg.mac_fs_enabled || cfg.is_paused() {
-                let _ = send_json(
-                    state,
-                    json!({ "type": "mac-fs-list-error", "reqId": req_id,
-                            "error": "Mac file browsing is turned off" }),
-                )
-                .await;
-                return;
-            }
-            let path = raw.get("path").and_then(Value::as_str).unwrap_or("").to_string();
+            let Some((req_id, path, cfg)) = mac_fs_gate(app, state, &raw, "mac-fs-list-error").await else { return };
             let roots = cfg.mac_fs_roots;
             // Spawned, not awaited inline: a slow or hung root would otherwise
             // stall the whole inbound read loop for every other feature.
             let state2 = state.clone();
             tokio::spawn(async move {
-            match if path.is_empty() {
-                Ok(crate::mac_fs::list_roots(&roots))
-            } else {
-                crate::mac_fs::list(&roots, &path).await
-            } {
-                Ok(entries) => {
-                    let _ = send_json(
-                        &state2,
-                        json!({ "type": "mac-fs-list-result", "reqId": req_id, "entries": entries }),
-                    )
-                    .await;
-                }
-                Err(error) => {
-                    let _ = send_json(
-                        &state2,
-                        json!({ "type": "mac-fs-list-error", "reqId": req_id, "error": error }),
-                    )
-                    .await;
-                }
-            }
+                let reply = match if path.is_empty() {
+                    Ok(crate::mac_fs::list_roots(&roots))
+                } else {
+                    crate::mac_fs::list(&roots, &path).await
+                } {
+                    Ok(entries) => json!({ "type": "mac-fs-list-result", "reqId": req_id, "entries": entries }),
+                    Err(error) => json!({ "type": "mac-fs-list-error", "reqId": req_id, "error": error }),
+                };
+                let _ = send_json(&state2, reply).await;
             });
         }
         "mac-fs-pull" => {
-            let Some(req_id) = raw.get("reqId").and_then(Value::as_str).map(str::to_string) else {
-                return;
-            };
-            let cfg = live_config(app);
-            if !cfg.mac_fs_enabled || cfg.is_paused() {
-                let _ = send_json(
-                    state,
-                    json!({ "type": "mac-fs-pull-error", "reqId": req_id,
-                            "error": "Mac file browsing is turned off" }),
-                )
-                .await;
-                return;
-            }
-            let path = raw.get("path").and_then(Value::as_str).unwrap_or("").to_string();
+            let Some((req_id, path, cfg)) = mac_fs_gate(app, state, &raw, "mac-fs-pull-error").await else { return };
             let roots = cfg.mac_fs_roots;
             let app2 = app.clone();
             let state2 = state.clone();
@@ -1569,20 +1656,16 @@ async fn route_text(app: &AppHandle, state: &SharedState, raw: Value, origin: Li
                 // reject outright over the cap instead of queueing unbounded
                 // waiters, so a malicious/broken client can't grow memory
                 // just by firing requests faster than they're served.
-                let permit = match state2.mac_fs_pull_limit.try_acquire() {
-                    Ok(p) => p,
-                    Err(_) => {
-                        let _ = send_json(
-                            &state2,
-                            json!({ "type": "mac-fs-pull-error", "reqId": req_id, "error": "Too many concurrent Mac file transfers — try again shortly" }),
-                        )
-                        .await;
-                        return;
-                    }
+                let Ok(permit) = state2.mac_fs_pull_limit.try_acquire() else {
+                    let _ = send_json(
+                        &state2,
+                        json!({ "type": "mac-fs-pull-error", "reqId": req_id, "error": "Too many concurrent Mac file transfers — try again shortly" }),
+                    )
+                    .await;
+                    return;
                 };
-                let req_id2 = req_id.clone();
                 if let Err(error) =
-                    crate::mac_fs::pull_to_phone(app2, state2.clone(), &roots, path, req_id2).await
+                    crate::mac_fs::pull_to_phone(app2, state2.clone(), &roots, path, req_id.clone()).await
                 {
                     let _ = send_json(
                         &state2,
@@ -1679,21 +1762,63 @@ async fn route_text(app: &AppHandle, state: &SharedState, raw: Value, origin: Li
         // stopping the ADB mDNS/tcp reconnect scan — mirrors wifi.js's
         // `forwardCb('pause', ...)` (which also ignores `until`; the Mac just
         // reacts to the next successful hello, above, rather than doing
-        // timestamp math). "resume" is ported for fidelity but is dead code
-        // in the shipped Android app — `ConnectionManager.resume()` sends no
-        // message at all, only stops pausing internally.
+        // timestamp math). (No phone build ever sent a
+        // "resume" message, so there is no handler for one.)
         "pause" => {
             app.state::<crate::adb::AdbState>().paused.store(true, std::sync::atomic::Ordering::Relaxed);
             emit_event(app, "wifi-event", &json!({ "kind": "info", "text": "Phone paused the link" }));
-        }
-        "resume" => {
-            app.state::<crate::adb::AdbState>().paused.store(false, std::sync::atomic::Ordering::Relaxed);
         }
 
         // Nothing else is wired. Silently ignored, exactly like wifi.js's
         // final no-op else branch.
         _ => {}
     }
+}
+
+/// End a refused connection cleanly: queue the close frame, wait for the writer
+/// to flush it, then read until the peer's Close, end of stream, or 2 s, so
+/// dropping the socket can't RST away the frames just sent.
+async fn finish_blocked<S>(
+    outbox: &mpsc::Sender<WsMessage>,
+    writer: &mut tokio::task::JoinHandle<()>,
+    read: &mut S,
+    close: WsMessage,
+) where
+    S: futures_util::Stream<Item = Result<WsMessage, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    let _ = outbox.send(close).await;
+    let _ = tokio::time::timeout(Duration::from_secs(2), &mut *writer).await;
+    let _ = tokio::time::timeout(Duration::from_secs(2), async {
+        while let Some(Ok(m)) = read.next().await {
+            if m.is_close() {
+                break;
+            }
+        }
+    })
+    .await;
+}
+
+/// Shared front door of the phone-initiated Mac-file requests: the string
+/// `reqId`, the enabled/paused gate (answered with `error_type` when off), and
+/// the requested path.
+async fn mac_fs_gate(
+    app: &AppHandle,
+    state: &SharedState,
+    raw: &Value,
+    error_type: &str,
+) -> Option<(String, String, crate::config::Config)> {
+    let req_id = raw.get("reqId").and_then(Value::as_str)?.to_string();
+    let cfg = live_config(app);
+    if !cfg.mac_fs_enabled || cfg.is_paused() {
+        let _ = send_json(
+            state,
+            json!({ "type": error_type, "reqId": req_id, "error": "Mac file browsing is turned off" }),
+        )
+        .await;
+        return None;
+    }
+    let path = raw.get("path").and_then(Value::as_str).unwrap_or("").to_string();
+    Some((req_id, path, cfg))
 }
 
 /// Route an inbound binary frame by its leading kind byte. Layout (see
@@ -1739,7 +1864,7 @@ async fn route_binary(app: &AppHandle, state: &SharedState, buf: Vec<u8>) {
     match kind {
         transfer::KIND_THUMB => {
             // The transferId slot IS the thumb reqId for KIND_THUMB frames.
-            if let Some(tx) = state.pending_thumb.lock().await.remove(&id) {
+            if let Some(tx) = state.pending_thumb.take(&id).await {
                 let _ = tx.send(Ok(buf[transfer::HEADER..].to_vec()));
             }
         }
@@ -1751,7 +1876,7 @@ async fn route_binary(app: &AppHandle, state: &SharedState, buf: Vec<u8>) {
 /// Resolve a pending thumb request with an error (called from transfer control
 /// on `photo-thumb-error`).
 pub async fn fail_thumb(state: &SharedState, req_id: u32, error: String) {
-    if let Some(tx) = state.pending_thumb.lock().await.remove(&req_id) {
+    if let Some(tx) = state.pending_thumb.take(&req_id).await {
         let _ = tx.send(Err(error));
     }
 }
@@ -1918,6 +2043,34 @@ pub fn mac_name(app: &AppHandle) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn pre_auth_limits_are_per_ip_and_global() {
+        use std::net::IpAddr;
+        let a: IpAddr = "10.0.0.1".parse().unwrap();
+        let b: IpAddr = "10.0.0.2".parse().unwrap();
+        let mut t = SlotTable::default();
+        for _ in 0..MAX_PRE_AUTH_PER_IP {
+            assert!(t.try_take(a, MAX_PRE_AUTH, MAX_PRE_AUTH_PER_IP));
+        }
+        assert!(!t.try_take(a, MAX_PRE_AUTH, MAX_PRE_AUTH_PER_IP), "one peer is capped");
+        assert!(t.try_take(b, MAX_PRE_AUTH, MAX_PRE_AUTH_PER_IP), "the real phone still gets in");
+        t.release(a);
+        assert!(t.try_take(a, MAX_PRE_AUTH, MAX_PRE_AUTH_PER_IP));
+        let mut g = SlotTable::default();
+        assert!(g.try_take(a, 1, 4));
+        assert!(!g.try_take(b, 1, 4), "global cap");
+    }
+
+    #[test]
+    fn message_cap_fits_the_largest_legitimate_frames() {
+        // 8 MiB clipboard image -> base64 is 4/3 larger, plus envelope slack.
+        assert!(MAX_WS_MESSAGE >= 8 * 1024 * 1024 * 4 / 3 + 1024 * 1024);
+        assert!(MAX_WS_MESSAGE >= 16 * 1024 * 1024);
+        assert!(PRE_AUTH_MAX_TEXT <= 8 * 1024);
+    }
+
     use super::{reply_family, reply_matches};
 
     #[test]

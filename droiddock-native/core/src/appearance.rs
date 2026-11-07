@@ -42,10 +42,10 @@ const BINDINGS_KEY: &str = "app-bindings";
 /// state a normal app is in.
 #[cfg(target_os = "macos")]
 pub fn dock_space_binding(bundle_id: &str) -> Option<String> {
-    read_bindings()
-        .into_iter()
-        .find(|(id, _)| id == bundle_id)
-        .map(|(_, value)| value)
+    match read_bindings() {
+        Bindings::Parsed(all) => all.into_iter().find(|(id, _)| id == bundle_id).map(|(_, value)| value),
+        _ => None,
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -68,10 +68,21 @@ pub fn dock_space_binding(_bundle_id: &str) -> Option<String> {
 pub fn clear_dock_space_binding(bundle_id: &str) -> bool {
     use std::process::Command;
 
-    let remaining: Vec<(String, String)> = read_bindings()
-        .into_iter()
-        .filter(|(id, _)| id != bundle_id)
-        .collect();
+    let all = match read_bindings() {
+        Bindings::Parsed(all) => all,
+        // No assignments at all: nothing to clear.
+        Bindings::Missing => return true,
+        // Couldn't make sense of it: rewriting from a half-understood list would wipe every other
+        // app's "Assign To", so touch nothing and let the caller say "do it by hand".
+        Bindings::Unreadable => {
+            eprintln!("[window] could not parse {SPACES_DOMAIN} {BINDINGS_KEY}; leaving it alone");
+            return false;
+        }
+    };
+    if !all.iter().any(|(id, _)| id == bundle_id) {
+        return true;
+    }
+    let remaining: Vec<(String, String)> = all.into_iter().filter(|(id, _)| id != bundle_id).collect();
 
     let ok = if remaining.is_empty() {
         // The whole dictionary was ours, so the key itself goes. `defaults`
@@ -106,39 +117,60 @@ pub fn clear_dock_space_binding(_bundle_id: &str) -> bool {
     true
 }
 
+/// What `defaults read com.apple.spaces app-bindings` gave.
+#[cfg(target_os = "macos")]
+enum Bindings {
+    Parsed(Vec<(String, String)>),
+    /// The key doesn't exist (no app is assigned to a desktop).
+    Missing,
+    /// It exists but couldn't be run or fully parsed.
+    Unreadable,
+}
+
 /// `defaults read com.apple.spaces app-bindings`, parsed.
 ///
 /// The output is an old-style plist — `{ "com.foo.bar" = AllSpaces; }` — with
-/// keys quoted only when they need to be. Anything that doesn't parse yields an
-/// empty list, and an empty list means [`clear_dock_space_binding`] deletes the
-/// key rather than writing a half-understood dictionary back over the user's.
+/// keys quoted only when they need to be. Anything that doesn't parse completely is
+/// `Unreadable`, and [`clear_dock_space_binding`] then does nothing rather than write a
+/// half-understood dictionary back over the user's.
 #[cfg(target_os = "macos")]
-fn read_bindings() -> Vec<(String, String)> {
+fn read_bindings() -> Bindings {
     let Ok(out) = std::process::Command::new("/usr/bin/defaults")
         .args(["read", SPACES_DOMAIN, BINDINGS_KEY])
         .output()
     else {
-        return Vec::new();
+        return Bindings::Unreadable;
     };
     if !out.status.success() {
         // The usual case: no app on this Mac is assigned to a desktop, so the
-        // key doesn't exist and `defaults` exits non-zero.
-        return Vec::new();
+        // key doesn't exist and `defaults` exits non-zero with "does not exist".
+        let err = String::from_utf8_lossy(&out.stderr);
+        return if err.contains("does not exist") { Bindings::Missing } else { Bindings::Unreadable };
     }
-    parse_bindings(&String::from_utf8_lossy(&out.stdout))
+    match parse_bindings(&String::from_utf8_lossy(&out.stdout)) {
+        Some(v) => Bindings::Parsed(v),
+        None => Bindings::Unreadable,
+    }
 }
 
+/// `None` when any non-structural line isn't a `key = value;` pair.
 #[cfg(target_os = "macos")]
-fn parse_bindings(text: &str) -> Vec<(String, String)> {
-    text.lines()
-        .filter_map(|line| {
-            let line = line.trim().trim_end_matches(';');
-            let (key, value) = line.split_once('=')?;
-            let unquote = |s: &str| s.trim().trim_matches('"').to_string();
-            let (key, value) = (unquote(key), unquote(value));
-            (!key.is_empty() && !value.is_empty()).then_some((key, value))
-        })
-        .collect()
+fn parse_bindings(text: &str) -> Option<Vec<(String, String)>> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line == "{" || line == "}" || line == "};" {
+            continue;
+        }
+        let (key, value) = line.trim_end_matches(';').split_once('=')?;
+        let unquote = |s: &str| s.trim().trim_matches('"').to_string();
+        let (key, value) = (unquote(key), unquote(value));
+        if key.is_empty() || value.is_empty() || value == "{" || value == "(" {
+            return None;
+        }
+        out.push((key, value));
+    }
+    Some(out)
 }
 
 // ── Surfaced to Settings ─────────────────────────────────────────────────────
@@ -166,25 +198,28 @@ mod tests {
     fn reads_the_dock_assignment_dictionary() {
         let got = parse_bindings(
             "{\n    \"com.droiddock.mac\" = AllSpaces;\n    Finder = \"D5B6...\";\n}\n",
-        );
+        )
+        .unwrap();
         assert_eq!(
             got,
             vec![
                 ("com.droiddock.mac".into(), "AllSpaces".into()),
-                // Unquoted keys and quoted values both occur; a desktop-level
-                // assignment is a space UUID, and rewriting the dictionary has
-                // to hand that back to `defaults` unchanged.
                 ("Finder".into(), "D5B6...".into()),
             ]
         );
     }
 
     #[test]
-    fn braces_and_junk_contribute_no_entries() {
-        // The guard that matters: an unparseable read must look like "no
-        // assignments", never like a dictionary worth writing back.
-        assert!(parse_bindings("{\n}\n").is_empty());
-        assert!(parse_bindings("").is_empty());
-        assert!(parse_bindings("does not exist").is_empty());
+    fn empty_dictionary_parses_to_nothing() {
+        assert_eq!(parse_bindings("{\n}\n").unwrap(), vec![]);
+        assert_eq!(parse_bindings("").unwrap(), vec![]);
+    }
+
+    #[test]
+    fn unparseable_output_is_none_never_an_empty_list() {
+        // The guard that matters: an unparseable read must never look like "no other assignments".
+        assert!(parse_bindings("does not exist").is_none());
+        assert!(parse_bindings("garbage line").is_none());
+        assert!(parse_bindings("{\n x = {\n y = 1;\n };\n}").is_none());
     }
 }

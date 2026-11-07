@@ -31,6 +31,8 @@ pub enum PayloadError {
     Unexpected(i64),
     OutOfOrder { id: i64, expected: i64, got: i64 },
     TooLarge(i64),
+    /// The sender marked the payload finished before all declared bytes arrived.
+    Incomplete { id: i64, received: i64, total: i64 },
     Io(String),
 }
 
@@ -42,6 +44,9 @@ impl std::fmt::Display for PayloadError {
                 write!(f, "payload {id}: chunk at {got}, expected {expected}")
             }
             Self::TooLarge(id) => write!(f, "payload {id} exceeds its declared size"),
+            Self::Incomplete { id, received, total } => {
+                write!(f, "payload {id} ended early: {received} of {total} bytes")
+            }
             Self::Io(e) => write!(f, "{e}"),
         }
     }
@@ -60,7 +65,8 @@ pub enum Completed {
 
 enum Sink {
     Bytes(Vec<u8>),
-    File { handle: File, path: PathBuf },
+    /// Written to `part`, renamed to `path` only once complete (D11).
+    File { handle: File, path: PathBuf, part: PathBuf },
 }
 
 struct Incoming {
@@ -127,8 +133,9 @@ impl Reassembler {
                     std::fs::create_dir_all(parent)
                         .map_err(|e| PayloadError::Io(e.to_string()))?;
                 }
-                let handle = File::create(&path).map_err(|e| PayloadError::Io(e.to_string()))?;
-                Sink::File { handle, path }
+                let part = part_path(&path);
+                let handle = File::create(&part).map_err(|e| PayloadError::Io(e.to_string()))?;
+                Sink::File { handle, path, part }
             } else {
                 if total_size as usize > MAX_BYTES_PAYLOAD {
                     return Err(PayloadError::TooLarge(id));
@@ -145,18 +152,21 @@ impl Reassembler {
         // attacker-chosen position in a file we are writing.
         if offset != entry.received {
             let expected = entry.received;
-            self.incoming.remove(&id);
+            self.drop_incoming(id);
             return Err(PayloadError::OutOfOrder { id, expected, got: offset });
         }
         if entry.received + body.len() as i64 > entry.total {
-            self.incoming.remove(&id);
+            self.drop_incoming(id);
             return Err(PayloadError::TooLarge(id));
         }
 
         match &mut entry.sink {
             Sink::Bytes(buf) => buf.extend_from_slice(body),
             Sink::File { handle, .. } => {
-                handle.write_all(body).map_err(|e| PayloadError::Io(e.to_string()))?;
+                if let Err(e) = handle.write_all(body) {
+                    self.drop_incoming(id);
+                    return Err(PayloadError::Io(e.to_string()));
+                }
             }
         }
         entry.received += body.len() as i64;
@@ -172,9 +182,25 @@ impl Reassembler {
         let done = self.incoming.remove(&id).expect("present");
         Ok(Some(match done.sink {
             Sink::Bytes(data) => Completed::Bytes { id, data },
-            Sink::File { mut handle, path } => {
-                handle.flush().map_err(|e| PayloadError::Io(e.to_string()))?;
+            Sink::File { mut handle, path, part } => {
+                // A sender that sets `last` early must not leave a truncated
+                // file that looks complete in Downloads.
+                if done.received != done.total {
+                    drop(handle);
+                    let _ = std::fs::remove_file(&part);
+                    return Err(PayloadError::Incomplete { id, received: done.received, total: done.total });
+                }
+                if let Err(e) = handle.flush().map_err(|e| e.to_string()) {
+                    drop(handle);
+                    let _ = std::fs::remove_file(&part);
+                    return Err(PayloadError::Io(e));
+                }
                 let _ = handle.seek(SeekFrom::Start(0));
+                drop(handle);
+                if let Err(e) = std::fs::rename(&part, &path) {
+                    let _ = std::fs::remove_file(&part);
+                    return Err(PayloadError::Io(e.to_string()));
+                }
                 Completed::File { id, path }
             }
         }))
@@ -185,9 +211,15 @@ impl Reassembler {
     /// that looks complete is worse than no file.
     pub fn abort(&mut self) {
         for (_, inc) in self.incoming.drain() {
-            if let Sink::File { path, .. } = inc.sink {
-                let _ = std::fs::remove_file(path);
+            if let Sink::File { part, .. } = inc.sink {
+                let _ = std::fs::remove_file(part);
             }
+        }
+    }
+
+    fn drop_incoming(&mut self, id: i64) {
+        if let Some(Incoming { sink: Sink::File { part, .. }, .. }) = self.incoming.remove(&id) {
+            let _ = std::fs::remove_file(part);
         }
     }
 }
@@ -221,9 +253,15 @@ pub fn sanitize_file_name(name: &str) -> String {
 
 /// A path in `dir` that does not exist yet, appending " (2)", " (3)"… before the
 /// extension the way the rest of the app does.
+fn part_path(p: &Path) -> PathBuf {
+    let mut s = p.as_os_str().to_os_string();
+    s.push(".part");
+    PathBuf::from(s)
+}
+
 fn unique_path(dir: &Path, name: &str) -> PathBuf {
     let candidate = dir.join(name);
-    if !candidate.exists() {
+    if !candidate.exists() && !part_path(&candidate).exists() {
         return candidate;
     }
     let path = Path::new(name);
@@ -234,7 +272,7 @@ fn unique_path(dir: &Path, name: &str) -> PathBuf {
             Some(e) => dir.join(format!("{stem} ({n}).{e}")),
             None => dir.join(format!("{stem} ({n})")),
         };
-        if !attempt.exists() {
+        if !attempt.exists() && !part_path(&attempt).exists() {
             return attempt;
         }
     }
@@ -371,7 +409,7 @@ mod tests {
         let mut r = Reassembler::new(&dir);
         r.expect_file(1, "partial.bin");
         r.on_chunk(1, true, 100, 0, b"half", false).unwrap();
-        let path = dir.join("partial.bin");
+        let path = dir.join("partial.bin.part");
         assert!(path.exists());
         r.abort();
         assert!(!path.exists(), "a truncated file must not be left behind");
@@ -387,5 +425,27 @@ mod tests {
             Some(Completed::Bytes { data, .. }) => assert_eq!(data, b"aaAA"),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn an_early_last_flag_leaves_no_file_behind() {
+        let dir = tmp();
+        let mut r = Reassembler::new(&dir);
+        r.expect_file(3, "big.bin");
+        let err = r.on_chunk(3, true, 100, 0, b"short", true).unwrap_err();
+        assert_eq!(err, PayloadError::Incomplete { id: 3, received: 5, total: 100 });
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0, "neither big.bin nor big.bin.part");
+    }
+
+    #[test]
+    fn in_flight_file_lives_under_part_until_complete() {
+        let dir = tmp();
+        let mut r = Reassembler::new(&dir);
+        r.expect_file(4, "a.txt");
+        r.on_chunk(4, true, 6, 0, b"abc", false).unwrap();
+        assert!(!dir.join("a.txt").exists());
+        assert!(dir.join("a.txt.part").exists());
+        r.abort();
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
     }
 }

@@ -344,8 +344,11 @@ impl EditCacheState {
     pub async fn clear(&self) -> ClearOutcome {
         let mut out = ClearOutcome::default();
         let mut m = self.manifest.lock().await;
-        let pending: std::collections::HashSet<PathBuf> =
+        // Never touch a file with an unsynced edit, nor one still open for editing (it has a live
+        // watcher): removing it would drop the watcher and later saves would never sync.
+        let mut pending: std::collections::HashSet<PathBuf> =
             m.entries.iter().filter(|(_, e)| e.pending).map(|(k, _)| PathBuf::from(k)).collect();
+        pending.extend(self.watchers.lock().unwrap().keys().cloned());
 
         fn sweep(dir: &Path, pending: &std::collections::HashSet<PathBuf>, top: bool, removed: &mut Vec<(PathBuf, u64)>, kept: &mut usize) {
             let Ok(rd) = std::fs::read_dir(dir) else { return };
@@ -435,6 +438,8 @@ fn start_watch(app: AppHandle, ws_state: SharedState, cache: EditCache, local_pa
         // notify calls this closure on its own FSEvents thread, which has no
         // Tokio context: go through the core runtime's handle.
         crate::host::async_runtime::spawn(async move {
+            // Unsynced from the moment of the save, not only once the debounce settles.
+            cache3.mark_pending(&local3, &phone3).await;
             tokio::time::sleep(DEBOUNCE).await;
             if gen3.load(Ordering::SeqCst) != my_gen {
                 return;
@@ -512,9 +517,20 @@ pub async fn retry_pending(app: AppHandle, ws_state: SharedState, cache: EditCac
 pub async fn open_in_place(app: AppHandle, ws_state: SharedState, cache: EditCache, path: String) -> Result<(), String> {
     let dest = cache.session_dir.join(cache_relative_path(&path));
 
-    let saved = transfer::pull(app.clone(), ws_state.clone(), path.clone(), dest, Some(crate::transfer_log::Source::Files)).await?;
-    cache.record_synced(&saved, &path).await;
-    cache.enforce_cap(&saved).await?;
+    // An unsynced edit lives in this file: re-pulling would overwrite it with the phone's older copy.
+    // Reopen what is on disk instead and let the pending writeback (retried on reconnect) deliver it.
+    let has_unsynced = {
+        let m = cache.manifest.lock().await;
+        m.entries.get(&dest.to_string_lossy().to_string()).is_some_and(|e| e.pending) && dest.is_file()
+    };
+    let saved = if has_unsynced {
+        dest
+    } else {
+        let saved = transfer::pull(app.clone(), ws_state.clone(), path.clone(), dest, Some(crate::transfer_log::Source::Files)).await?;
+        cache.record_synced(&saved, &path).await;
+        cache.enforce_cap(&saved).await?;
+        saved
+    };
     start_watch(app.clone(), ws_state.clone(), cache, saved.clone(), path)?;
 
     app.opener().open_path(saved.to_string_lossy().to_string(), None::<&str>).map_err(|e| e.to_string())
@@ -558,6 +574,26 @@ mod tests {
         assert_eq!(reloaded.entries.len(), 1);
         assert!(reloaded.entries[&pend.to_string_lossy().to_string()].pending);
         assert_eq!(st.usage().await, (9, 1, 1));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn clear_keeps_files_with_a_live_watcher() {
+        let root = tmp_dir("clear-watched");
+        let st = init(root.clone());
+        let d = st.session_dir.join("cccc");
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("open.txt");
+        std::fs::write(&f, b"in editor").unwrap();
+        st.record_synced(&f, "/sdcard/open.txt").await;
+        let w = notify::recommended_watcher(|_r: notify::Result<Event>| {}).unwrap();
+        st.watchers.lock().unwrap().insert(f.clone(), w);
+
+        let out = st.clear().await;
+        assert_eq!(out.removed_files, 0);
+        assert!(f.exists());
+        assert!(st.watchers.lock().unwrap().contains_key(&f));
 
         let _ = std::fs::remove_dir_all(&root);
     }

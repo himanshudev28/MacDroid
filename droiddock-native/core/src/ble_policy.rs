@@ -746,6 +746,7 @@ impl Policy {
         }
     }
 
+    #[cfg(test)]
     pub fn scanning(&self) -> bool {
         self.scan_on
     }

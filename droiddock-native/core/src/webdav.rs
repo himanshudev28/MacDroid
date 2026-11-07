@@ -193,6 +193,14 @@ struct PhoneFs {
     /// run, cleared on stop.
     cache: PathBuf,
     listings: Arc<tokio::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, Listing)>>>,
+    /// The phone's `(size, modified_ms)` as of when each cache file was pulled,
+    /// so freshness is compared phone-to-phone (never against the Mac's clock).
+    /// Empty after a restart, which just means one re-pull.
+    cached: Arc<std::sync::Mutex<std::collections::HashMap<PathBuf, (u64, i64)>>>,
+    /// Cache files holding an edit whose upload failed. They are never
+    /// re-pulled over, so the unsent edit isn't lost; a later successful sync
+    /// clears the mark.
+    dirty: Arc<std::sync::Mutex<std::collections::HashSet<PathBuf>>>,
     /// Read from config at mount time, not per request. Toggling the setting
     /// while a volume is mounted therefore does nothing until it is remounted —
     /// which is the honest behaviour: Finder has already been told what the
@@ -293,6 +301,20 @@ impl PhoneFs {
         write_guard(self.writable)
     }
 
+    /// Every mutating call: write guard, skip Finder junk (`junk`), ask the
+    /// phone, then drop the cached listings in `forget`.
+    async fn mutate(&self, junk: bool, body: Value, forget: &[&str]) -> FsResult<()> {
+        self.writes_allowed()?;
+        if junk {
+            return Ok(());
+        }
+        self.ask(body).await?;
+        for p in forget {
+            self.forget(p).await;
+        }
+        Ok(())
+    }
+
     async fn ask(&self, body: Value) -> FsResult<Value> {
         let reply = ws_server::request_default(&self.ws, crate::map_of(body))
             .await
@@ -385,16 +407,38 @@ impl DavFileSystem for PhoneFs {
             // every download.
             let name = phone_path.rsplit('/').next().unwrap_or("file").to_string();
             let dest = self.cache.join(cache_name(&phone_path, &name));
-            if !dest.exists() {
-                crate::transfer::pull(
+            let unsent = self.dirty.lock().unwrap_or_else(|e| e.into_inner()).contains(&dest) && dest.exists();
+            let recorded = self.cached.lock().unwrap_or_else(|e| e.into_inner()).get(&dest).copied();
+            if unsent {
+                // Serve the local edit that never reached the phone.
+                let file = tokio::fs::File::open(&dest).await.map_err(|_| FsError::NotFound)?;
+                let len = file.metadata().await.map(|m| m.len()).unwrap_or(meta.len);
+                return Ok(Box::new(CachedFile { file, meta: Meta { len, ..meta } }) as Box<dyn DavFile>);
+            }
+            if !cache_fresh(&dest, &meta, recorded) {
+                // A private directory per download: two opens of one file must
+                // not share a `.part`, and the name (which transfer_log shows)
+                // stays the real one. Renamed into the cache only on success.
+                let work = self.cache.join(format!("dl-{}", uuid::Uuid::new_v4().simple()));
+                tokio::fs::create_dir_all(&work).await.map_err(|_| FsError::GeneralFailure)?;
+                let tmp = work.join(&name);
+                let pulled = crate::transfer::pull(
                     self.app.clone(),
                     self.ws.clone(),
                     phone_path,
-                    dest.clone(),
+                    tmp.clone(),
                     Some(crate::transfer_log::Source::Finder),
                 )
-                    .await
-                    .map_err(|_| FsError::NotFound)?;
+                .await;
+                let moved = match pulled {
+                    Ok(_) => tokio::fs::rename(&tmp, &dest).await.is_ok(),
+                    Err(_) => false,
+                };
+                let _ = tokio::fs::remove_dir_all(&work).await;
+                if !moved {
+                    return Err(FsError::NotFound);
+                }
+                self.cached.lock().unwrap_or_else(|e| e.into_inner()).insert(dest.clone(), (meta.len, meta.modified_ms));
             }
             let file = tokio::fs::File::open(&dest).await.map_err(|_| FsError::NotFound)?;
             Ok(Box::new(CachedFile { file, meta }) as Box<dyn DavFile>)
@@ -406,23 +450,19 @@ impl DavFileSystem for PhoneFs {
             self.writes_allowed()?;
             let phone_path = self.phone_path(path);
             let name = leaf(&phone_path).to_string();
-            if is_finder_junk(&name) {
-                return Ok(());
-            }
+            let junk = is_finder_junk(&name);
             // Caps-gated: an older phone would ignore `fs-mkdir` entirely and
             // Finder would sit waiting for a folder that never appears.
-            if !ws_server::phone_has_cap(&self.ws, "fsmkdir").await {
+            if !junk && !ws_server::phone_has_cap(&self.ws, "fsmkdir").await {
                 return Err(FsError::NotImplemented);
             }
             let parent = phone_path.rsplit_once('/').map(|(p, _)| p).unwrap_or("/");
-            self.ask(json!({
+            let body = json!({
                 "type": "fs-mkdir",
                 "path": if parent.is_empty() { "/" } else { parent },
                 "name": name,
-            }))
-            .await?;
-            self.forget(&phone_path).await;
-            Ok(())
+            });
+            self.mutate(junk, body, &[&phone_path]).await
         })
     }
 
@@ -445,18 +485,13 @@ impl DavFileSystem for PhoneFs {
             let (src_parent, _) = src.rsplit_once('/').ok_or(FsError::NotFound)?;
             let (dst_parent, dst_name) = dst.rsplit_once('/').ok_or(FsError::NotFound)?;
 
-            if is_finder_junk(leaf(&src)) || is_finder_junk(dst_name) {
-                return Ok(());
-            }
+            let junk = is_finder_junk(leaf(&src)) || is_finder_junk(dst_name);
             // Same-directory renames only — see the module docs for why moving
             // between directories is refused rather than emulated.
-            if src_parent != dst_parent {
+            if !junk && src_parent != dst_parent {
                 return Err(FsError::NotImplemented);
             }
-            self.ask(json!({ "type": "fs-rename", "path": src, "name": dst_name })).await?;
-            self.forget(&src).await;
-            self.forget(&dst).await;
-            Ok(())
+            self.mutate(junk, json!({ "type": "fs-rename", "path": src, "name": dst_name }), &[&src, &dst]).await
         })
     }
 }
@@ -476,6 +511,12 @@ fn write_guard(writable: bool) -> FsResult<()> {
 
 /// The last path component. `phone_path` never produces a trailing slash, so
 /// this is the file or directory name.
+/// D4: is the cached read copy still the phone's file? Only when the phone's
+/// `(size, modified_ms)` now equals what it was when we pulled it.
+fn cache_fresh(cached: &std::path::Path, meta: &Meta, recorded: Option<(u64, i64)>) -> bool {
+    cached.is_file() && recorded == Some((meta.len, meta.modified_ms))
+}
+
 fn leaf(phone_path: &str) -> &str {
     phone_path.rsplit('/').next().unwrap_or(phone_path)
 }
@@ -484,19 +525,14 @@ impl PhoneFs {
     async fn remove(&self, path: &DavPath) -> FsResult<()> {
         self.writes_allowed()?;
         let phone_path = self.phone_path(path);
-        // Deleting junk that was never sent has to succeed, or Finder reports
-        // an error emptying a folder it filled itself.
-        if is_finder_junk(leaf(&phone_path)) {
-            return Ok(());
-        }
         // Refusing to delete the volume root is not paranoia: `fs-delete` is
         // recursive on the phone, so one stray request here wipes /sdcard.
         if phone_path == PHONE_ROOT {
             return Err(FsError::Forbidden);
         }
-        self.ask(json!({ "type": "fs-delete", "path": phone_path })).await?;
-        self.forget(&phone_path).await;
-        Ok(())
+        // Deleting junk that was never sent has to succeed, or Finder reports
+        // an error emptying a folder it filled itself.
+        self.mutate(is_finder_junk(leaf(&phone_path)), json!({ "type": "fs-delete", "path": phone_path }), &[&phone_path]).await
     }
 }
 
@@ -629,7 +665,6 @@ impl WriteFile {
         if self.synced {
             return Ok(());
         }
-        self.synced = true;
 
         // Close the local file before reading it back: an open handle with
         // buffered bytes would push a file missing its tail.
@@ -640,13 +675,17 @@ impl WriteFile {
         }
 
         let Some((fs, phone_path)) = self.target.clone() else {
+            self.synced = true;
             return Ok(());
         };
         let (dir, _) = phone_path.rsplit_once('/').ok_or(FsError::GeneralFailure)?;
-        crate::transfer::push(
+        crate::transfer::push_as(
             fs.app.clone(),
             fs.ws.clone(),
             self.local.to_string_lossy().into_owned(),
+            // D1: the local file is a hash-named cache copy; the phone must
+            // get the real leaf name, not that.
+            Some(leaf(&phone_path).to_string()),
             if dir.is_empty() { "/".into() } else { dir.to_string() },
             // Always overwrite. Without it the phone's `uniqueDest` forks every
             // save into "name (2).ext" and leaves the file the user opened
@@ -658,8 +697,17 @@ impl WriteFile {
         .await
         .map_err(|e| {
             eprintln!("[webdav] push failed: {e}");
+            // Keep the unsent edit: it must not be re-pulled over.
+            fs.dirty.lock().unwrap_or_else(|e| e.into_inner()).insert(self.local.clone());
             FsError::GeneralFailure
         })?;
+        fs.dirty.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.local);
+        fs.cached.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.local);
+        // D3: only now is the edit really on the phone. Marking this earlier
+        // made a failed upload look saved on the next flush/close.
+        self.synced = true;
+        // The cached read copy is now stale.
+        let _ = tokio::fs::remove_file(fs.cache.join(cache_name(&phone_path, leaf(&phone_path)))).await;
         fs.forget(&phone_path).await;
         Ok(())
     }
@@ -674,13 +722,7 @@ impl DavFile for WriteFile {
     }
 
     fn write_bytes(&mut self, buf: bytes::Bytes) -> FsFuture<'_, ()> {
-        Box::pin(async move {
-            use tokio::io::AsyncWriteExt;
-            let file = self.file.as_mut().ok_or(FsError::GeneralFailure)?;
-            file.write_all(&buf).await.map_err(|_| FsError::GeneralFailure)?;
-            self.written += buf.len() as u64;
-            Ok(())
-        })
+        self.write_buf(Box::new(buf))
     }
 
     fn write_buf(&mut self, mut buf: Box<dyn bytes::Buf + Send>) -> FsFuture<'_, ()> {
@@ -776,6 +818,8 @@ pub async fn webdav_start(
         ws: ws.inner().clone(),
         cache: cache.clone(),
         listings: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        cached: Arc::default(),
+        dirty: Arc::default(),
         writable,
     };
     // The token is the first path segment, so it is stripped before the
@@ -1045,6 +1089,30 @@ mod tests {
         ] {
             assert!(!is_finder_junk(n), "{n} must reach the phone");
         }
+    }
+
+    #[test]
+    fn the_phone_gets_the_real_leaf_not_the_cache_hash_name() {
+        let phone = "/sdcard/Documents/report.docx";
+        let cache = cache_name(phone, leaf(phone));
+        assert_ne!(cache, leaf(phone));
+        assert_eq!(crate::transfer::pick_remote_name(Some(leaf(phone).to_string()), std::path::Path::new(&format!("/c/{cache}"))).unwrap(), "report.docx");
+        // Without an override the local name is used (unchanged behaviour).
+        assert_eq!(crate::transfer::pick_remote_name(None, std::path::Path::new("/x/a.txt")).unwrap(), "a.txt");
+    }
+
+    #[test]
+    fn stale_read_cache_is_detected() {
+        let d = std::env::temp_dir().join(format!("dd-wd-{}-{}", std::process::id(), uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("c.bin");
+        let m = |len, modified_ms| Meta { is_dir: false, len, modified_ms };
+        assert!(!cache_fresh(&f, &m(3, 5), Some((3, 5))), "missing file");
+        std::fs::write(&f, b"abc").unwrap();
+        assert!(cache_fresh(&f, &m(3, 5), Some((3, 5))));
+        assert!(!cache_fresh(&f, &m(3, 5), None), "nothing recorded (e.g. after a restart)");
+        assert!(!cache_fresh(&f, &m(4, 5), Some((3, 5))), "size changed on the phone");
+        assert!(!cache_fresh(&f, &m(3, 6), Some((3, 5))), "phone copy modified");
     }
 
     #[test]

@@ -66,6 +66,7 @@ pub struct HoldMachine {
 }
 
 impl HoldMachine {
+    #[cfg(test)]
     pub fn held(&self) -> Option<Btn> {
         self.held
     }
@@ -238,7 +239,13 @@ pub fn on_message(app: &AppHandle, raw: &Value) {
             if let Some(text) = raw.get("text").and_then(Value::as_str) {
                 // Bounded: a phone should not be able to stream unbounded
                 // synthetic typing into whatever window happens to be focused.
-                imp::type_text(&text.chars().take(500).collect::<String>());
+                let text: String = text.chars().take(500).collect();
+                // And rate-limited: a budget of characters that refills over time, so many small
+                // messages can't add up to unbounded typing either.
+                let allowed = TYPE_BUDGET.lock().unwrap().take(text.chars().count(), std::time::Instant::now());
+                if allowed {
+                    imp::type_text(&text);
+                }
             }
         }
         "media" => {
@@ -652,8 +659,53 @@ mod imp {
     pub fn reset_accessibility(_bundle_id: &str) -> bool { true }
 }
 
+/// Characters of phone-typed text allowed: a burst of `CAP`, refilling at `RATE` per second.
+struct TypeBudget {
+    tokens: f64,
+    last: Option<std::time::Instant>,
+}
+
+impl TypeBudget {
+    const CAP: f64 = 600.0;
+    const RATE: f64 = 100.0;
+
+    const fn new() -> Self {
+        Self { tokens: Self::CAP, last: None }
+    }
+
+    /// Spend `n` characters at `now`; false (and nothing spent) when the budget can't cover them.
+    fn take(&mut self, n: usize, now: std::time::Instant) -> bool {
+        if let Some(last) = self.last {
+            let dt = now.saturating_duration_since(last).as_secs_f64();
+            self.tokens = (self.tokens + dt * Self::RATE).min(Self::CAP);
+        }
+        self.last = Some(now);
+        if (n as f64) <= self.tokens {
+            self.tokens -= n as f64;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+static TYPE_BUDGET: std::sync::Mutex<TypeBudget> = std::sync::Mutex::new(TypeBudget::new());
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn type_budget_limits_and_refills() {
+        use super::TypeBudget;
+        use std::time::{Duration, Instant};
+        let t0 = Instant::now();
+        let mut b = TypeBudget::new();
+        assert!(b.take(500, t0));
+        assert!(!b.take(500, t0), "burst beyond the cap is refused");
+        assert!(b.take(100, t0));
+        assert!(!b.take(1, t0));
+        assert!(b.take(300, t0 + Duration::from_secs(3)), "refilled over time");
+    }
+
     use super::*;
     use std::time::{Duration, Instant};
 

@@ -51,7 +51,7 @@ pub fn fp_of_spki(spki: &[u8]) -> String {
     B64URL.encode(Sha256::digest(spki))
 }
 
-fn write_atomic(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     let tmp = path.with_extension("tmp");
@@ -358,6 +358,14 @@ pub fn note_device_in(dir: &Path, device_id: Option<&str>) {
     let Some(id) = device_id.filter(|s| !s.is_empty()) else { return };
     let _g = DEVICES_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut list = read_devices(dir);
+    let ok_path = dir.join("plain-ok.json");
+    let mut ok = read_list(&ok_path);
+    if ok.iter().any(|d| d == id) {
+        ok.retain(|d| d != id);
+        if let Ok(b) = serde_json::to_vec(&ok) {
+            let _ = write_atomic(&ok_path, &b, 0o644);
+        }
+    }
     if list.last().is_some_and(|l| l == id) {
         return;
     }
@@ -373,10 +381,76 @@ pub fn note_device_in(dir: &Path, device_id: Option<&str>) {
     }
 }
 
+/// S3: once ANY TLS-capable device is on record for this pairing, a plain
+/// hello is refused whether or not it carries a `deviceId` (the client chooses
+/// that field, so keying the guard on it let an attacker just omit it). The
+/// only exception is a device the user explicitly allowed (`allow_plain_in`).
+/// With nothing on record yet the first-time upgrade still works: old QR
+/// without `fp` -> plain hello -> `tls-pin`.
 pub fn blocked_in(dir: &Path, device_id: Option<&str>) -> bool {
-    let Some(id) = device_id.filter(|s| !s.is_empty()) else { return false };
     let _g = DEVICES_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    read_devices(dir).iter().any(|d| d == id)
+    if read_devices(dir).is_empty() {
+        return false;
+    }
+    if let Some(id) = device_id.filter(|s| !s.is_empty()) {
+        if read_list(&dir.join("plain-ok.json")).iter().any(|d| d == id) {
+            return false;
+        }
+    }
+    true
+}
+
+fn read_list(path: &Path) -> Vec<String> {
+    std::fs::read(path)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Vec<String>>(&b).ok())
+        .unwrap_or_default()
+}
+
+/// The user clicked "Allow" for an old phone that can't do TLS: forget it from
+/// the TLS list and remember it as allowed to stay plain.
+pub fn allow_plain_in(dir: &Path, device_id: Option<&str>) {
+    forget_device_in(dir, device_id);
+    let Some(id) = device_id.filter(|s| !s.is_empty()) else { return };
+    let _g = DEVICES_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut list = read_list(&dir.join("plain-ok.json"));
+    if !list.iter().any(|d| d == id) {
+        list.push(id.to_string());
+        while list.len() > MAX_DEVICES {
+            list.remove(0);
+        }
+        if std::fs::create_dir_all(dir).is_ok() {
+            if let Ok(b) = serde_json::to_vec(&list) {
+                let _ = write_atomic(&dir.join("plain-ok.json"), &b, 0o644);
+            }
+        }
+    }
+}
+
+pub fn allow_plain(app: &AppHandle, device_id: Option<&str>) {
+    if let Some(d) = tls_dir(app) {
+        allow_plain_in(&d, device_id);
+    }
+}
+
+/// "Reset pairing": drop the downgrade record and the plain-allow list (the old
+/// phones are no longer paired with the new token).
+pub fn reset_devices_in(dir: &Path) {
+    let _g = DEVICES_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _ = std::fs::remove_file(dir.join("devices.json"));
+    let _ = std::fs::remove_file(dir.join("plain-ok.json"));
+}
+
+pub fn reset_devices(app: &AppHandle) {
+    if let Some(d) = tls_dir(app) {
+        reset_devices_in(&d);
+    }
+}
+
+/// False while the TLS identity can't be built (the Mac is serving plaintext).
+/// Triggers a (rate-limited) build attempt if none was made yet.
+pub fn identity_ok(app: &AppHandle) -> bool {
+    identity(app).is_some()
 }
 
 /// What the hello handler does with a hello.
@@ -447,12 +521,6 @@ pub fn forget_device_in(dir: &Path, device_id: Option<&str>) {
     }
 }
 
-pub fn forget_device(app: &AppHandle, device_id: Option<&str>) {
-    if let Some(d) = tls_dir(app) {
-        forget_device_in(&d, device_id);
-    }
-}
-
 /// Record that this phone completed a TLS session.
 pub fn note_tls_device(app: &AppHandle, device_id: Option<&str>) {
     if let Some(d) = tls_dir(app) {
@@ -461,8 +529,11 @@ pub fn note_tls_device(app: &AppHandle, device_id: Option<&str>) {
 }
 
 /// True when a plain-text hello from this phone must be refused.
+///
+/// Fails open while the Mac has no TLS identity: it serves plaintext then, so
+/// refusing plain hellos would just lock every phone out.
 pub fn plain_blocked(app: &AppHandle, device_id: Option<&str>) -> bool {
-    tls_dir(app).is_some_and(|d| blocked_in(&d, device_id))
+    identity(app).is_some() && tls_dir(app).is_some_and(|d| blocked_in(&d, device_id))
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────
@@ -740,8 +811,14 @@ mod tests {
         let d = tmpdir("allow");
         note_device_in(&d, Some("old-phone"));
         assert!(blocked_in(&d, Some("old-phone")));
-        forget_device_in(&d, Some("old-phone")); // what `tls_allow_plain` does
+        allow_plain_in(&d, Some("old-phone")); // what `tls_allow_plain` does
         assert!(!blocked_in(&d, Some("old-phone")));
+        note_device_in(&d, Some("other-tls"));
+        assert!(blocked_in(&d, Some("stranger")), "only the allowed device is exempt");
+        assert!(!blocked_in(&d, Some("old-phone")));
+        // It later upgrades and connects over TLS: the exemption ends.
+        note_device_in(&d, Some("old-phone"));
+        assert!(blocked_in(&d, Some("old-phone")));
     }
 
     #[test]
@@ -762,8 +839,11 @@ mod tests {
         note_device_in(&d, Some("a"));
         note_device_in(&d, Some("b"));
         forget_device_in(&d, Some("a"));
-        assert!(!blocked_in(&d, Some("a")));
+        assert!(read_devices(&d) == vec!["b".to_string()]);
         assert!(blocked_in(&d, Some("b")));
+        forget_device_in(&d, Some("b"));
+        assert!(!blocked_in(&d, Some("a")), "nothing on record: first-time upgrade allowed");
+        note_device_in(&d, Some("b"));
         forget_device_in(&d, None);
         forget_device_in(&d, Some("never-there"));
         assert!(blocked_in(&d, Some("b")));
@@ -800,14 +880,16 @@ mod tests {
         assert!(!blocked_in(&d, None));
         note_device_in(&d, Some("a"));
         assert!(blocked_in(&d, Some("a")));
-        assert!(!blocked_in(&d, None));
+        assert!(blocked_in(&d, None), "S3: a hello without deviceId is blocked too");
+        assert!(blocked_in(&d, Some("never-seen")), "S3: so is an unknown deviceId");
         for i in 0..20 {
             note_device_in(&d, Some(&format!("dev{i}")));
         }
         assert_eq!(read_devices(&d).len(), MAX_DEVICES);
-        assert!(!blocked_in(&d, Some("a")));
         assert!(blocked_in(&d, Some("dev19")));
-        assert!(!blocked_in(&d, Some("dev0")));
+        reset_devices_in(&d);
+        assert!(!blocked_in(&d, None));
+        assert!(!blocked_in(&d, Some("dev19")));
     }
 
     #[tokio::test]

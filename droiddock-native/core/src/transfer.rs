@@ -40,6 +40,25 @@ pub const CHUNK: usize = 256 * 1024;
 /// which share the same `recv` map.
 const MAC_ID_BASE: u32 = 0x4000_0000;
 
+/// Early-arrival buffer (D2): the phone starts streaming right after it
+/// replies to `fs-pull`, and those chunks can reach the socket reader before
+/// the Mac-side task has registered its receiver. They are held briefly,
+/// bounded in size, count and age, and replayed on registration.
+const EARLY_MAX_BYTES: usize = 8 * 1024 * 1024;
+const EARLY_MAX_IDS: usize = 16;
+const EARLY_TTL: Duration = Duration::from_secs(15);
+/// A receive that hears nothing for this long is dead (dropped `Done`, wedged phone).
+const RECV_IDLE: Duration = Duration::from_secs(60);
+
+struct Early {
+    at: Instant,
+    /// Something was dropped (over the cap): the stream has a hole, so the
+    /// receiver must be told to fail rather than get a short "complete" file.
+    poisoned: bool,
+    bytes: usize,
+    events: Vec<RecvEvent>,
+}
+
 /// Events delivered to a Mac-*receiving* transfer (pull / phone-push).
 enum RecvEvent {
     Chunk(Vec<u8>),
@@ -61,6 +80,7 @@ enum SendEvent {
 pub struct TransferRegistry {
     recv: Mutex<HashMap<u32, mpsc::UnboundedSender<RecvEvent>>>,
     send: Mutex<HashMap<u32, mpsc::UnboundedSender<SendEvent>>>,
+    early: std::sync::Mutex<HashMap<u32, Early>>,
     next_mac_id: AtomicU32,
 }
 
@@ -70,6 +90,56 @@ impl TransferRegistry {
     /// invents a second id space alongside `phone-push`'s.
     pub fn alloc_mac_id(&self) -> u32 {
         self.next_mac_id.fetch_add(1, Ordering::Relaxed) + MAC_ID_BASE
+    }
+
+    /// Register a receiver and replay anything that arrived before it existed.
+    /// Holds the `recv` lock throughout so a chunk can't slip between the drain
+    /// and the insert (`buffer_early` is called under the same lock).
+    async fn register_recv(&self, id: u32, tx: mpsc::UnboundedSender<RecvEvent>) {
+        let mut recv = self.recv.lock().await;
+        let early = self.early.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+        if let Some(e) = early {
+            if e.poisoned || e.at.elapsed() >= EARLY_TTL {
+                let _ = tx.send(RecvEvent::Error("early data was lost".into()));
+            } else {
+                for ev in e.events {
+                    let _ = tx.send(ev);
+                }
+            }
+        }
+        recv.insert(id, tx);
+    }
+
+    /// Hold an event for a receiver that isn't registered yet. Caller holds the `recv` lock.
+    fn buffer_early(&self, id: u32, ev: RecvEvent) {
+        let mut g = self.early.lock().unwrap_or_else(|e| e.into_inner());
+        g.retain(|_, e| e.at.elapsed() < EARLY_TTL);
+        let is_chunk = matches!(ev, RecvEvent::Chunk(_));
+        // A new id past the id cap is refused; if it was data, remember that the
+        // stream has a hole (small marker entry) so registration fails it.
+        let full = !g.contains_key(&id) && g.len() >= EARLY_MAX_IDS;
+        if full && g.len() >= EARLY_MAX_IDS * 4 {
+            return; // even the small "hole" markers are bounded
+        }
+        let entry = g
+            .entry(id)
+            .or_insert_with(|| Early { at: Instant::now(), poisoned: false, bytes: 0, events: Vec::new() });
+        if entry.poisoned {
+            return;
+        }
+        let add = if let RecvEvent::Chunk(b) = &ev { b.len() } else { 0 };
+        if full || entry.bytes + add > EARLY_MAX_BYTES {
+            if is_chunk {
+                entry.poisoned = true;
+                entry.events.clear();
+                entry.bytes = 0;
+            } else if full {
+                g.remove(&id);
+            }
+            return;
+        }
+        entry.bytes += add;
+        entry.events.push(ev);
     }
 
     /// Cancel every in-flight transfer — called when the phone disconnects, so
@@ -83,6 +153,7 @@ impl TransferRegistry {
         for (_, tx) in self.send.lock().await.drain() {
             let _ = tx.send(SendEvent::Cancel);
         }
+        self.early.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 }
 
@@ -138,9 +209,15 @@ pub fn frame(kind: u8, transfer_id: u32, seq: u32, payload: &[u8]) -> Vec<u8> {
 
 /// A KIND_DATA binary chunk arrived for `transfer_id`.
 pub async fn on_chunk(state: &SharedState, transfer_id: u32, buf: &[u8]) {
+    if buf.len() < HEADER {
+        return;
+    }
     let payload = buf[HEADER..].to_vec();
-    if let Some(tx) = state.transfers.recv.lock().await.get(&transfer_id) {
+    let recv = state.transfers.recv.lock().await;
+    if let Some(tx) = recv.get(&transfer_id) {
         let _ = tx.send(RecvEvent::Chunk(payload));
+    } else {
+        state.transfers.buffer_early(transfer_id, RecvEvent::Chunk(payload));
     }
 }
 
@@ -212,8 +289,12 @@ fn err_str(raw: &Value) -> String {
 
 async fn send_recv(state: &SharedState, tid: Option<u32>, ev: RecvEvent) {
     if let Some(tid) = tid {
-        if let Some(tx) = state.transfers.recv.lock().await.get(&tid) {
+        let recv = state.transfers.recv.lock().await;
+        if let Some(tx) = recv.get(&tid) {
             let _ = tx.send(ev);
+        } else if matches!(ev, RecvEvent::Done | RecvEvent::Error(_)) {
+            // `fs-pull-done` can beat the receiver's registration too.
+            state.transfers.buffer_early(tid, ev);
         }
     }
 }
@@ -247,11 +328,23 @@ pub async fn push(
     overwrite: bool,
     source: Source,
 ) -> Result<(), String> {
+    push_as(app, state, local_path, None, dest, overwrite, source).await
+}
+
+/// [`push`], with the name the phone should create. `None` uses the local file's
+/// own name. A caller whose local file is a cache copy (the Finder mount names
+/// them by hash) must pass the real leaf name, or the phone gets a hex-named file.
+pub async fn push_as(
+    app: AppHandle,
+    state: SharedState,
+    local_path: String,
+    remote_name: Option<String>,
+    dest: String,
+    overwrite: bool,
+    source: Source,
+) -> Result<(), String> {
     let path = PathBuf::from(&local_path);
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .ok_or("invalid file name")?;
+    let name = pick_remote_name(remote_name, &path).ok_or("invalid file name")?;
     let meta = tokio::fs::metadata(&path)
         .await
         .map_err(|e| format!("cannot read file: {e}"))?;
@@ -288,6 +381,14 @@ pub async fn push(
     state.transfers.send.lock().await.remove(&transfer_id);
     tracked.finish(result.clone().map(|()| None).into());
     result
+}
+
+/// The name the phone should create: the caller's override when it is a plain
+/// leaf, else the local file's own name.
+pub(crate) fn pick_remote_name(remote_name: Option<String>, local: &Path) -> Option<String> {
+    remote_name
+        .filter(|n| !n.is_empty() && !n.contains('/') && n != "." && n != "..")
+        .or_else(|| local.file_name().map(|n| n.to_string_lossy().to_string()))
 }
 
 async fn stream_file(
@@ -402,7 +503,7 @@ pub async fn pull(
     let size = begin.get("size").and_then(Value::as_u64).unwrap_or(0);
 
     let (tx, rx) = mpsc::unbounded_channel::<RecvEvent>();
-    state.transfers.recv.lock().await.insert(transfer_id, tx);
+    state.transfers.register_recv(transfer_id, tx).await;
 
     let tracked = track.map(|source| {
         transfer_log::start(
@@ -418,7 +519,7 @@ pub async fn pull(
         )
     });
     let key = tracked.as_ref().map(|t| t.key());
-    let result = receive_to_file(&app, &dest_file, transfer_id, &name, size, "pull", key, rx).await;
+    let result = receive_to_file(true, &app, &dest_file, transfer_id, &name, size, "pull", key, rx).await;
     state.transfers.recv.lock().await.remove(&transfer_id);
     if let Some(t) = tracked {
         t.finish(result.clone().map(|()| Some(dest_file.clone())).into());
@@ -448,7 +549,7 @@ async fn start_phone_push(app: &AppHandle, state: &SharedState, raw: &Value) {
         .fetch_add(1, Ordering::Relaxed)
         + MAC_ID_BASE;
 
-    let Some(dest) = download_dir(app).map(|d| d.join(sanitize(&name))) else {
+    let Some(dest) = download_dir(app).map(|d| unique_dest(&d, &sanitize(&name))) else {
         ws_server::push(state, json!({ "type": "phone-push-error", "reqId": req_id, "error": "no downloads dir" })).await;
         return;
     };
@@ -457,7 +558,7 @@ async fn start_phone_push(app: &AppHandle, state: &SharedState, raw: &Value) {
     ws_server::push(state, json!({ "type": "phone-push", "reqId": req_id, "transferId": transfer_id })).await;
 
     let (tx, rx) = mpsc::unbounded_channel::<RecvEvent>();
-    state.transfers.recv.lock().await.insert(transfer_id, tx);
+    state.transfers.register_recv(transfer_id, tx).await;
 
     let tracked = transfer_log::start(
         app,
@@ -473,9 +574,13 @@ async fn start_phone_push(app: &AppHandle, state: &SharedState, raw: &Value) {
     let app = app.clone();
     let state2 = state.clone();
     tokio::spawn(async move {
-        let result = receive_to_file(&app, &dest, transfer_id, &name, size, "phone", Some(tracked.key()), rx).await;
+        let result = receive_to_file(false, &app, &dest, transfer_id, &name, size, "phone", Some(tracked.key()), rx).await;
         tracked.finish(result.clone().map(|()| Some(dest.clone())).into());
         let ok = result.is_ok();
+        if !ok {
+            // Drop the empty placeholder `unique_dest` reserved.
+            let _ = tokio::fs::remove_file(&dest).await;
+        }
         state2.transfers.recv.lock().await.remove(&transfer_id);
         ws_server::push(
             &state2,
@@ -486,6 +591,7 @@ async fn start_phone_push(app: &AppHandle, state: &SharedState, raw: &Value) {
 }
 
 async fn receive_to_file(
+    strict_size: bool,
     app: &AppHandle,
     dest: &Path,
     transfer_id: u32,
@@ -493,63 +599,110 @@ async fn receive_to_file(
     size: u64,
     dir: &'static str,
     log_key: Option<u64>,
-    mut rx: mpsc::UnboundedReceiver<RecvEvent>,
+    rx: mpsc::UnboundedReceiver<RecvEvent>,
 ) -> Result<(), String> {
-    if let Some(parent) = dest.parent() {
-        let _ = tokio::fs::create_dir_all(parent).await;
-    }
-    let part = with_part_ext(dest);
-    let mut file = File::create(&part)
-        .await
-        .map_err(|e| format!("cannot create file: {e}"))?;
-    let mut received: u64 = 0;
-
     let mut last_progress: Option<Instant> = None;
-    let outcome = loop {
-        match rx.recv().await {
-            Some(RecvEvent::Chunk(bytes)) => {
-                if file.write_all(&bytes).await.is_err() {
-                    break Err("write error".to_string());
-                }
-                received += bytes.len() as u64;
-                if let Some(key) = log_key {
-                    transfer_log::progress(app, key, received);
-                }
-                emit_progress_throttled(
-                    app,
-                    Progress { transfer_id, name: name.into(), sent: received, total: size, dir, done: false, error: None },
-                    &mut last_progress,
-                );
-            }
-            Some(RecvEvent::Done) => break Ok(()),
-            // Channel closed without a Done: the registry entry was dropped
-            // (disconnect abort_all sends Cancel first, so this is a genuinely
-            // abnormal end) — never rename a partial .part into place.
-            None => break Err("transfer aborted".to_string()),
-            Some(RecvEvent::Error(e)) => break Err(e),
-            Some(RecvEvent::Cancel) => break Err("cancelled".to_string()),
+    let outcome = receive_core(dest, size, strict_size, RECV_IDLE, rx, |received| {
+        if let Some(key) = log_key {
+            transfer_log::progress(app, key, received);
         }
-    };
-
-    let _ = file.flush().await;
-    drop(file);
-
+        emit_progress_throttled(
+            app,
+            Progress { transfer_id, name: name.into(), sent: received, total: size, dir, done: false, error: None },
+            &mut last_progress,
+        );
+    })
+    .await;
     match outcome {
-        Ok(()) => {
-            let _ = tokio::fs::rename(&part, dest).await;
+        Ok(received) => {
             emit_progress(
                 app,
                 Progress { transfer_id, name: name.into(), sent: received, total: size, dir, done: true, error: None },
             );
             Ok(())
         }
-        Err(e) => {
-            let _ = tokio::fs::remove_file(&part).await;
+        Err((received, e)) => {
             emit_progress(
                 app,
                 Progress { transfer_id, name: name.into(), sent: received, total: size, dir, done: true, error: Some(e.clone()) },
             );
             Err(e)
+        }
+    }
+}
+
+/// The receive loop, free of app state so it can be tested. Writes `dest.part`
+/// and renames it into place only when the transfer finished cleanly AND the
+/// byte count matches the announced `size` (when one was announced); otherwise
+/// the `.part` is deleted. Gives up after `idle` without any event.
+async fn receive_core(
+    dest: &Path,
+    size: u64,
+    strict_size: bool,
+    idle: Duration,
+    mut rx: mpsc::UnboundedReceiver<RecvEvent>,
+    mut on_progress: impl FnMut(u64),
+) -> Result<u64, (u64, String)> {
+    if let Some(parent) = dest.parent() {
+        let _ = tokio::fs::create_dir_all(parent).await;
+    }
+    let part = with_part_ext(dest);
+    let mut file = File::create(&part)
+        .await
+        .map_err(|e| (0, format!("cannot create file: {e}")))?;
+    let mut received: u64 = 0;
+
+    let outcome = loop {
+        match tokio::time::timeout(idle, rx.recv()).await {
+            Err(_) => break Err("transfer stalled".to_string()),
+            Ok(Some(RecvEvent::Chunk(bytes))) => {
+                if file.write_all(&bytes).await.is_err() {
+                    break Err("write error".to_string());
+                }
+                received += bytes.len() as u64;
+                on_progress(received);
+            }
+            Ok(Some(RecvEvent::Done)) => break Ok(()),
+            // Channel closed without a Done: the registry entry was dropped
+            // (disconnect abort_all sends Cancel first, so this is a genuinely
+            // abnormal end) — never rename a partial .part into place.
+            Ok(None) => break Err("transfer aborted".to_string()),
+            Ok(Some(RecvEvent::Error(e))) => break Err(e),
+            Ok(Some(RecvEvent::Cancel)) => break Err("cancelled".to_string()),
+        }
+    };
+
+    let flushed = file.flush().await;
+    drop(file);
+
+    let outcome = outcome.and_then(|()| {
+        // size == 0 may just mean "the phone didn't say", so only a declared
+        // non-zero size is enforced; that is what catches a truncated file.
+        if size > 0 && received != size {
+            if strict_size {
+                Err(format!("incomplete transfer: got {received} of {size} bytes"))
+            } else {
+                // A phone-initiated share: content providers (Drive/Docs virtual
+                // files) report a wrong OpenableColumns.SIZE, so the bytes we
+                // got are accepted; the mismatch is only logged.
+                eprintln!("[transfer] phone push size mismatch: got {received}, announced {size}; accepting");
+                flushed.map_err(|e| format!("write error: {e}"))
+            }
+        } else {
+            flushed.map_err(|e| format!("write error: {e}"))
+        }
+    });
+    match outcome {
+        Ok(()) => match tokio::fs::rename(&part, dest).await {
+            Ok(()) => Ok(received),
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&part).await;
+                Err((received, format!("cannot save file: {e}")))
+            }
+        },
+        Err(e) => {
+            let _ = tokio::fs::remove_file(&part).await;
+            Err((received, e))
         }
     }
 }
@@ -577,8 +730,36 @@ fn with_part_ext(dest: &Path) -> PathBuf {
     PathBuf::from(s)
 }
 
-fn sanitize(name: &str) -> String {
-    name.replace(['/', '\\'], "_")
+pub(crate) fn sanitize(name: &str) -> String {
+    let n: String = name.replace(['/', '\\'], "_").chars().filter(|c| !c.is_control()).collect();
+    match n.trim() {
+        "" | "." | ".." => "download".to_string(),
+        t => t.to_string(),
+    }
+}
+
+/// `dir/name`, or `dir/name (2).ext`, `(3)`, … when that already exists (D5:
+/// a phone share must never overwrite a file in Downloads). Also steps over a
+/// leftover `.part`, so two shares of one name can't write the same temp file.
+fn unique_dest(dir: &Path, name: &str) -> PathBuf {
+    // Reserve with an exclusive create so two concurrent shares can't pick the
+    // same name (the empty placeholder is replaced by the final rename).
+    let reserve = |p: &Path| {
+        !with_part_ext(p).exists()
+            && std::fs::OpenOptions::new().write(true).create_new(true).open(p).is_ok()
+    };
+    let first = dir.join(name);
+    if reserve(&first) {
+        return first;
+    }
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 => (&name[..i], &name[i..]),
+        _ => (name, ""),
+    };
+    (2..10_000)
+        .map(|n| dir.join(format!("{stem} ({n}){ext}")))
+        .find(|p| reserve(p))
+        .unwrap_or(first)
 }
 
 /// The user's Downloads dir (same landing spot as Electron's
@@ -588,4 +769,155 @@ pub fn download_dir(app: &AppHandle) -> Option<PathBuf> {
         .download_dir()
         .ok()
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Downloads")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("dd-xfer-{tag}-{}-{}", std::process::id(), uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    async fn run(dest: &Path, size: u64, idle: Duration, evs: Vec<RecvEvent>, keep_open: bool) -> Result<u64, (u64, String)> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        for e in evs {
+            tx.send(e).unwrap();
+        }
+        let r = receive_core(dest, size, true, idle, rx, |_| {}).await;
+        drop(tx);
+        let _ = keep_open;
+        r
+    }
+
+    #[tokio::test]
+    async fn complete_transfer_is_renamed_into_place() {
+        let d = tmp("ok");
+        let dest = d.join("a.bin");
+        let r = run(&dest, 5, Duration::from_secs(5), vec![RecvEvent::Chunk(vec![1, 2, 3]), RecvEvent::Chunk(vec![4, 5]), RecvEvent::Done], false).await;
+        assert_eq!(r.unwrap(), 5);
+        assert_eq!(std::fs::read(&dest).unwrap(), vec![1, 2, 3, 4, 5]);
+        assert!(!with_part_ext(&dest).exists());
+    }
+
+    #[tokio::test]
+    async fn truncated_transfer_is_an_error_and_leaves_nothing() {
+        let d = tmp("short");
+        let dest = d.join("a.bin");
+        let r = run(&dest, 10, Duration::from_secs(5), vec![RecvEvent::Chunk(vec![1, 2, 3]), RecvEvent::Done], false).await;
+        assert!(r.unwrap_err().1.contains("incomplete"));
+        assert!(!dest.exists() && !with_part_ext(&dest).exists());
+        // An "empty but complete" file with a declared size is the D2 symptom.
+        let r = run(&dest, 10, Duration::from_secs(5), vec![RecvEvent::Done], false).await;
+        assert!(r.is_err() && !dest.exists());
+    }
+
+    #[tokio::test]
+    async fn unknown_size_is_not_enforced_and_a_rename_failure_is_reported() {
+        let d = tmp("unk");
+        let dest = d.join("a.bin");
+        assert!(run(&dest, 0, Duration::from_secs(5), vec![RecvEvent::Chunk(vec![9]), RecvEvent::Done], false).await.is_ok());
+        // Rename onto a non-empty directory fails: must be an Err, not a silent success.
+        let blocked = d.join("dir");
+        std::fs::create_dir_all(blocked.join("x")).unwrap();
+        let r = run(&blocked, 1, Duration::from_secs(5), vec![RecvEvent::Chunk(vec![9]), RecvEvent::Done], false).await;
+        assert!(r.unwrap_err().1.contains("cannot save"));
+        assert!(!with_part_ext(&blocked).exists());
+    }
+
+    #[tokio::test]
+    async fn a_silent_phone_times_out_instead_of_hanging() {
+        let d = tmp("idle");
+        let dest = d.join("a.bin");
+        let (tx, rx) = mpsc::unbounded_channel::<RecvEvent>();
+        tx.send(RecvEvent::Chunk(vec![1])).unwrap();
+        let r = receive_core(&dest, 5, true, Duration::from_millis(80), rx, |_| {}).await;
+        assert!(r.unwrap_err().1.contains("stalled"));
+        assert!(!with_part_ext(&dest).exists());
+        drop(tx);
+    }
+
+    #[tokio::test]
+    async fn early_chunks_are_replayed_and_bounded() {
+        let reg = TransferRegistry::default();
+        {
+            let _g = reg.recv.lock().await;
+            reg.buffer_early(7, RecvEvent::Chunk(vec![1, 2]));
+            reg.buffer_early(7, RecvEvent::Chunk(vec![3]));
+            reg.buffer_early(7, RecvEvent::Done);
+            // Over the byte cap: dropped, not stored.
+            reg.buffer_early(8, RecvEvent::Chunk(vec![0; EARLY_MAX_BYTES]));
+            reg.buffer_early(8, RecvEvent::Chunk(vec![0; 1]));
+        }
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        reg.register_recv(7, tx).await;
+        let mut bytes = Vec::new();
+        let mut done = false;
+        while let Ok(ev) = rx.try_recv() {
+            match ev {
+                RecvEvent::Chunk(b) => bytes.extend(b),
+                RecvEvent::Done => done = true,
+                _ => {}
+            }
+        }
+        assert_eq!(bytes, vec![1, 2, 3]);
+        assert!(done);
+        // id cap
+        {
+            let _g = reg.recv.lock().await;
+            for id in 100..(100 + EARLY_MAX_IDS as u32 + 5) {
+                reg.buffer_early(id, RecvEvent::Chunk(vec![1]));
+            }
+        }
+        assert!(reg.early.lock().unwrap().len() <= EARLY_MAX_IDS * 4);
+    }
+
+    #[tokio::test]
+    async fn a_dropped_early_chunk_fails_the_receiver_instead_of_leaving_a_hole() {
+        let reg = TransferRegistry::default();
+        {
+            let _g = reg.recv.lock().await;
+            reg.buffer_early(9, RecvEvent::Chunk(vec![0; EARLY_MAX_BYTES]));
+            reg.buffer_early(9, RecvEvent::Chunk(vec![1])); // over the cap -> poisoned
+            reg.buffer_early(9, RecvEvent::Done); // ignored once poisoned
+        }
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        reg.register_recv(9, tx).await;
+        assert!(matches!(rx.try_recv(), Ok(RecvEvent::Error(_))));
+        assert!(rx.try_recv().is_err(), "no data or Done is replayed after a hole");
+    }
+
+    #[tokio::test]
+    async fn phone_push_accepts_a_wrong_announced_size_but_pull_does_not() {
+        let d = tmp("lenient");
+        let dest = d.join("p.bin");
+        let (tx, rx) = mpsc::unbounded_channel();
+        tx.send(RecvEvent::Chunk(vec![1, 2, 3])).unwrap();
+        tx.send(RecvEvent::Done).unwrap();
+        let r = receive_core(&dest, 99, false, Duration::from_secs(5), rx, |_| {}).await;
+        assert_eq!(r.unwrap(), 3);
+        assert_eq!(std::fs::read(&dest).unwrap(), vec![1, 2, 3]);
+        let dest2 = d.join("q.bin");
+        let (tx, rx) = mpsc::unbounded_channel();
+        tx.send(RecvEvent::Chunk(vec![1, 2, 3])).unwrap();
+        tx.send(RecvEvent::Done).unwrap();
+        assert!(receive_core(&dest2, 99, true, Duration::from_secs(5), rx, |_| {}).await.is_err());
+    }
+
+    #[test]
+    fn share_names_never_overwrite_or_escape() {
+        let d = tmp("uniq");
+        assert_eq!(sanitize("../x"), ".._x");
+        assert_eq!(sanitize(".."), "download");
+        let a = unique_dest(&d, "photo.jpg");
+        assert_eq!(a, d.join("photo.jpg"));
+        std::fs::write(&a, b"1").unwrap();
+        let b = unique_dest(&d, "photo.jpg");
+        assert_eq!(b, d.join("photo (2).jpg"));
+        std::fs::write(&b, b"2").unwrap();
+        assert_eq!(unique_dest(&d, "photo.jpg"), d.join("photo (3).jpg"));
+        assert_eq!(unique_dest(&d, "noext"), d.join("noext"));
+    }
 }

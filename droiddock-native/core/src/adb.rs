@@ -13,9 +13,7 @@
 //! Wi-Fi link when a device is plugged in. That would mean reworking
 //! `FilesView`/`PhotosView`'s single Wi-Fi transport into a transport-aware
 //! one — a larger change than "matches current SetupModal/DevicesView flow"
-//! calls for. The underlying primitives (`pull`/`push_paths`/`list_dir`/…)
-//! are still ported below for fidelity to `adb.js`, just not wired to a UI
-//! path yet. Flagged in the checkpoint as a known, explicit gap.
+//! calls for.
 
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -251,6 +249,11 @@ pub async fn brew_install(brew: &str, formula: &str) -> Result<(), String> {
 // ── Generic process runner (mirrors `run`) ──────────────────────────────
 
 async fn run(bin: &str, args: &[&str], timeout: Duration) -> Result<String, String> {
+    run_bytes(bin, args, timeout).await.map(|b| String::from_utf8_lossy(&b).to_string())
+}
+
+/// `run`, keeping stdout as raw bytes (`exec-out screencap -p`).
+async fn run_bytes(bin: &str, args: &[&str], timeout: Duration) -> Result<Vec<u8>, String> {
     // kill_on_drop: on timeout the future below is dropped, and without this
     // the adb child keeps running unsupervised. The 1s call-state poller made
     // that a steady leak — dozens of orphaned processes over a long call.
@@ -264,7 +267,7 @@ async fn run(bin: &str, args: &[&str], timeout: Duration) -> Result<String, Stri
         .map_err(|_| "command timed out".to_string())?
         .map_err(|e| e.to_string())?;
     if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        Ok(output.stdout)
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         Err(if stderr.is_empty() { "command failed".to_string() } else { stderr })
@@ -323,12 +326,6 @@ fn reap(app: AppHandle, what: &'static str, child: std::process::Child) {
             .unwrap_or("scrcpy exited immediately");
         emit_toast(&app, "bad", &format!("{what} failed — {reason}"));
     });
-}
-
-/// POSIX single-quote escaping for paths sent through `adb shell` (mirrors `shq`).
-#[allow(dead_code)] // ported from adb.js for fidelity; not yet wired to a UI path (see module doc)
-fn shq(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 pub async fn start_server(adb: &str) {
@@ -494,14 +491,6 @@ pub struct Device {
     pub wifi_serial: Option<String>,
 }
 
-#[allow(dead_code)] // ported from adb.js for fidelity; not yet wired to a UI path (see module doc)
-pub async fn list_devices(adb: &str) -> Result<Vec<Device>, String> {
-    let out = run(adb, &["devices", "-l"], DEFAULT_TIMEOUT).await?;
-    let rest: String = out.lines().skip(1).collect::<Vec<_>>().join("\n");
-    let raw = parse_device_block(&rest);
-    Ok(group_devices(raw, &mut HashMap::new()))
-}
-
 /// Stable hardware id for grouping USB+wireless views of the same phone;
 /// falls back to the adb serial if `ro.serialno` can't be read (offline).
 async fn group_id(adb: &str, d: &RawDevice, cache: &mut HashMap<String, String>) -> String {
@@ -517,43 +506,6 @@ async fn group_id(adb: &str, d: &RawDevice, cache: &mut HashMap<String, String>)
         .unwrap_or_else(|_| d.serial.clone());
     cache.insert(d.serial.clone(), id.clone());
     id
-}
-
-#[allow(dead_code)] // ported from adb.js for fidelity; not yet wired to a UI path (see module doc)
-fn group_devices(raw: Vec<RawDevice>, cache: &mut HashMap<String, String>) -> Vec<Device> {
-    // Synchronous grouping variant used only by the one-shot `list_devices` (no
-    // network round-trip needed there since ids are cached ahead of time by the
-    // tracker in the common path). Falls back to serial-as-id, same as the
-    // uncached branch of `groupId`.
-    let mut groups: Vec<(String, Vec<RawDevice>)> = Vec::new();
-    for d in raw {
-        let id = cache.get(&d.serial).cloned().unwrap_or_else(|| d.serial.clone());
-        if let Some(entry) = groups.iter_mut().find(|(gid, _)| gid == &id) {
-            entry.1.push(d);
-        } else {
-            groups.push((id, vec![d]));
-        }
-    }
-    groups
-        .into_iter()
-        .map(|(id, g)| {
-            let usb = g.iter().find(|d| !d.wireless);
-            let wl = g
-                .iter()
-                .find(|d| d.wireless && d.serial.rsplit_once(':').map(|(_, p)| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit())).unwrap_or(false))
-                .or_else(|| g.iter().find(|d| d.wireless));
-            let active = usb.or(wl).unwrap();
-            Device {
-                id,
-                serial: active.serial.clone(),
-                model: active.model.clone(),
-                state: active.state.clone(),
-                transport: if active.wireless { "wifi".into() } else { "usb".into() },
-                usb_serial: usb.map(|d| d.serial.clone()),
-                wifi_serial: wl.map(|d| d.serial.clone()),
-            }
-        })
-        .collect()
 }
 
 /// Managed state: resolved tool paths, live device list, and background-task
@@ -1216,22 +1168,30 @@ fn scrcpy_env(adb: Option<&str>) -> HashMap<String, String> {
     env
 }
 
-/// Spawn scrcpy in camera mode, detached (its own OS window) — mirrors `camera`.
-pub fn camera(app: AppHandle, scrcpy: &str, serial: &str, adb: Option<&str>) -> Result<(), String> {
-    std::process::Command::new(scrcpy)
-        .args(["-s", serial, "--video-source=camera", "--camera-facing=back", "--no-audio", "--window-title", "DroidDock — Camera"])
-        .envs(scrcpy_env(adb))
-        // Detached with stdio ignored, matching the Electron reference's
-        // `spawn(..., {detached:true, stdio:'ignore'})`. Without this each
-        // session left a zombie behind and scrcpy's chatter went to our stdio.
-        .stdin(std::process::Stdio::null())
+/// A scrcpy command for `serial` with its window title and the env scrcpy needs (`PATH`, `ADB`).
+fn scrcpy_cmd(scrcpy: &str, serial: &str, title: &str, adb: Option<&str>) -> std::process::Command {
+    let mut cmd = std::process::Command::new(scrcpy);
+    cmd.args(["-s", serial, "--window-title", title]).envs(scrcpy_env(adb));
+    cmd
+}
+
+/// Spawn a scrcpy window detached, and `reap` it (report an immediate failure, never leave a zombie).
+/// Stdio is nulled as in the Electron reference's `spawn(..., {detached:true, stdio:'ignore'})`,
+/// except stderr: it is piped so `reap` can show scrcpy's own message, and `reap` drains it.
+fn spawn_scrcpy(app: AppHandle, mut cmd: std::process::Command, what: &'static str) -> Result<(), String> {
+    cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        // Piped, not nulled: `reap` needs scrcpy's own message to explain an
-        // immediate failure. It drains the pipe, so nothing can block.
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .map(|c| reap(app, "ADB camera", c))
+        .map(|c| reap(app, what, c))
         .map_err(|e| e.to_string())
+}
+
+/// Spawn scrcpy in camera mode, detached (its own OS window) — mirrors `camera`.
+pub fn camera(app: AppHandle, scrcpy: &str, serial: &str, adb: Option<&str>) -> Result<(), String> {
+    let mut cmd = scrcpy_cmd(scrcpy, serial, "DroidDock — Camera", adb);
+    cmd.args(["--video-source=camera", "--camera-facing=back", "--no-audio"]);
+    spawn_scrcpy(app, cmd, "ADB camera")
 }
 
 /// Spawn scrcpy in mirror mode, detached — mirrors `mirror`.
@@ -1257,22 +1217,9 @@ pub fn scrcpy_quality_args(app: &AppHandle) -> Vec<String> {
 pub fn mirror(app: AppHandle, scrcpy: &str, serial: &str, caps: ScrcpyCaps, adb: Option<&str>) -> Result<(), String> {
     let quality = scrcpy_quality_args(&app);
     let prefs = mirror_prefs(&app);
-    std::process::Command::new(scrcpy)
-        .args(["-s", serial, "--window-title", "DroidDock — Mirror"])
-        .args(&quality)
-        .args(scrcpy_option_args(&prefs, caps))
-        .envs(scrcpy_env(adb))
-        // Detached with stdio ignored, matching the Electron reference's
-        // `spawn(..., {detached:true, stdio:'ignore'})`. Without this each
-        // session left a zombie behind and scrcpy's chatter went to our stdio.
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        // Piped, not nulled: `reap` needs scrcpy's own message to explain an
-        // immediate failure. It drains the pipe, so nothing can block.
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map(|c| reap(app, "ADB mirror", c))
-        .map_err(|e| e.to_string())
+    let mut cmd = scrcpy_cmd(scrcpy, serial, "DroidDock — Mirror", adb);
+    cmd.args(&quality).args(scrcpy_option_args(&prefs, caps));
+    spawn_scrcpy(app, cmd, "ADB mirror")
 }
 
 /// Tier D — desktop mode ("wireless DeX for everyone", as AirSync puts it).
@@ -1514,8 +1461,8 @@ pub fn desktop(
     }
     let display_arg = format!("--new-display={geometry}{}", prefs.ui_mode.dpi_suffix());
 
-    let mut cmd = std::process::Command::new(scrcpy);
-    cmd.args(["-s", serial, &display_arg, "--window-title", "DroidDock — Desktop"]);
+    let mut cmd = scrcpy_cmd(scrcpy, serial, "DroidDock — Desktop", adb);
+    cmd.arg(&display_arg);
     // Open the window fully on screen (the canvas can be larger than the Mac's usable area).
     cmd.args(desktop_window_args(&geometry, flex));
     // Flex display: resizing the Mac window resizes the Android display itself
@@ -1534,18 +1481,7 @@ pub fn desktop(
     // apply — desktop mode drives ~3× the pixels of a portrait phone view.
     cmd.args(desktop_quality_args(&app));
     cmd.args(scrcpy_option_args(&prefs, caps));
-    cmd.envs(scrcpy_env(adb))
-        // Detached with stdio ignored, matching the Electron reference's
-        // `spawn(..., {detached:true, stdio:'ignore'})`. Without this each
-        // session left a zombie behind and scrcpy's chatter went to our stdio.
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        // Piped, not nulled: `reap` needs scrcpy's own message to explain an
-        // immediate failure. It drains the pipe, so nothing can block.
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map(|c| reap(app, "Desktop mode", c))
-        .map_err(|e| e.to_string())
+    spawn_scrcpy(app, cmd, "Desktop mode")
 }
 
 /// What the UI shows when the local scrcpy predates virtual displays.
@@ -1581,8 +1517,7 @@ pub fn mirror_app(
         return Err(SCRCPY_TOO_OLD.into());
     }
     let prefs = mirror_prefs(&app);
-    let mut cmd = std::process::Command::new(scrcpy);
-    cmd.args(["-s", serial]);
+    let mut cmd = scrcpy_cmd(scrcpy, serial, &format!("DroidDock — {package}"), adb);
     if new_display {
         // Size deliberately omitted — with flex display the *window* drives the
         // display size, so only the density needs stating. The old bare
@@ -1611,11 +1546,7 @@ pub fn mirror_app(
     // scrcpy takes `--start-app=+pkg` to force-stop first, so re-launching an
     // app that is already running on the phone still lands on the new display
     // instead of silently resuming on the built-in one.
-    cmd.args([
-        format!("--start-app=+{package}"),
-        "--window-title".to_string(),
-        format!("DroidDock — {package}"),
-    ]);
+    cmd.arg(format!("--start-app=+{package}"));
     // Bit rate and fps, but no `--max-size` on a virtual display — see
     // `desktop_quality_args`. Without a new display this is an ordinary mirror
     // and keeps the resolution cap it always had.
@@ -1625,18 +1556,7 @@ pub fn mirror_app(
         cmd.args(scrcpy_quality_args(&app));
     }
     cmd.args(scrcpy_option_args(&prefs, caps));
-    cmd.envs(scrcpy_env(adb))
-        // Detached with stdio ignored, matching the Electron reference's
-        // `spawn(..., {detached:true, stdio:'ignore'})`. Without this each
-        // session left a zombie behind and scrcpy's chatter went to our stdio.
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        // Piped, not nulled: `reap` needs scrcpy's own message to explain an
-        // immediate failure. It drains the pipe, so nothing can block.
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map(|c| reap(app, "App window", c))
-        .map_err(|e| e.to_string())
+    spawn_scrcpy(app, cmd, "App window")
 }
 
 // ── Android freeform / desktop-windowing settings (opt-in) ───────────────
@@ -1784,140 +1704,11 @@ pub async fn device_info(adb: &str, serial: &str) -> Result<DeviceInfo, String> 
     Ok(DeviceInfo { model: if model.is_empty() { serial.to_string() } else { model }, android, sdk, battery, charging })
 }
 
-#[derive(Serialize)]
-#[allow(dead_code)] // ported from adb.js for fidelity; not yet wired to a UI path (see module doc)
-pub struct Entry {
-    pub name: String,
-    pub dir: bool,
-}
-
-#[allow(dead_code)] // ported from adb.js for fidelity; not yet wired to a UI path (see module doc)
-pub async fn list_dir(adb: &str, serial: &str, dir_path: &str) -> Result<Vec<Entry>, String> {
-    let out = run(adb, &["-s", serial, "shell", &format!("ls -1p {}", shq(dir_path))], DEFAULT_TIMEOUT).await?;
-    let mut entries: Vec<Entry> = out
-        .lines()
-        .map(|l| l.trim_end_matches('\r'))
-        .filter(|l| !l.is_empty())
-        .map(|name| match name.strip_suffix('/') {
-            Some(stem) => Entry { name: stem.to_string(), dir: true },
-            None => Entry { name: name.to_string(), dir: false },
-        })
-        .collect();
-    entries.sort_by(|a, b| match (a.dir, b.dir) {
-        (x, y) if x == y => a.name.cmp(&b.name),
-        (true, false) => std::cmp::Ordering::Less,
-        (false, true) => std::cmp::Ordering::Greater,
-        _ => std::cmp::Ordering::Equal,
-    });
-    Ok(entries)
-}
-
-#[allow(dead_code)] // ported from adb.js for fidelity; not yet wired to a UI path (see module doc)
-pub async fn rm(adb: &str, serial: &str, remote_path: &str) -> Result<(), String> {
-    let out = run(adb, &["-s", serial, "shell", &format!("rm -rf {} && echo OK", shq(remote_path))], DEFAULT_TIMEOUT).await?;
-    if out.contains("OK") {
-        Ok(())
-    } else {
-        Err(if out.trim().is_empty() { "delete failed".into() } else { out.trim().to_string() })
-    }
-}
-
-#[allow(dead_code)] // ported from adb.js for fidelity; not yet wired to a UI path (see module doc)
-pub async fn rename(adb: &str, serial: &str, remote_path: &str, new_name: &str) -> Result<String, String> {
-    let clean = new_name.trim();
-    if clean.is_empty() || clean.contains('/') || clean == "." || clean == ".." {
-        return Err("Invalid name".into());
-    }
-    let dir = remote_path.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
-    let dest = format!("{dir}/{clean}");
-    let out = run(adb, &["-s", serial, "shell", &format!("mv -n {} {} && echo OK", shq(remote_path), shq(&dest))], DEFAULT_TIMEOUT).await?;
-    if out.contains("OK") {
-        Ok(dest)
-    } else {
-        Err(if out.trim().is_empty() { "rename failed".into() } else { out.trim().to_string() })
-    }
-}
-
-#[allow(dead_code)] // ported from adb.js for fidelity; not yet wired to a UI path (see module doc)
-fn unique_dest(dest_dir: &Path, file_name: &str) -> PathBuf {
-    let path = Path::new(file_name);
-    let ext = path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
-    let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file_name.to_string());
-    let mut candidate = dest_dir.join(file_name);
-    let mut i = 2;
-    while candidate.exists() {
-        candidate = dest_dir.join(format!("{stem} ({i}){ext}"));
-        i += 1;
-    }
-    candidate
-}
-
-#[allow(dead_code)] // ported from adb.js for fidelity; not yet wired to a UI path (see module doc)
-pub async fn pull(adb: &str, serial: &str, remote_path: &str, dest_dir: &Path) -> Result<String, String> {
-    let file_name = Path::new(remote_path).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
-    let dest = unique_dest(dest_dir, &file_name);
-    let dest_s = dest.to_string_lossy().to_string();
-    let output = Command::new(adb)
-        .args(["-s", serial, "pull", remote_path, &dest_s])
-        .env("PATH", augmented_path())
-        .output()
-        .await
-        .map_err(|e| e.to_string())?;
-    if output.status.success() {
-        Ok(dest_s)
-    } else {
-        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        Err(if err.is_empty() { format!("pull failed ({:?})", output.status.code()) } else { err })
-    }
-}
-
-#[allow(dead_code)] // ported from adb.js for fidelity; not yet wired to a UI path (see module doc)
-pub async fn push_paths(adb: &str, serial: &str, local_paths: &[String], remote_dir: &str) -> Result<usize, String> {
-    for p in local_paths {
-        let output = Command::new(adb)
-            .args(["-s", serial, "push", p, remote_dir])
-            .env("PATH", augmented_path())
-            .output()
-            .await
-            .map_err(|e| e.to_string())?;
-        if !output.status.success() {
-            let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            return Err(if err.is_empty() { format!("push failed ({:?})", output.status.code()) } else { err });
-        }
-    }
-    Ok(local_paths.len())
-}
-
 pub async fn screenshot(adb: &str, serial: &str, dest_dir: &Path, timestamp: &str) -> Result<String, String> {
     let dest = dest_dir.join(format!("droiddock-{timestamp}.png"));
-    let output = Command::new(adb)
-        .args(["-s", serial, "exec-out", "screencap", "-p"])
-        .env("PATH", augmented_path())
-        .output()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if err.is_empty() { "screencap failed".into() } else { err });
-    }
-    tokio::fs::write(&dest, &output.stdout).await.map_err(|e| e.to_string())?;
+    let png = run_bytes(adb, &["-s", serial, "exec-out", "screencap", "-p"], Duration::from_secs(30)).await?;
+    tokio::fs::write(&dest, &png).await.map_err(|e| e.to_string())?;
     Ok(dest.to_string_lossy().to_string())
-}
-
-#[allow(dead_code)] // ported from adb.js for fidelity; not yet wired to a UI path (see module doc)
-pub async fn file_bytes(adb: &str, serial: &str, remote_path: &str) -> Result<Vec<u8>, String> {
-    let output = Command::new(adb)
-        .args(["-s", serial, "exec-out", "cat", remote_path])
-        .env("PATH", augmented_path())
-        .output()
-        .await
-        .map_err(|e| e.to_string())?;
-    if output.status.success() {
-        Ok(output.stdout)
-    } else {
-        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        Err(if err.is_empty() { "cat failed".into() } else { err })
-    }
 }
 
 /// Run `adb -s <serial> shell <args…>` for input injection (`input tap`, `input keyevent`…).
@@ -1949,13 +1740,6 @@ pub async fn display_size(adb: &str, serial: &str) -> Option<(u32, u32)> {
 pub async fn phone_call(adb: &str, serial: &str, number: &str) -> Result<(), String> {
     let tel = format!("tel:{}", urlencode(number));
     run(adb, &["-s", serial, "shell", "am", "start", "-a", "android.intent.action.CALL", "-d", &tel], Duration::from_secs(8)).await?;
-    Ok(())
-}
-
-#[allow(dead_code)] // ported from adb.js for fidelity; not yet wired to a UI path (see module doc)
-pub async fn phone_sms(adb: &str, serial: &str, number: &str) -> Result<(), String> {
-    let sms = format!("sms:{}", urlencode(number));
-    run(adb, &["-s", serial, "shell", "am", "start", "-a", "android.intent.action.SENDTO", "-d", &sms], Duration::from_secs(8)).await?;
     Ok(())
 }
 
@@ -2750,6 +2534,17 @@ pub async fn adb_second_screen(
     .await
 }
 
+/// Window keys whose `open_vd_window` is in flight (reserved until it returns).
+static OPENING_WINDOWS: std::sync::LazyLock<Mutex<std::collections::HashSet<String>>> =
+    std::sync::LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
+
+struct OpeningGuard(String);
+impl Drop for OpeningGuard {
+    fn drop(&mut self) {
+        OPENING_WINDOWS.lock().unwrap().remove(&self.0);
+    }
+}
+
 /// One scrcpy window showing its own virtual display.
 struct VdWindow {
     serial: String,
@@ -2777,19 +2572,32 @@ async fn open_vd_window(app: AppHandle, state: &AdbState, w: VdWindow) -> Result
         return Err(SCRCPY_TOO_OLD.into());
     }
     let VdWindow { serial, key, package, kind, title, decorations, keep_alive } = w;
-    if let Some(w) = APP_WINDOWS.lock().unwrap().get(&key).copied() {
-        if kind == "second" {
-            emit_toast(&app, "info", "The second screen is already open");
-        }
-        return Ok(AppWindowOpened { display_id: w.display_id, reused: true });
+    if package.as_deref().is_some_and(|p| !is_package_name(p)) {
+        return Err("Invalid package name".into());
     }
+    // Reserve the key before any await, so a double-click can't open two windows.
+    let _reservation = {
+        let mut opening = OPENING_WINDOWS.lock().unwrap();
+        let existing = APP_WINDOWS.lock().unwrap().get(&key).copied();
+        if let Some(w) = existing {
+            drop(opening);
+            if kind == "second" {
+                emit_toast(&app, "info", "The second screen is already open");
+            }
+            return Ok(AppWindowOpened { display_id: w.display_id, reused: true });
+        }
+        if !opening.insert(key.clone()) {
+            return Err("That window is already opening".into());
+        }
+        OpeningGuard(key.clone())
+    };
     let phone = display_size(&adb, &serial).await.unwrap_or((1080, 2340));
     let density = display_density(&adb, &serial).await.unwrap_or(420);
     let (geometry, canvas) = app_window_geometry(phone, density);
     let prefs = mirror_prefs(&app);
 
-    let mut cmd = std::process::Command::new(&scrcpy);
-    cmd.args(["-s", &serial, &format!("--new-display={geometry}"), "--window-title", &title]);
+    let mut cmd = scrcpy_cmd(&scrcpy, &serial, &title, Some(&adb));
+    cmd.arg(format!("--new-display={geometry}"));
     cmd.args(desktop_window_args(&canvas, false));
     if !decorations {
         cmd.arg("--no-vd-system-decorations");
@@ -2803,8 +2611,7 @@ async fn open_vd_window(app: AppHandle, state: &AdbState, w: VdWindow) -> Result
     cmd.args(desktop_quality_args(&app));
     // The phone's own screen must stay usable: never blank it for this window.
     cmd.args(scrcpy_option_args(&prefs, caps).into_iter().filter(|a| a != "--turn-screen-off"));
-    cmd.envs(scrcpy_env(Some(&adb)))
-        .stdin(std::process::Stdio::null())
+    cmd.stdin(std::process::Stdio::null())
         // scrcpy 5.x logs its INFO lines (including the server's "New display: … (id=N)") to stdout,
         // older versions to stderr: read both.
         .stdout(std::process::Stdio::piped())
@@ -2815,13 +2622,29 @@ async fn open_vd_window(app: AppHandle, state: &AdbState, w: VdWindow) -> Result
     if crate::shutdown::quitting() {
         send_signal(pid, Signal::Term);
     }
-    let (tx, rx) = std::sync::mpsc::channel::<Result<u32, String>>();
-    let announced_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    use std::sync::{atomic::{AtomicBool, Ordering as AtOrd}, Arc};
+    // The first outcome (display id, or a failure) goes to the waiting caller through this oneshot.
+    let (tx, rx) = tokio::sync::oneshot::channel::<Result<u32, String>>();
+    let tx = Arc::new(Mutex::new(Some(tx)));
+    let reply = {
+        let tx = tx.clone();
+        move |r: Result<u32, String>| {
+            if let Some(t) = tx.lock().unwrap().take() {
+                let _ = t.send(r);
+            }
+        }
+    };
+    let announced_flag = Arc::new(AtomicBool::new(false));
     // First sighting of the display id (stdout or stderr reader): record it and tell the Mac.
     let keep_awake = prefs.vd_keep_awake;
     let announce = {
         let (key, serial, app, package, adb) = (key.clone(), serial.clone(), app.clone(), package.clone(), adb.clone());
-        move |id: u32| {
+        let (flag, reply) = (announced_flag.clone(), reply.clone());
+        move |line: &str| {
+            let Some(id) = parse_new_display_id(line) else { return };
+            if flag.swap(true, AtOrd::SeqCst) {
+                return;
+            }
             APP_WINDOWS.lock().unwrap().insert(key.clone(), AppWin { display_id: id, pid });
             if keep_awake {
                 vd_keeper_start(&adb, &serial, &key, id);
@@ -2830,19 +2653,17 @@ async fn open_vd_window(app: AppHandle, state: &AdbState, w: VdWindow) -> Result
                 "vd-window",
                 serde_json::json!({ "pid": pid, "displayId": id, "serial": serial, "kind": kind, "decorations": decorations, "package": package }),
             );
+            reply(Ok(id));
         }
     };
+    // Shared by the stdout and stderr readers (only the first sighting counts).
+    let announce = Arc::new(announce);
     if let Some(out) = child.stdout.take() {
-        let (tx2, flag, announce) = (tx.clone(), announced_flag.clone(), announce.clone());
+        let announce = announce.clone();
         std::thread::spawn(move || {
             use std::io::{BufRead, BufReader};
             for line in BufReader::new(out).lines().map_while(Result::ok) {
-                if let Some(id) = parse_new_display_id(&line) {
-                    if !flag.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                        announce(id);
-                        let _ = tx2.send(Ok(id));
-                    }
-                }
+                announce(&line);
             }
         });
     }
@@ -2853,12 +2674,7 @@ async fn open_vd_window(app: AppHandle, state: &AdbState, w: VdWindow) -> Result
         let mut tail = String::new();
         if let Some(err) = child.stderr.take() {
             for line in BufReader::new(err).lines().map_while(Result::ok) {
-                if let Some(id) = parse_new_display_id(&line) {
-                    if !announced_flag.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                        announce(id);
-                        let _ = tx.send(Ok(id));
-                    }
-                }
+                announce(&line);
                 if !line.trim().is_empty() {
                     tail = line;
                 }
@@ -2877,23 +2693,19 @@ async fn open_vd_window(app: AppHandle, state: &AdbState, w: VdWindow) -> Result
             let (adb, serial, key) = (wadb.clone(), wserial.clone(), wkey.clone());
             std::thread::spawn(move || vd_keeper_window_closed(&adb, &serial, &key));
         }
-        if !announced_flag.load(std::sync::atomic::Ordering::SeqCst) {
-            let _ = tx.send(Err(if tail.is_empty() { "scrcpy exited before creating the display".into() } else { tail.clone() }));
+        if !announced_flag.load(AtOrd::SeqCst) {
+            reply(Err(if tail.is_empty() { "scrcpy exited before creating the display".into() } else { tail.clone() }));
         }
         if !ok && started.elapsed() < Duration::from_secs(3) {
             emit_toast(&wapp, "bad", &format!("App window failed — {tail}"));
         }
     });
     // Wait (without blocking the runtime) for the server to name the display.
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        match rx.try_recv() {
-            Ok(Ok(id)) => return Ok(AppWindowOpened { display_id: id, reused: false }),
-            Ok(Err(e)) => return Err(e),
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => return Err("scrcpy exited".into()),
-            Err(std::sync::mpsc::TryRecvError::Empty) => {}
-        }
-        if Instant::now() > deadline {
+    match tokio::time::timeout(Duration::from_secs(15), rx).await {
+        Ok(Ok(Ok(id))) => Ok(AppWindowOpened { display_id: id, reused: false }),
+        Ok(Ok(Err(e))) => Err(e),
+        Ok(Err(_)) => Err("scrcpy exited".into()),
+        Err(_) => {
             send_signal(pid, Signal::Term);
             // scrcpy's SDL loop may sleep through SIGTERM until another event arrives: don't leave an orphan window.
             std::thread::spawn(move || {
@@ -2902,9 +2714,8 @@ async fn open_vd_window(app: AppHandle, state: &AdbState, w: VdWindow) -> Result
                     send_signal(pid, Signal::Kill);
                 }
             });
-            return Err("Timed out waiting for the virtual display".into());
+            Err("Timed out waiting for the virtual display".into())
         }
-        tokio::time::sleep(Duration::from_millis(120)).await;
     }
 }
 
@@ -2921,6 +2732,9 @@ pub async fn adb_vd_key(
 ) -> Result<(), String> {
     let adb = state.adb.lock().unwrap().clone().ok_or("ADB not found")?;
     if let (Some(pkg), "home") = (package.as_deref(), key.as_str()) {
+        if !is_package_name(pkg) {
+            return Err("Invalid package name".into());
+        }
         let comp = launcher_activity(&adb, &serial, pkg).await.ok_or("This app has no launcher activity")?;
         let d = display_id.to_string();
         return run(&adb, &["-s", &serial, "shell", "am", "start", "--display", &d, "--activity-clear-top", "-n", &comp], Duration::from_secs(8))
@@ -2966,6 +2780,9 @@ pub async fn adb_vd_switch(
     display_id: u32,
     package: String,
 ) -> Result<(), String> {
+    if !is_package_name(&package) {
+        return Err("Invalid package name".into());
+    }
     let adb = state.adb.lock().unwrap().clone().ok_or("ADB not found")?;
     let comp = launcher_activity(&adb, &serial, &package).await.ok_or("This app has no launcher activity")?;
     let d = display_id.to_string();
@@ -3028,8 +2845,19 @@ async fn dump_tasks(adb: &str, serial: &str) -> Vec<TaskInfo> {
         .unwrap_or_default()
 }
 
+/// Same rules as `automation.rs::is_package_name`: dot-separated `[A-Za-z0-9_]` segments.
+fn is_package_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 255
+        && s.split('.').all(|seg| !seg.is_empty() && seg.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+}
+
 /// The package's launcher activity (`pkg/.Cls`).
 async fn launcher_activity(adb: &str, serial: &str, package: &str) -> Option<String> {
+    // The name goes into `adb shell`, which the phone's `sh` re-parses: refuse anything but a plain name.
+    if !is_package_name(package) {
+        return None;
+    }
     let out = run(
         adb,
         &["-s", serial, "shell", "cmd", "package", "resolve-activity", "--brief", "-c", "android.intent.category.LAUNCHER", package],
@@ -3056,6 +2884,9 @@ pub async fn adb_app_window_place(
     display_id: u32,
     fired: bool,
 ) -> Result<AppWindowPlaced, String> {
+    if !is_package_name(&package) {
+        return Err("Invalid package name".into());
+    }
     let adb = state.adb.lock().unwrap().clone().ok_or("ADB not found")?;
     if fired {
         // The start is asynchronous: poll until the app has a visible task somewhere.
@@ -3137,6 +2968,17 @@ pub async fn adb_projection_grant(state: crate::host::State<'_, AdbState>, allow
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn package_name_validator() {
+        use super::is_package_name;
+        assert!(is_package_name("com.whatsapp"));
+        assert!(is_package_name("com.a_b.c9"));
+        for bad in ["", "x; reboot", "a b", "a..b", ".a", "a.", "a$(id)", "a'b", "a\nb", "a/b"] {
+            assert!(!is_package_name(bad), "{bad:?}");
+        }
+        assert!(!is_package_name(&"a".repeat(256)));
+    }
+
     use super::{app_window_geometry, find_app_task, is_transient_adb_error, parse_appop_mode, parse_new_display_id, parse_pair_output, parse_tasks, ScrcpyCaps, UiMode};
 
     /// The exact string wireless QR pairing died on must be recognised as

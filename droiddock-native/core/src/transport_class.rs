@@ -31,7 +31,7 @@ const P2M_ANY: &[&str] = &[
 
 const M2P_ANY: &[&str] = &[
     "welcome", "caps", "ping", "pong", "mac-info", "mac-media", "reply", "dismiss", "notif-action", "notif-open",
-    "action-call", "action-sms", "call-action", "ring", "health", "health-fix", "media-cmd",
+    "action-call", "call-action", "ring", "health", "health-fix", "media-cmd",
     "sms-threads", "sms-messages", "sms-send", "app-launch", "link-mode", "link-prefer",
 ];
 

@@ -502,12 +502,21 @@ async fn osascript(script: &str) -> String {
     if std::env::var_os("DD_TRACE_FORKS").is_some() {
         eprintln!("[fork] osascript #{n}");
     }
-    let out = tokio::process::Command::new("/usr/bin/osascript")
-        .args(["-e", script])
-        .output()
-        .await;
-    out.map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-        .unwrap_or_default()
+    // A hung player, or an Automation prompt nobody answers, must not freeze the now-playing loop:
+    // time out, and `kill_on_drop` reaps the process when the future is dropped.
+    let out = tokio::time::timeout(
+        std::time::Duration::from_secs(8),
+        tokio::process::Command::new("/usr/bin/osascript")
+            .args(["-e", script])
+            .stdin(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await;
+    match out {
+        Ok(Ok(o)) => String::from_utf8_lossy(&o.stdout).to_string(),
+        _ => String::new(),
+    }
 }
 
 #[cfg(not(target_os = "macos"))]

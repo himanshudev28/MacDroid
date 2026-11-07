@@ -39,6 +39,7 @@ pub const COMMANDS: &[&str] = &[
     "server_restart",
     "get_config",
     "get_pairing_info",
+    "pairing_reset",
     "set_setting",
     "notif_reply",
     "notif_dismiss",
@@ -289,6 +290,7 @@ const SWIFT_ONLY: &[&str] = &[
 #[cfg(test)]
 const NEW_COMMANDS: &[&str] = &[
     "notif_open",
+    "pairing_reset",
     "quickshare_discover_start",
     "quickshare_discover_stop",
     "quickshare_devices",
@@ -326,6 +328,15 @@ pub async fn dispatch(
     args: Value,
     body: Option<Vec<u8>>,
 ) -> Result<Value, String> {
+    // Defence in depth (S6): a package name reaches `adb shell`, so refuse
+    // anything that is not a dotted identifier before any adb_* command runs.
+    if cmd.starts_with("adb_") {
+        if let Some(pkg) = args.get("package").and_then(|v| v.as_str()).filter(|p| !p.is_empty()) {
+            if !crate::automation::is_package_name(pkg) {
+                return Err("invalid package name".to_string());
+            }
+        }
+    }
     match cmd {
         // ── BLE fallback (docs/BLE-NEARBY-DESIGN.md §8) ──
         "ble_status" => crate::ble_policy::cmd_status(app),
@@ -337,7 +348,7 @@ pub async fn dispatch(
         "ble_rssi" => crate::ble_policy::cmd_rssi(app, &args),
         "link_prefer" => crate::ble_policy::cmd_link_prefer(app, &args).await,
         "tls_allow_plain" => {
-            crate::tls::forget_device(app, args.get("deviceId").and_then(|v| v.as_str()));
+            crate::tls::allow_plain(app, args.get("deviceId").and_then(|v| v.as_str()));
             Ok(Value::Null)
         }
         "tls_status" => {
@@ -347,6 +358,11 @@ pub async fn dispatch(
         "get_config" => {
             let s0 = app.state::<crate::AppState>();
             val(crate::commands::get_config(s0))
+        }
+        "pairing_reset" => {
+            let st = app.state::<crate::ws_server::SharedState>();
+            crate::commands::pairing_reset(app, st.inner()).await?;
+            Ok(Value::Null)
         }
         "get_pairing_info" => {
             let s0 = app.state::<crate::AppState>();

@@ -655,7 +655,7 @@ mod tests {
 
     #[test]
     fn inflate_bomb_is_capped_and_oversize_send_refused() {
-        let (mut mac, mut phone) = live_pair();
+        let (mut mac, phone) = live_pair();
         // A deflate frame that inflates past 256 KiB must be rejected.
         let bomb = miniz_oxide::deflate::compress_to_vec(&vec![b' '; MAX_INFLATED + 10], 6);
         let key = phone.session_key().unwrap();

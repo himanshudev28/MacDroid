@@ -485,13 +485,22 @@ impl Default for Config {
 /// a failed parse by regenerating a default config with a FRESH TOKEN —
 /// silently unpairing the phone.
 pub fn save(app: &AppHandle, config: &Config) {
-    let path = config_path(app);
+    save_to(&config_path(app), config);
+}
+
+/// Atomic, fsynced, owner-only write. The previous good file is kept as
+/// `droiddock.json.bak` so a later parse failure can recover the token.
+pub(crate) fn save_to(path: &std::path::Path, config: &Config) {
     if let Some(dir) = path.parent() {
         let _ = fs::create_dir_all(dir);
     }
-    let tmp = path.with_extension("json.tmp");
-    if fs::write(&tmp, serde_json::to_string_pretty(config).unwrap()).is_ok() {
-        let _ = fs::rename(&tmp, &path);
+    // Only a main file that still parses becomes the backup: a corrupt file
+    // must never replace a good `.bak`.
+    if fs::read(path).is_ok_and(|b| serde_json::from_slice::<Config>(&b).is_ok()) {
+        let _ = fs::copy(path, path.with_extension("json.bak"));
+    }
+    if let Ok(json) = serde_json::to_string_pretty(config) {
+        let _ = crate::tls::write_atomic(path, json.as_bytes(), 0o600);
     }
 }
 
@@ -505,19 +514,35 @@ fn config_path(app: &AppHandle) -> PathBuf {
 /// Load `droiddock.json` from the app data dir, creating it with a fresh
 /// token on first run — same semantics as the Electron app's `loadConfig()`.
 pub fn load_or_create(app: &AppHandle) -> Config {
-    let path = config_path(app);
+    load_or_create_at(&config_path(app))
+}
 
-    if let Ok(raw) = fs::read_to_string(&path) {
-        if let Ok(config) = serde_json::from_str::<Config>(&raw) {
-            return config;
+/// Never silently replace an unparseable file with a fresh token: that would
+/// unpair the phone and destroy the evidence. Try the `.bak`, and keep the bad
+/// file aside as `.corrupt` before minting a new default.
+pub(crate) fn load_or_create_at(path: &std::path::Path) -> Config {
+    let parse = |p: &std::path::Path| fs::read(p).ok().and_then(|b| serde_json::from_slice::<Config>(&b).ok());
+    match fs::read(path) {
+        Ok(bytes) => {
+            if let Ok(config) = serde_json::from_slice::<Config>(&bytes) {
+                return config;
+            }
+            // Unparseable (corrupt or not UTF-8): keep the evidence.
+            let _ = fs::write(path.with_extension("json.corrupt"), &bytes);
+            eprintln!("[config] droiddock.json is unreadable; kept a copy as droiddock.json.corrupt");
         }
+        // Unreadable for another reason (permissions, I/O): don't mint a token over it.
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            eprintln!("[config] cannot read droiddock.json: {e}");
+        }
+        Err(_) => {}
     }
-
+    if let Some(config) = parse(&path.with_extension("json.bak")) {
+        save_to(path, &config);
+        return config;
+    }
     let config = Config::default();
-    if let Some(dir) = path.parent() {
-        let _ = fs::create_dir_all(dir);
-    }
-    let _ = fs::write(&path, serde_json::to_string_pretty(&config).unwrap());
+    save_to(path, &config);
     config
 }
 
@@ -608,5 +633,48 @@ mod tests {
         assert_eq!(cfg.notif_tier("a"), "hidden", "hidden wins over the legacy muted list");
         let back: Config = serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
         assert_eq!(back.notif_tiers.get("b").map(String::as_str), Some("silent"));
+    }
+
+    #[test]
+    fn a_corrupt_config_is_kept_and_recovered_from_the_backup() {
+        let d = std::env::temp_dir().join(format!("dd-cfg-{}-{}", std::process::id(), Uuid::new_v4()));
+        let p = d.join("droiddock.json");
+        let mut cfg = Config::default();
+        cfg.token = "tok-one".into();
+        save_to(&p, &cfg);
+        cfg.menubar_max_len = 33;
+        save_to(&p, &cfg); // now .bak holds the first save
+        fs::write(&p, "{ not json").unwrap();
+        let back = load_or_create_at(&p);
+        assert_eq!(back.token, "tok-one", "token recovered from .bak");
+        assert_eq!(fs::read_to_string(p.with_extension("json.corrupt")).unwrap(), "{ not json");
+        // No backup at all: fresh default, but the bad file is still preserved.
+        let _ = fs::remove_file(p.with_extension("json.bak"));
+        fs::write(&p, "garbage").unwrap();
+        let fresh = load_or_create_at(&p);
+        assert_ne!(fresh.token, "tok-one");
+        assert_eq!(fs::read_to_string(p.with_extension("json.corrupt")).unwrap(), "garbage");
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_non_utf8_config_still_recovers_and_a_corrupt_file_never_replaces_a_good_backup() {
+        let d = std::env::temp_dir().join(format!("dd-cfg2-{}-{}", std::process::id(), Uuid::new_v4()));
+        let p = d.join("droiddock.json");
+        let mut cfg = Config::default();
+        cfg.token = "tok-good".into();
+        save_to(&p, &cfg);
+        save_to(&p, &cfg); // .bak = good
+        fs::write(&p, [0xff, 0xfe, 0x00, 0x80]).unwrap();
+        // A save while main is corrupt must leave the good .bak alone.
+        save_to(&p, &cfg);
+        assert_eq!(load_or_create_at(&p).token, "tok-good");
+        fs::write(&p, [0xff, 0xfe, 0x00]).unwrap();
+        let back = load_or_create_at(&p);
+        assert_eq!(back.token, "tok-good", "recovered from .bak despite non-UTF-8 main");
+        assert_eq!(fs::read(p.with_extension("json.corrupt")).unwrap(), vec![0xff, 0xfe, 0x00]);
+        let _ = fs::remove_dir_all(&d);
     }
 }

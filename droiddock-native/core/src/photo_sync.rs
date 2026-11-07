@@ -37,6 +37,13 @@ const PAGE: u32 = 500;
 struct Ledger {
     #[serde(default)]
     by_device: HashMap<String, HashSet<i64>>,
+    /// Ledger format version. 0 = written before video ids got their own key.
+    #[serde(default)]
+    v: u32,
+    /// Frozen copy of a v0 ledger's raw ids. Only used so already-synced videos
+    /// aren't downloaded again after the upgrade; never extended.
+    #[serde(default)]
+    legacy_by_device: HashMap<String, HashSet<i64>>,
 }
 
 impl Ledger {
@@ -49,6 +56,9 @@ impl Ledger {
     fn migrate_key(&mut self, from: &str, to: &str) -> bool {
         if from == to || self.by_device.contains_key(to) {
             return false;
+        }
+        if let Some(l) = self.legacy_by_device.remove(from) {
+            self.legacy_by_device.entry(to.to_string()).or_insert(l);
         }
         match self.by_device.remove(from) {
             Some(ids) => {
@@ -96,10 +106,15 @@ pub fn init(data_dir: PathBuf) -> PhotoSync {
 }
 
 fn load_ledger(path: &Path) -> Ledger {
-    std::fs::read_to_string(path)
+    let mut l: Ledger = std::fs::read_to_string(path)
         .ok()
         .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    if l.v == 0 {
+        l.legacy_by_device = l.by_device.clone();
+        l.v = 1;
+    }
+    l
 }
 
 /// Write-to-temp-then-rename, same atomic-landing pattern as
@@ -121,8 +136,12 @@ impl PhotoSyncState {
         save_ledger(&self.ledger_path, &l);
     }
 
-    async fn already_synced(&self, device_key: &str) -> HashSet<i64> {
-        self.ledger.lock().await.by_device.get(device_key).cloned().unwrap_or_default()
+    async fn already_synced(&self, device_key: &str) -> (HashSet<i64>, HashSet<i64>) {
+        let l = self.ledger.lock().await;
+        (
+            l.by_device.get(device_key).cloned().unwrap_or_default(),
+            l.legacy_by_device.get(device_key).cloned().unwrap_or_default(),
+        )
     }
 
     /// One-time migration for ledgers written before the key changed from the
@@ -147,6 +166,31 @@ struct MediaItem {
     name: String,
     #[serde(default)]
     path: String,
+    /// `"image"` or `"video"`; MediaStore ids are only unique within one table.
+    #[serde(default)]
+    kind: String,
+}
+
+/// Ledger key for an item. Images keep the raw MediaStore id (so existing
+/// ledgers stay valid); videos get bit 62 set so an image and a video that
+/// share a `_id` no longer collide.
+const VIDEO_KEY_BIT: i64 = 1 << 62;
+fn ledger_key(kind: &str, id: i64) -> i64 {
+    if kind == "video" { id | VIDEO_KEY_BIT } else { id }
+}
+
+/// Already synced? A video also honours the frozen pre-upgrade raw ids
+/// (`legacy`), so an upgrade doesn't re-download every video; ids recorded
+/// after the upgrade are exact.
+fn is_synced(already: &HashSet<i64>, legacy: &HashSet<i64>, it: &MediaItem) -> bool {
+    already.contains(&ledger_key(&it.kind, it.id)) || (it.kind == "video" && legacy.contains(&it.id))
+}
+
+/// S4: the phone-supplied name is untrusted. Keep only a plain leaf so
+/// `../../x`, absolute paths and `..` can never leave the sync folder.
+fn safe_name(name: &str) -> String {
+    let leaf = name.rsplit(['/', '\\']).next().unwrap_or("").trim().trim_start_matches('.');
+    if leaf.is_empty() { "media".to_string() } else { leaf.replace('\0', "_") }
 }
 
 #[derive(Clone, Serialize)]
@@ -256,8 +300,8 @@ async fn run_sync(
     let _guard = RunGuard(&photo.running);
 
     let items = fetch_all_items(&ws_state).await?;
-    let already = photo.already_synced(&device_key).await;
-    let new_items: Vec<MediaItem> = items.into_iter().filter(|it| !already.contains(&it.id)).collect();
+    let (already, legacy) = photo.already_synced(&device_key).await;
+    let new_items: Vec<MediaItem> = items.into_iter().filter(|it| !is_synced(&already, &legacy, it)).collect();
 
     let total = new_items.len() as u32;
     if total == 0 {
@@ -294,13 +338,13 @@ async fn run_sync(
 
     let mut done = 0u32;
     for item in new_items {
-        let dest = unique_dest(&dest_dir, &item.name);
+        let dest = unique_dest(&dest_dir, &safe_name(&item.name));
         // Record-as-completed happens per item (not batched at the end) so a
         // crash mid-run leaves the ledger reflecting exactly what actually
         // landed on disk — a re-run only re-downloads what's still missing.
         match transfer::pull(app.clone(), ws_state.clone(), item.path.clone(), dest, None).await {
             Ok(_) => {
-                photo.mark_synced(&device_key, item.id).await;
+                photo.mark_synced(&device_key, ledger_key(&item.kind, item.id)).await;
                 done += 1;
                 emit_progress(&app, done, total, Some(item.name), None);
             }
@@ -516,5 +560,38 @@ mod tests {
         assert_eq!(dest, root.join("a (3).png"));
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn hostile_names_cannot_leave_the_sync_folder() {
+        assert_eq!(safe_name("../../Library/LaunchAgents/x.plist"), "x.plist");
+        assert_eq!(safe_name("/etc/passwd"), "passwd");
+        assert_eq!(safe_name(".."), "media");
+        assert_eq!(safe_name("a\\b.jpg"), "b.jpg");
+        assert_eq!(safe_name(".hidden.jpg"), "hidden.jpg");
+        assert_eq!(safe_name("IMG_1.jpg"), "IMG_1.jpg");
+        let d = tmp_dir("hostile");
+        let p = unique_dest(&d, &safe_name("../../x.plist"));
+        assert_eq!(p.parent().unwrap(), d.as_path());
+    }
+
+    #[test]
+    fn image_and_video_ids_do_not_collide_in_the_ledger() {
+        let img = MediaItem { id: 7, name: "a.jpg".into(), path: String::new(), kind: "image".into() };
+        let vid = MediaItem { id: 7, name: "a.mp4".into(), path: String::new(), kind: "video".into() };
+        let none = HashSet::new();
+        let mut already = HashSet::new();
+        already.insert(ledger_key("image", 7));
+        assert!(is_synced(&already, &none, &img));
+        assert!(!is_synced(&already, &none, &vid), "a synced image must not hide a video with the same id");
+        already.insert(ledger_key("video", 7));
+        assert!(is_synced(&already, &none, &vid));
+        // Pre-upgrade ledger: raw ids are frozen as `legacy`; videos honour them.
+        let dir = tmp_dir("legacy");
+        let path = dir.join("l.json");
+        std::fs::write(&path, r#"{"by_device":{"p":[7]}}"#).unwrap();
+        let l = load_ledger(&path);
+        assert!(is_synced(&HashSet::new(), &l.legacy_by_device["p"], &vid));
+        assert_eq!(l.v, 1);
     }
 }

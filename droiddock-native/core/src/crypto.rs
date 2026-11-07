@@ -49,6 +49,19 @@ const NONCE_LEN: usize = 12;
 /// The capability string both sides advertise.
 pub const CAP: &str = "enc";
 
+/// Constant-time byte-string equality (length is not secret). Use for tokens
+/// and MACs, never `==`.
+pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 #[derive(Clone)]
 pub struct LinkKey(Key<Aes256Gcm>);
 

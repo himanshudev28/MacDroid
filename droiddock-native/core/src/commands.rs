@@ -3,7 +3,7 @@
 
 use crate::adb::{self, AdbState};
 use crate::config::{self, Config};
-use crate::host::{AppHandle, Manager, State};
+use crate::host::{AppHandle, Emitter, Manager, State};
 use crate::ws_server::{self, SharedState};
 use crate::{capture, edit_cache, health, photo_sync, statusbar, transfer, transfer_log, AppState};
 use serde::Serialize;
@@ -15,11 +15,6 @@ use std::time::Duration;
 /// contacts (up to 3000 rows) and sending an SMS (SmsManager round-trip) —
 /// matching index.js's raised timeouts for `contacts:list` and `sms:send`.
 const SLOW_TIMEOUT: Duration = Duration::from_secs(15);
-
-/// A string setting, falling back when the frontend sends something unexpected.
-fn str_setting(v: &Value, fallback: &str) -> String {
-    v.as_str().filter(|s| !s.is_empty()).unwrap_or(fallback).to_string()
-}
 
 pub(crate) fn map_of(v: Value) -> Map<String, Value> {
     match v {
@@ -44,87 +39,96 @@ pub fn set_setting(app: AppHandle, state: State<AppState>, key: String, value: V
     if key == "autoReconnect" {
         crate::pacing::poke_reconnect();
     }
+    // Typed accessors: a value of the wrong JSON type is an error, not a silent
+    // reset to the default (which used to turn a bad call into a changed setting).
+    let bad = |want: &str| format!("setting `{key}` expects {want}");
+    let flag = || value.as_bool().ok_or_else(|| bad("a boolean"));
+    let num = || {
+        value
+            .as_u64()
+            .or_else(|| value.as_f64().filter(|f| *f >= 0.0).map(|f| f as u64))
+            .ok_or_else(|| bad("a non-negative number"))
+    };
+    // Empty string / null mean "use the default".
+    let text = |fallback: &str| match &value {
+        Value::String(s) if !s.is_empty() => Ok(s.clone()),
+        Value::String(_) | Value::Null => Ok(fallback.to_string()),
+        _ => Err(bad("a string")),
+    };
+    // Trimmed string; empty / null mean "unset".
+    let opt_text = || match &value {
+        Value::Null => Ok(None),
+        Value::String(s) => Ok(Some(s.trim().to_string()).filter(|s| !s.is_empty())),
+        _ => Err(bad("a string or null")),
+    };
+    let strings = || match &value {
+        Value::Array(a) => Ok(a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect::<Vec<String>>()),
+        _ => Err(bad("an array of strings")),
+    };
     let mut cfg = state.config.lock().unwrap();
     match key.as_str() {
-        "clipboardSync" => cfg.clipboard_sync = value.as_bool().unwrap_or(true),
-        "notifications" => cfg.notifications = value.as_bool().unwrap_or(true),
-        "nativeNotifs" => cfg.native_notifs = value.as_bool().unwrap_or(true),
-        "autoReconnect" => cfg.auto_reconnect = value.as_bool().unwrap_or(true),
+        "clipboardSync" => cfg.clipboard_sync = flag()?,
+        "notifications" => cfg.notifications = flag()?,
+        "nativeNotifs" => cfg.native_notifs = flag()?,
+        "autoReconnect" => cfg.auto_reconnect = flag()?,
         "deviceName" => {
-            cfg.device_name = value
-                .as_str()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
+            cfg.device_name = opt_text()?
         }
-        "photoSyncEnabled" => cfg.photo_sync_enabled = value.as_bool().unwrap_or(false),
+        "photoSyncEnabled" => cfg.photo_sync_enabled = flag()?,
         "photoSyncDest" => {
-            cfg.photo_sync_dest = value
-                .as_str()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
+            cfg.photo_sync_dest = opt_text()?
         }
         // Phase 19: the reverse-file-browsing root allowlist — a plain string
         // list edited wholesale from Settings (add/remove folder), same as
         // any other setting here, just array-shaped instead of scalar.
-        "macFsEnabled" => cfg.mac_fs_enabled = value.as_bool().unwrap_or(false),
-        "quickShareEnabled" => cfg.quickshare_enabled = value.as_bool().unwrap_or(false),
+        "macFsEnabled" => cfg.mac_fs_enabled = flag()?,
+        "quickShareEnabled" => cfg.quickshare_enabled = flag()?,
         "macFsRoots" => {
-            cfg.mac_fs_roots = value
-                .as_array()
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
-                .unwrap_or_default()
+            cfg.mac_fs_roots = strings()?
         }
-        "macInfoSync" => cfg.mac_info_sync = value.as_bool().unwrap_or(true),
-        "macMediaSync" => cfg.mac_media_sync = value.as_bool().unwrap_or(true),
-        "macMediaBrowser" => cfg.mac_media_browser = value.as_bool().unwrap_or(true),
+        "macInfoSync" => cfg.mac_info_sync = flag()?,
+        "macMediaSync" => cfg.mac_media_sync = flag()?,
+        "macMediaBrowser" => cfg.mac_media_browser = flag()?,
         // Read once at mount time (webdav.rs), so it applies on the next mount.
-        "webdavWritable" => cfg.webdav_writable = value.as_bool().unwrap_or(false),
-        "encryptLink" => cfg.encrypt_link = value.as_bool().unwrap_or(false),
-        "remoteControl" => cfg.remote_control = value.as_bool().unwrap_or(false),
-        "menubarText" => cfg.menubar_text = str_setting(&value, "battery"),
-        "menubarBatteryStyle" => cfg.menubar_battery_style = str_setting(&value, "percent"),
-        "menubarMaxLen" => cfg.menubar_max_len = value.as_u64().unwrap_or(28).clamp(6, 60) as u32,
-        "menubarAlbumArt" => cfg.menubar_album_art = str_setting(&value, "thumb"),
-        "lowBatteryAlert" => cfg.low_battery_alert = value.as_bool().unwrap_or(true),
-        "lowBatteryPct" => cfg.low_battery_pct = value.as_u64().unwrap_or(20).clamp(5, 50) as u8,
-        "desktopDisplaySize" => cfg.desktop_display_size = value.as_str().unwrap_or("").trim().to_string(),
+        "webdavWritable" => cfg.webdav_writable = flag()?,
+        "encryptLink" => cfg.encrypt_link = flag()?,
+        "remoteControl" => cfg.remote_control = flag()?,
+        "menubarText" => cfg.menubar_text = text("battery")?,
+        "menubarBatteryStyle" => cfg.menubar_battery_style = text("percent")?,
+        "menubarMaxLen" => cfg.menubar_max_len = num()?.clamp(6, 60) as u32,
+        "menubarAlbumArt" => cfg.menubar_album_art = text("thumb")?,
+        "lowBatteryAlert" => cfg.low_battery_alert = flag()?,
+        "lowBatteryPct" => cfg.low_battery_pct = num()?.clamp(5, 50) as u8,
+        "desktopDisplaySize" => cfg.desktop_display_size = opt_text()?.unwrap_or_default(),
         // Virtual-display behaviour. `desktopUiMode` is the one that decides
         // whether an app opens as a desktop window or a magnified phone.
-        "desktopUiMode" => cfg.desktop_ui_mode = str_setting(&value, "desktop"),
-        "desktopFlex" => cfg.desktop_flex = value.as_bool().unwrap_or(true),
-        "appWindowChrome" => cfg.app_window_chrome = value.as_bool().unwrap_or(false),
-        "appWindowKeepAlive" => cfg.app_window_keep_alive = value.as_bool().unwrap_or(true),
-        "vdKeepAwake" => cfg.vd_keep_awake = value.as_bool().unwrap_or(true),
-        "mirrorCodec" => cfg.mirror_codec = str_setting(&value, "h264"),
-        "mirrorAudio" => cfg.mirror_audio = value.as_bool().unwrap_or(true),
-        "scrcpyUhid" => cfg.scrcpy_uhid = value.as_bool().unwrap_or(false),
-        "scrcpyStayAwake" => cfg.scrcpy_stay_awake = value.as_bool().unwrap_or(false),
-        "scrcpyTurnScreenOff" => cfg.scrcpy_turn_screen_off = value.as_bool().unwrap_or(false),
-        "scrcpyAlwaysOnTop" => cfg.scrcpy_always_on_top = value.as_bool().unwrap_or(false),
+        "desktopUiMode" => cfg.desktop_ui_mode = text("desktop")?,
+        "desktopFlex" => cfg.desktop_flex = flag()?,
+        "appWindowChrome" => cfg.app_window_chrome = flag()?,
+        "appWindowKeepAlive" => cfg.app_window_keep_alive = flag()?,
+        "vdKeepAwake" => cfg.vd_keep_awake = flag()?,
+        "mirrorCodec" => cfg.mirror_codec = text("h264")?,
+        "mirrorAudio" => cfg.mirror_audio = flag()?,
+        "scrcpyUhid" => cfg.scrcpy_uhid = flag()?,
+        "scrcpyStayAwake" => cfg.scrcpy_stay_awake = flag()?,
+        "scrcpyTurnScreenOff" => cfg.scrcpy_turn_screen_off = flag()?,
+        "scrcpyAlwaysOnTop" => cfg.scrcpy_always_on_top = flag()?,
         "pinnedApps" => {
-            cfg.pinned_apps = value
-                .as_array()
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
-                .unwrap_or_default()
+            cfg.pinned_apps = strings()?
         }
-        "openAppsOnMac" => cfg.open_apps_on_mac = value.as_bool().unwrap_or(false),
+        "openAppsOnMac" => cfg.open_apps_on_mac = flag()?,
         // Mirror quality. Clamped here as well as at each use site — this is
         // the boundary the frontend can write through, so it's the one place
         // that has to hold.
         "mirrorBitrateMbps" => {
-            cfg.mirror_bitrate_mbps = value.as_u64().unwrap_or(12).clamp(1, 50) as u32
+            cfg.mirror_bitrate_mbps = num()?.clamp(1, 50) as u32
         }
-        "mirrorFps" => cfg.mirror_fps = value.as_u64().unwrap_or(60).clamp(15, 120) as u32,
-        "mirrorMaxSize" => cfg.mirror_max_size = value.as_u64().unwrap_or(0).min(4096) as u32,
-        "defaultMirrorMode" => cfg.default_mirror_mode = str_setting(&value, "wifi"),
-        "autoCheckUpdates" => cfg.auto_check_updates = value.as_bool().unwrap_or(true),
+        "mirrorFps" => cfg.mirror_fps = num()?.clamp(15, 120) as u32,
+        "mirrorMaxSize" => cfg.mirror_max_size = num()?.min(4096) as u32,
+        "defaultMirrorMode" => cfg.default_mirror_mode = text("wifi")?,
+        "autoCheckUpdates" => cfg.auto_check_updates = flag()?,
         "mutedApps" => {
-            cfg.muted_apps = value
-                .as_array()
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
-                .unwrap_or_default();
+            cfg.muted_apps = strings()?;
             // Keep tiers in step: the list is authoritative for "muted".
             let list = cfg.muted_apps.clone();
             cfg.notif_tiers.retain(|k, t| t != "muted" || list.contains(k));
@@ -135,6 +139,9 @@ pub fn set_setting(app: AppHandle, state: State<AppState>, key: String, value: V
         // `{pkg: "alert"|"silent"|"muted"|"hidden"}`. `muted_apps` is kept in step (it is
         // the pre-tiers list); unknown tier values are dropped.
         "notifTiers" => {
+            if !value.is_object() {
+                return Err(bad("an object"));
+            }
             cfg.notif_tiers = value
                 .as_object()
                 .map(|o| {
@@ -154,14 +161,14 @@ pub fn set_setting(app: AppHandle, state: State<AppState>, key: String, value: V
             muted.sort();
             cfg.muted_apps.extend(muted);
         }
-        "syncNotifDismissals" => cfg.sync_notif_dismissals = value.as_bool().unwrap_or(true),
+        "syncNotifDismissals" => cfg.sync_notif_dismissals = flag()?,
         // BLE fallback (docs/BLE-NEARBY-DESIGN.md §8): stamped so the newest change wins when synced.
         "connectionMode" => {
             cfg.connection_mode = if value.as_str() == Some("fallback") { "fallback" } else { "network" }.to_string();
             cfg.connection_mode_at = config::now_ms();
         }
         "bleAutoReturn" => {
-            cfg.ble_auto_return = value.as_bool().unwrap_or(true);
+            cfg.ble_auto_return = flag()?;
             cfg.connection_mode_at = config::now_ms();
         }
         other => return Err(format!("unknown setting: {other}")),
@@ -194,6 +201,25 @@ pub fn set_setting(app: AppHandle, state: State<AppState>, key: String, value: V
         });
     }
     Ok(updated)
+}
+
+/// "Reset pairing": mint a new token, persist it atomically, forget the TLS
+/// downgrade record (those phones belong to the old token), and drop the live
+/// link so the old token stops working immediately. Emits the standard
+/// `config` event with the updated config; the UI re-reads `get_pairing_info`
+/// for the new QR. Returns nothing (`null`).
+pub async fn pairing_reset(app: &AppHandle, state: &SharedState) -> Result<(), String> {
+    let updated = {
+        let app_state = app.state::<AppState>();
+        let mut cfg = app_state.config.lock().unwrap();
+        cfg.token = uuid::Uuid::new_v4().to_string();
+        crate::config::save(app, &cfg);
+        cfg.clone()
+    };
+    crate::tls::reset_devices(app);
+    ws_server::drop_phone(state).await;
+    let _ = app.emit("config", &updated);
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -753,7 +779,7 @@ pub fn json_map(value: Value) -> serde_json::Map<String, Value> {
 }
 
 pub fn sanitize(name: &str) -> String {
-    name.replace(['/', '\\'], "_")
+    transfer::sanitize(name)
 }
 
 /// Minimal base64 (standard alphabet, padded) for thumbnail data URLs — avoids

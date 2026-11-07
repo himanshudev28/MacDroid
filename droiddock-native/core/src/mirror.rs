@@ -221,7 +221,15 @@ pub async fn mirror_input(
         if let Some((adb_bin, serial)) = adb_target(&app) {
             match adb_input(&app, &adb_bin, &serial, &msg).await {
                 Ok(()) => return Ok(()),
-                Err(e) => eprintln!("[mirror] adb input failed: {e}"),
+                // Failed before any adb input was sent (an unmappable key or character, or no
+                // screen size): the phone's own route may still handle it. Any failure after an
+                // adb command ran may have half-run, so report it rather than sending the input
+                // a second time down the Wi-Fi path.
+                Err(InputErr::NotSent(e)) => eprintln!("[mirror] adb input skipped: {e}"),
+                Err(InputErr::Failed(e)) => {
+                    eprintln!("[mirror] adb input failed: {e}");
+                    return Err(e);
+                }
             }
         } else if !ws_server::push(&state, msg).await {
             return Err("Phone not linked".into());
@@ -250,6 +258,19 @@ pub(crate) fn adb_target(app: &AppHandle) -> Option<(String, String)> {
     Some((bin, first.serial.clone()))
 }
 
+/// Why `adb_input` failed. `NotSent` happened before any adb input command ran, so
+/// falling back to the Wi-Fi path cannot double-send.
+#[derive(Debug, PartialEq, Eq)]
+enum InputErr {
+    NotSent(String),
+    Failed(String),
+}
+
+/// Run one adb input command; any error from here on may have half-run.
+async fn run_input(adb_bin: &str, serial: &str, args: &[&str]) -> Result<(), InputErr> {
+    crate::adb::shell_input(adb_bin, serial, args).await.map(|_| ()).map_err(InputErr::Failed)
+}
+
 /// Single-quote for the phone's shell (adb joins its arguments into one command line).
 fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
@@ -264,7 +285,7 @@ fn oriented(natural: (u32, u32), stream: Option<(i64, i64)>) -> (f64, f64) {
     }
 }
 
-async fn adb_input(app: &AppHandle, adb_bin: &str, serial: &str, msg: &Value) -> Result<(), String> {
+async fn adb_input(app: &AppHandle, adb_bin: &str, serial: &str, msg: &Value) -> Result<(), InputErr> {
     let f = |k: &str| msg.get(k).and_then(Value::as_f64).unwrap_or(0.0).clamp(0.0, 1.0);
     match msg.get("type").and_then(Value::as_str) {
         Some("mirror-key") => {
@@ -273,21 +294,21 @@ async fn adb_input(app: &AppHandle, adb_bin: &str, serial: &str, msg: &Value) ->
                 Some("home") => "3",
                 Some("recents") => "187",
                 Some("lock") => "223",
-                other => return Err(format!("unsupported key {other:?}")),
+                other => return Err(InputErr::NotSent(format!("unsupported key {other:?}"))),
             };
-            crate::adb::shell_input(adb_bin, serial, &["input", "keyevent", code]).await.map(|_| ())
+            run_input(adb_bin, serial, &["input", "keyevent", code]).await
         }
         Some("mirror-text") => match msg.get("op").and_then(Value::as_str) {
-            Some("backspace") => crate::adb::shell_input(adb_bin, serial, &["input", "keyevent", "67"]).await.map(|_| ()),
-            Some("enter") => crate::adb::shell_input(adb_bin, serial, &["input", "keyevent", "66"]).await.map(|_| ()),
+            Some("backspace") => run_input(adb_bin, serial, &["input", "keyevent", "67"]).await,
+            Some("enter") => run_input(adb_bin, serial, &["input", "keyevent", "66"]).await,
             _ => {
                 let text = msg.get("text").and_then(Value::as_str).unwrap_or("");
                 // `input text` takes ASCII only; `%s` is its space.
                 if text.is_empty() || !text.is_ascii() {
-                    return Err("this character can't be typed over adb".into());
+                    return Err(InputErr::NotSent("this character can't be typed over adb".into()));
                 }
                 let arg = sh_quote(&text.replace('%', "%25").replace(' ', "%s"));
-                crate::adb::shell_input(adb_bin, serial, &["input", "text", &arg]).await.map(|_| ())
+                run_input(adb_bin, serial, &["input", "text", &arg]).await
             }
         },
         Some(kind @ ("mirror-tap" | "mirror-swipe")) => {
@@ -296,7 +317,7 @@ async fn adb_input(app: &AppHandle, adb_bin: &str, serial: &str, msg: &Value) ->
             let natural = match cached {
                 Some(d) => d,
                 None => {
-                    let d = crate::adb::display_size(adb_bin, serial).await.ok_or("couldn't read the phone's screen size")?;
+                    let d = crate::adb::display_size(adb_bin, serial).await.ok_or_else(|| InputErr::NotSent("couldn't read the phone's screen size".into()))?;
                     *st.adb_screen.lock().unwrap() = Some((serial.to_string(), d));
                     d
                 }
@@ -308,14 +329,14 @@ async fn adb_input(app: &AppHandle, adb_bin: &str, serial: &str, msg: &Value) ->
             let px = |frac: f64, dim: f64| ((frac * dim).round().min(dim - 1.0).max(0.0) as i64).to_string();
             if kind == "mirror-tap" {
                 let (x, y) = (px(f("x"), dw), px(f("y"), dh));
-                crate::adb::shell_input(adb_bin, serial, &["input", "tap", &x, &y]).await.map(|_| ())
+                run_input(adb_bin, serial, &["input", "tap", &x, &y]).await
             } else {
                 let dur = msg.get("dur").and_then(Value::as_i64).unwrap_or(120).clamp(30, 1500).to_string();
                 let (x1, y1, x2, y2) = (px(f("x1"), dw), px(f("y1"), dh), px(f("x2"), dw), px(f("y2"), dh));
-                crate::adb::shell_input(adb_bin, serial, &["input", "swipe", &x1, &y1, &x2, &y2, &dur]).await.map(|_| ())
+                run_input(adb_bin, serial, &["input", "swipe", &x1, &y1, &x2, &y2, &dur]).await
             }
         }
-        _ => Err("not an input message".into()),
+        _ => Err(InputErr::NotSent("not an input message".into())),
     }
 }
 

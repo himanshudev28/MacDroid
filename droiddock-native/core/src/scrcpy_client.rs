@@ -76,6 +76,8 @@ struct Session {
     /// leaking a port binding for the life of the adb server.
     local_port: u16,
     serial: String,
+    /// Wakes the session's task to drop (and so kill) the server child.
+    kill: Arc<tokio::sync::Notify>,
 }
 
 impl ScrcpyState {
@@ -203,15 +205,25 @@ pub async fn start(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
-    let child = cmd.spawn().map_err(|e| format!("couldn't start the scrcpy server: {e}"))?;
+    let child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            // Don't leak the forward we just opened.
+            let _ = adb(&adb_bin, &["-s", &serial, "forward", "--remove", &format!("tcp:{local_port}")]).await;
+            crate::shutdown::forward_closed(&app, &serial, local_port);
+            return Err(format!("couldn't start the scrcpy server: {e}"));
+        }
+    };
 
     let stop = Arc::new(AtomicBool::new(false));
+    let kill = Arc::new(tokio::sync::Notify::new());
     {
         let state = app.state::<ScrcpyState>();
         *state.running.lock().unwrap() = Some(Session {
             stop: stop.clone(),
             local_port,
             serial: serial.clone(),
+            kill: kill.clone(),
         });
     }
 
@@ -219,16 +231,25 @@ pub async fn start(
     // rather than sleeping a fixed time, and so does `connect_with_retry`.
     let app2 = app.clone();
     let adb2 = adb_bin.clone();
-    tokio::spawn(async move {
-        let result = pump(app2.clone(), local_port, stop.clone()).await;
+    crate::host::async_runtime::spawn(async move {
+        // `stop()` notifies `kill`, which ends the pump at once (a stalled read included) so the
+        // server child below is dropped, and so killed (`kill_on_drop`).
+        let result = tokio::select! {
+            r = pump(app2.clone(), local_port, stop.clone()) => r,
+            _ = kill.notified() => Ok(()),
+        };
         // Whatever happened — clean exit, stream error, stop request — the
         // session is over: tear down the forward and tell the UI once.
         let _ = adb(&adb2, &["-s", &serial, "forward", "--remove", &format!("tcp:{local_port}")]).await;
         crate::shutdown::forward_closed(&app2, &serial, local_port);
         drop(child);
         {
+            // Only clear our own session: a newer one may already be running.
             let state = app2.state::<ScrcpyState>();
-            *state.running.lock().unwrap() = None;
+            let mut running = state.running.lock().unwrap();
+            if running.as_ref().is_some_and(|s| s.local_port == local_port && Arc::ptr_eq(&s.stop, &stop)) {
+                *running = None;
+            }
         }
         match result {
             Err(e) if !stop.load(Ordering::Relaxed) => {
@@ -430,9 +451,8 @@ pub fn stop(app: &AppHandle) {
     let session = state.running.lock().unwrap().take();
     if let Some(s) = session {
         s.stop.store(true, Ordering::Relaxed);
-        // The pump's own cleanup removes the forward; this is the belt-and-
-        // braces path for a session whose task has already exited.
-        let _ = (s.local_port, s.serial);
+        // The session task removes the forward and drops the server child (killing it).
+        s.kill.notify_one();
     }
 }
 
