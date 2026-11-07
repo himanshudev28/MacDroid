@@ -43,6 +43,7 @@ internal val extra_fr: Map<String, String> = mapOf(
     "Connected" to "Connecté",
     "Connected to {mac}" to "Connecté à {mac}",
     "Connected · Bluetooth" to "Connecté · Bluetooth",
+    "Connected · USB" to "Connecté · USB",
     "Connected · Wi-Fi" to "Connecté · Wi-Fi",
     "Continue" to "Continuer",
     "Control" to "Contrôle",

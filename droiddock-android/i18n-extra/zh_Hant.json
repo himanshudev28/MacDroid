@@ -217,5 +217,6 @@
   "Opening {label} on your Mac": "正在你的 Mac 上開啟 {label}",
   "Couldn't open {label}": "無法開啟 {label}",
   "Saved to Downloads": "已儲存到「下載」",
-  "Pull failed": "拉取失敗"
+  "Pull failed": "拉取失敗",
+  "Connected · USB": "已連線 · 藍牙"
 }

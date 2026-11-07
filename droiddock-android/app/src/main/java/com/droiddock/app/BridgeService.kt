@@ -82,6 +82,7 @@ class BridgeService : Service() {
                 val mac = ConnectionManager.macName.value ?: "Mac"
                 val text = when {
                     until != 0L -> "Paused"
+                    linked && ConnectionManager.usb.value -> "Linked to $mac · USB"
                     linked && tr == com.droiddock.app.link.Transport.BLE -> "Linked to $mac · Bluetooth"
                     linked -> "Linked to $mac"
                     else -> "Waiting for Mac…"

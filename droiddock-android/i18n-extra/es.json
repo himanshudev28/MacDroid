@@ -217,5 +217,6 @@
   "Opening {label} on your Mac": "Abriendo {label} en tu Mac",
   "Couldn't open {label}": "No se pudo abrir {label}",
   "Saved to Downloads": "Guardado en Descargas",
-  "Pull failed": "Error al descargar"
+  "Pull failed": "Error al descargar",
+  "Connected · USB": "Conectado · USB"
 }

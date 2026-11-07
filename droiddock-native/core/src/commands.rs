@@ -107,6 +107,7 @@ pub fn set_setting(app: AppHandle, state: State<AppState>, key: String, value: V
         "appWindowChrome" => cfg.app_window_chrome = flag()?,
         "appWindowKeepAlive" => cfg.app_window_keep_alive = flag()?,
         "vdKeepAwake" => cfg.vd_keep_awake = flag()?,
+        "usbLink" => cfg.usb_link = flag()?,
         "mirrorCodec" => cfg.mirror_codec = text("h264")?,
         "mirrorAudio" => cfg.mirror_audio = flag()?,
         "scrcpyUhid" => cfg.scrcpy_uhid = flag()?,
@@ -179,6 +180,11 @@ pub fn set_setting(app: AppHandle, state: State<AppState>, key: String, value: V
     drop(cfg);
     if key.starts_with("menubar") {
         statusbar::refresh_title(&app);
+    }
+    if key == "usbLink" {
+        // Apply or remove the `adb reverse` for attached phones right away.
+        let app2 = app.clone();
+        crate::host::async_runtime::spawn(async move { crate::adb::usb_link_apply(&app2).await });
     }
     if key == "connectionMode" || key == "bleAutoReturn" {
         crate::ble_policy::mode_changed_locally(&app);

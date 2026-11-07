@@ -43,6 +43,7 @@ internal val extra_ko: Map<String, String> = mapOf(
     "Connected" to "연결됨",
     "Connected to {mac}" to "{mac}에 연결됨",
     "Connected · Bluetooth" to "연결됨 · 블루투스",
+    "Connected · USB" to "연결됨 · 블루투스",
     "Connected · Wi-Fi" to "연결됨 · Wi-Fi",
     "Continue" to "계속",
     "Control" to "제어",

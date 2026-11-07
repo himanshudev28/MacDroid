@@ -252,6 +252,7 @@
 "Connect a phone via USB or wireless ADB from the Devices tab." = "डिवाइस टैब से USB या वायरलेस ADB के ज़रिए फ़ोन जोड़ें।";
 "Connect an ADB device to manage these." = "इन्हें प्रबंधित करने के लिए ADB डिवाइस कनेक्ट करें।";
 "Connect over" = "इसके ज़रिए कनेक्ट करें";
+"Connect over USB when plugged in" = "प्लग इन होने पर USB से कनेक्ट करें";
 "Connect phone to see calls" = "कॉल देखने के लिए फ़ोन कनेक्ट करें";
 "Connect the phone over ADB to mirror this way" = "इस तरह मिरर करने के लिए फ़ोन को ADB से कनेक्ट करें";
 "Connect the phone over ADB to take a screenshot" = "स्क्रीनशॉट लेने के लिए फ़ोन को ADB से कनेक्ट करें";
@@ -1319,6 +1320,7 @@
 "Use the port from the pairing dialog. It differs from the main port on the Wireless debugging screen." = "पेयरिंग डायलॉग वाला पोर्ट इस्तेमाल करें। यह वायरलेस डिबगिंग स्क्रीन के मुख्य पोर्ट से अलग होता है।";
 "Use your phone's camera as a live feed on this Mac." = "अपने फ़ोन के कैमरे को इस Mac पर लाइव फ़ीड की तरह इस्तेमाल करें।";
 "Uses Bluetooth only when Wi-Fi to your phone is unavailable, and switches back automatically." = "ब्लूटूथ का उपयोग केवल तब होता है जब आपके फ़ोन से Wi-Fi उपलब्ध न हो, और यह अपने आप वापस Wi-Fi पर आ जाता है।";
+"Uses the cable when your phone is plugged in. Needs USB debugging turned on on the phone." = "फ़ोन के प्लग इन होने पर केबल का उपयोग करता है। फ़ोन पर USB डीबगिंग चालू होनी चाहिए।";
 "Verification code copied" = "सत्यापन कोड कॉपी हुआ";
 "Verification codes" = "सत्यापन कोड";
 "Verifying…" = "जाँच हो रही है…";

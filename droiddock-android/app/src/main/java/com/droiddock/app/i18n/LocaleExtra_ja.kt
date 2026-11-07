@@ -43,6 +43,7 @@ internal val extra_ja: Map<String, String> = mapOf(
     "Connected" to "接続済み",
     "Connected to {mac}" to "{mac} に接続済み",
     "Connected · Bluetooth" to "接続済み · Bluetooth",
+    "Connected · USB" to "接続済み · USB",
     "Connected · Wi-Fi" to "接続済み · Wi-Fi",
     "Continue" to "続ける",
     "Control" to "操作",

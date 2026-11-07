@@ -144,6 +144,8 @@ extension DroidConfig {
               let s = try? JSONDecoder().decode(AppNotifSettings.self, from: d) else { return AppNotifSettings() }
         return s
     }
+    /// Connect over the USB cable when the phone is plugged in (core default: on).
+    var usbLink: Bool { raw["usbLink"]?.boolValue ?? true }
     var syncNotifDismissals: Bool { raw["syncNotifDismissals"]?.boolValue ?? true }
     /// BLE fallback: `"network"` (default) | `"fallback"`.
     var connectionMode: String { raw["connectionMode"]?.stringValue == "fallback" ? "fallback" : "network" }

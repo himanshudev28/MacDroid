@@ -252,6 +252,7 @@
 "Connect a phone via USB or wireless ADB from the Devices tab." = "Cihazlar sekmesinden USB ya da kablosuz ADB ile bir telefon bağlayın.";
 "Connect an ADB device to manage these." = "Bunları yönetmek için bir ADB aygıtı bağlayın.";
 "Connect over" = "Bağlantı yöntemi";
+"Connect over USB when plugged in" = "Takılıyken USB üzerinden bağlan";
 "Connect phone to see calls" = "Aramaları görmek için telefonu bağlayın";
 "Connect the phone over ADB to mirror this way" = "Bu şekilde yansıtmak için telefonu ADB ile bağlayın";
 "Connect the phone over ADB to take a screenshot" = "Ekran görüntüsü almak için telefonu ADB ile bağlayın";
@@ -1319,6 +1320,7 @@
 "Use the port from the pairing dialog. It differs from the main port on the Wireless debugging screen." = "Eşleştirme iletişim kutusundaki bağlantı noktasını kullanın. Kablosuz hata ayıklama ekranındaki ana bağlantı noktasından farklıdır.";
 "Use your phone's camera as a live feed on this Mac." = "Telefonunuzun kamerasını bu Mac'te canlı yayın olarak kullanın.";
 "Uses Bluetooth only when Wi-Fi to your phone is unavailable, and switches back automatically." = "Bluetooth'u yalnızca telefonunuzla Wi-Fi bağlantısı yokken kullanır ve otomatik olarak geri döner.";
+"Uses the cable when your phone is plugged in. Needs USB debugging turned on on the phone." = "Telefon takılıyken kabloyu kullanır. Telefonda USB hata ayıklamanın açık olması gerekir.";
 "Verification code copied" = "Doğrulama kodu kopyalandı";
 "Verification codes" = "Doğrulama kodları";
 "Verifying…" = "Doğrulanıyor…";

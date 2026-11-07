@@ -252,6 +252,7 @@
 "Connect a phone via USB or wireless ADB from the Devices tab." = "在“设备”标签页中通过 USB 或无线 ADB 连接手机。";
 "Connect an ADB device to manage these." = "连接 ADB 设备后才能管理这些内容。";
 "Connect over" = "连接方式";
+"Connect over USB when plugged in" = "插入时通过 USB 连接";
 "Connect phone to see calls" = "连接手机以查看通话";
 "Connect the phone over ADB to mirror this way" = "请通过 ADB 连接手机以使用此方式投屏";
 "Connect the phone over ADB to take a screenshot" = "请通过 ADB 连接手机以截取屏幕";
@@ -1319,6 +1320,7 @@
 "Use the port from the pairing dialog. It differs from the main port on the Wireless debugging screen." = "请使用配对对话框中的端口，它与“无线调试”界面上的主端口不同。";
 "Use your phone's camera as a live feed on this Mac." = "把手机摄像头作为此 Mac 上的实时画面来源。";
 "Uses Bluetooth only when Wi-Fi to your phone is unavailable, and switches back automatically." = "仅在与手机之间的 Wi-Fi 不可用时使用蓝牙，并会自动切换回来。";
+"Uses the cable when your phone is plugged in. Needs USB debugging turned on on the phone." = "手机插入数据线时使用数据线连接。需要在手机上开启 USB 调试。";
 "Verification code copied" = "已复制验证码";
 "Verification codes" = "验证码";
 "Verifying…" = "正在验证…";

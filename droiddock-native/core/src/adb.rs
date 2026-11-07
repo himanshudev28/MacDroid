@@ -475,6 +475,63 @@ fn parse_device_line(line: &str) -> RawDevice {
     RawDevice { serial, state, model, wireless }
 }
 
+/// Wireless transports (`ip:port`, `_adb-tls-connect`, mDNS names) have no cable to reverse over.
+fn is_wireless_serial(serial: &str) -> bool {
+    parse_device_line(serial).wireless
+}
+
+/// Whether `adb reverse` applies: a cabled serial whose state is "device".
+fn usb_link_eligible(serial: &str, state: &str) -> bool {
+    state == "device" && !serial.is_empty() && !is_wireless_serial(serial)
+}
+
+/// The phone-side port of the USB tunnel (`adb reverse tcp:28484 tcp:<mac port>`). It must sit below
+/// Android's ephemeral range (32768–60999): a port inside it, like 48484, is randomly taken by other
+/// apps' outgoing sockets, and adbd then fails with "cannot bind listener: Address already in use"
+/// (seen on a real phone). Must match Android's `USB_LOOPBACK_PORT`.
+pub const USB_PHONE_PORT: u16 = 28484;
+
+/// The adb args that map (or unmap) the phone's `phone` port to the Mac's WS `mac` port on one
+/// device. Idempotent: re-adding an existing identical mapping succeeds.
+fn reverse_args<'a>(serial: &'a str, phone: &'a str, mac: &'a str, on: bool) -> Vec<&'a str> {
+    let mut v = vec!["-s", serial, "reverse"];
+    if on {
+        v.extend([phone, mac]);
+    } else {
+        v.extend(["--remove", phone]);
+    }
+    v
+}
+
+/// Apply (setting on) or remove (off) the USB link's `adb reverse` for every cabled device that is
+/// online. Called on each device-list update (so a re-attach or an adb-server restart re-applies it)
+/// and when the `usbLink` setting changes. Never touches the adb server itself.
+pub async fn usb_link_apply(app: &AppHandle) {
+    let state = app.state::<AdbState>();
+    let Some(adb) = state.adb.lock().unwrap().clone() else { return };
+    let (on, port) = {
+        let cfg = app.state::<crate::AppState>().config.lock().unwrap().clone();
+        (cfg.usb_link, cfg.port)
+    };
+    let serials: Vec<String> = state
+        .devices
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|d| d.usb_serial.clone().filter(|s| usb_link_eligible(s, &d.state)))
+        .collect();
+    let phone = format!("tcp:{USB_PHONE_PORT}");
+    let mac = format!("tcp:{port}");
+    for serial in serials {
+        if let Err(e) = run(&adb, &reverse_args(&serial, &phone, &mac, on), Duration::from_secs(6)).await {
+            // `--remove` of a mapping that isn't there is an error worth ignoring.
+            if on {
+                eprintln!("[adb] reverse {phone} -> {mac} on {serial} failed: {e}");
+            }
+        }
+    }
+}
+
 fn parse_device_block(text: &str) -> Vec<RawDevice> {
     text.lines().map(str::trim).filter(|l| !l.is_empty()).map(parse_device_line).collect()
 }
@@ -847,6 +904,12 @@ async fn on_device_list(app: &AppHandle, raw0: Vec<RawDevice>) {
     }
     *state.prev_has_adb.lock().unwrap() = Some(adb_now);
     *state.idle_since.lock().unwrap() = Instant::now();
+    // Re-applied on every list update: a re-attach or an adb-server restart loses the mapping.
+    // Off the tracker's read loop: a slow or hung device must not delay later device events.
+    if app.state::<crate::AppState>().config.lock().unwrap().usb_link {
+        let app2 = app.clone();
+        crate::host::async_runtime::spawn(async move { usb_link_apply(&app2).await });
+    }
 }
 
 /// Bring adb online: start its server + device tracker. Mirrors `activateAdb`.
@@ -2968,6 +3031,32 @@ pub async fn adb_projection_grant(state: crate::host::State<'_, AdbState>, allow
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn usb_link_only_for_cabled_online_devices() {
+        use super::usb_link_eligible as ok;
+        assert!(ok("R58M123ABC", "device"));
+        assert!(ok("emulator-5554", "device"));
+        assert!(!ok("R58M123ABC", "unauthorized"));
+        assert!(!ok("R58M123ABC", "offline"));
+        assert!(!ok("192.168.1.20:5555", "device"));
+        assert!(!ok("adb-R58M123ABC-xYz._adb-tls-connect._tcp", "device"));
+        assert!(!ok("", "device"));
+    }
+
+    #[test]
+    fn reverse_args_add_and_remove() {
+        use super::reverse_args;
+        assert_eq!(reverse_args("S", "tcp:28484", "tcp:48484", true), ["-s", "S", "reverse", "tcp:28484", "tcp:48484"]);
+        assert_eq!(reverse_args("S", "tcp:28484", "tcp:48484", false), ["-s", "S", "reverse", "--remove", "tcp:28484"]);
+    }
+
+    #[test]
+    fn usb_phone_port_is_below_androids_ephemeral_range() {
+        // Android's ip_local_port_range is 32768–60999; a tunnel port inside it collides with
+        // other apps' outgoing sockets and `adb reverse` fails with "Address already in use".
+        assert!((1025..32768).contains(&super::USB_PHONE_PORT));
+    }
+
     #[test]
     fn package_name_validator() {
         use super::is_package_name;

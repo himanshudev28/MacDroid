@@ -252,6 +252,7 @@
 "Connect a phone via USB or wireless ADB from the Devices tab." = "وصّل هاتفًا عبر USB أو عبر ADB اللاسلكي من علامة تبويب الأجهزة.";
 "Connect an ADB device to manage these." = "وصّل جهاز ADB لإدارة هذه العناصر.";
 "Connect over" = "الاتصال عبر";
+"Connect over USB when plugged in" = "الاتصال عبر USB عند التوصيل";
 "Connect phone to see calls" = "وصّل الهاتف لعرض المكالمات";
 "Connect the phone over ADB to mirror this way" = "وصّل الهاتف عبر ADB لعكس الشاشة بهذه الطريقة";
 "Connect the phone over ADB to take a screenshot" = "وصّل الهاتف عبر ADB لالتقاط لقطة شاشة";
@@ -1319,6 +1320,7 @@
 "Use the port from the pairing dialog. It differs from the main port on the Wireless debugging screen." = "استخدم المنفذ من مربع حوار الإقران. يختلف عن المنفذ الرئيسي في شاشة التصحيح اللاسلكي.";
 "Use your phone's camera as a live feed on this Mac." = "استخدم كاميرا هاتفك كبث مباشر على هذا الـ Mac.";
 "Uses Bluetooth only when Wi-Fi to your phone is unavailable, and switches back automatically." = "يستخدم البلوتوث فقط عندما يتعذر الاتصال بهاتفك عبر Wi-Fi، ويعود تلقائيًا إلى Wi-Fi.";
+"Uses the cable when your phone is plugged in. Needs USB debugging turned on on the phone." = "يستخدم الكابل عند توصيل هاتفك. يتطلب تفعيل تصحيح USB على الهاتف.";
 "Verification code copied" = "تم نسخ رمز التحقق";
 "Verification codes" = "رموز التحقق";
 "Verifying…" = "جارٍ التحقق…";

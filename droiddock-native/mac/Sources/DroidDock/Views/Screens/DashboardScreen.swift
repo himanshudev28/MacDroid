@@ -104,7 +104,8 @@ struct DashboardScreen: View {
                 VStack(alignment: .leading, spacing: DD.Space.xs) {
                     Text(model.phoneName ?? tr("Phone")).font(DD.Font.title).foregroundStyle(DD.fg).lineLimit(1)
                     Text(subtitle).font(DD.Font.callout).foregroundStyle(DD.dim).lineLimit(1)
-                    ConnectionPill(transport: model.devices.contains { $0.state == "device" && $0.transport != "wifi" } ? .wifiAndUsb : .wifi,
+                    ConnectionPill(transport: model.pillTransport != .wifi ? model.pillTransport
+                                   : (model.devices.contains { $0.state == "device" && $0.transport != "wifi" } ? .wifiAndUsb : .wifi),
                                    link: model.linkQuality.map { LinkQualityLevel(grade: $0.grade) },
                                    rttMs: model.linkQuality?.rttMs.map { Int($0.rounded()) }, style: .standard)
                         .padding(.top, 2)

@@ -23,7 +23,7 @@ final class AppModel {
     private(set) var linkQuality: LinkQuality?
     private(set) var bleStatus = BleStatus()
     /// Which link carries traffic: `.wifi` or `.ble` (the pill label).
-    var pillTransport: DDTransport { wifi.transport == "ble" ? .ble : .wifi }
+    var pillTransport: DDTransport { wifi.transport == "ble" ? .ble : (wifi.transport == "usb" ? .usb : .wifi) }
     var onBluetooth: Bool { wifi.connected && wifi.transport == "ble" }
     /// Files, photos, mirror, camera, Mac Files, wallpaper... need the Wi-Fi socket (BLE fallback §2).
     var wifiFeaturesAvailable: Bool { wifi.connected && (wifi.transport != "ble" || bleStatus.wifiAvailable) }

@@ -217,5 +217,6 @@
   "Opening {label} on your Mac": "আপনার Mac-এ {label} খোলা হচ্ছে",
   "Couldn't open {label}": "{label} খোলা যায়নি",
   "Saved to Downloads": "ডাউনলোডে সংরক্ষিত হয়েছে",
-  "Pull failed": "আনা ব্যর্থ হয়েছে"
+  "Pull failed": "আনা ব্যর্থ হয়েছে",
+  "Connected · USB": "সংযুক্ত · ব্লুটুথ"
 }

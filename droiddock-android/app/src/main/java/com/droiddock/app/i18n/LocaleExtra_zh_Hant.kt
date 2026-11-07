@@ -43,6 +43,7 @@ internal val extra_zh_Hant: Map<String, String> = mapOf(
     "Connected" to "已連線",
     "Connected to {mac}" to "已連線到 {mac}",
     "Connected · Bluetooth" to "已連線 · 藍牙",
+    "Connected · USB" to "已連線 · 藍牙",
     "Connected · Wi-Fi" to "已連線 · Wi-Fi",
     "Continue" to "繼續",
     "Control" to "控制",

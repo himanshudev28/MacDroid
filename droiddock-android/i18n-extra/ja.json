@@ -217,5 +217,6 @@
   "Opening {label} on your Mac": "Mac で {label} を開いています",
   "Couldn't open {label}": "{label} を開けませんでした",
   "Saved to Downloads": "ダウンロードに保存しました",
-  "Pull failed": "取得に失敗しました"
+  "Pull failed": "取得に失敗しました",
+  "Connected · USB": "接続済み · USB"
 }

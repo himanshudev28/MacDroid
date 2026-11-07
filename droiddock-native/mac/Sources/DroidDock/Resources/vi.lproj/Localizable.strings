@@ -252,6 +252,7 @@
 "Connect a phone via USB or wireless ADB from the Devices tab." = "Kết nối điện thoại qua USB hoặc ADB không dây từ tab Thiết bị.";
 "Connect an ADB device to manage these." = "Kết nối thiết bị ADB để quản lý các mục này.";
 "Connect over" = "Kết nối qua";
+"Connect over USB when plugged in" = "Kết nối qua USB khi cắm cáp";
 "Connect phone to see calls" = "Kết nối điện thoại để xem cuộc gọi";
 "Connect the phone over ADB to mirror this way" = "Kết nối điện thoại qua ADB để phản chiếu theo cách này";
 "Connect the phone over ADB to take a screenshot" = "Kết nối điện thoại qua ADB để chụp ảnh màn hình";
@@ -1319,6 +1320,7 @@
 "Use the port from the pairing dialog. It differs from the main port on the Wireless debugging screen." = "Dùng cổng trong hộp thoại ghép nối. Nó khác với cổng chính trên màn hình Gỡ lỗi không dây.";
 "Use your phone's camera as a live feed on this Mac." = "Dùng máy ảnh điện thoại của bạn làm nguồn phát trực tiếp trên máy Mac này.";
 "Uses Bluetooth only when Wi-Fi to your phone is unavailable, and switches back automatically." = "Chỉ dùng Bluetooth khi không có Wi-Fi tới điện thoại và tự động chuyển lại.";
+"Uses the cable when your phone is plugged in. Needs USB debugging turned on on the phone." = "Dùng cáp khi điện thoại được cắm. Cần bật gỡ lỗi USB trên điện thoại.";
 "Verification code copied" = "Đã sao chép mã xác minh";
 "Verification codes" = "Mã xác minh";
 "Verifying…" = "Đang xác minh…";

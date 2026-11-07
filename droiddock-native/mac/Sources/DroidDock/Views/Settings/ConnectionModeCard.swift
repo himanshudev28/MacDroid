@@ -21,6 +21,9 @@ struct ConnectionModeCard: View {
         Binding(get: { cfg.connectionMode == ConnectionMode.fallback },
                 set: { model.setSetting("connectionMode", $0 ? ConnectionMode.fallback : ConnectionMode.network) })
     }
+    private var usbLink: Binding<Bool> {
+        Binding(get: { cfg.usbLink }, set: { model.setSetting("usbLink", $0) })
+    }
     private var autoReturn: Binding<Bool> {
         Binding(get: { cfg.bleAutoReturn }, set: { model.setSetting("bleAutoReturn", $0) })
     }
@@ -28,6 +31,9 @@ struct ConnectionModeCard: View {
     var body: some View {
         DDSection(tr("Connection mode"), symbol: "point.3.connected.trianglepath.dotted",
                   footer: tr("Uses Bluetooth only when Wi-Fi to your phone is unavailable, and switches back automatically.")) {
+            DescribedToggle(tr("Connect over USB when plugged in"),
+                            detail: tr("Uses the cable when your phone is plugged in. Needs USB debugging turned on on the phone."),
+                            symbol: "cable.connector", tint: Color(nsColor: .systemGreen), isOn: usbLink)
             Toggle(isOn: isOn) {
                 HStack(spacing: DD.Space.md) {
                     IconTile(symbol: "dot.radiowaves.left.and.right", tint: Color(nsColor: .systemBlue))
@@ -80,7 +86,7 @@ struct ConnectionModeCard: View {
         LabeledContent(tr("Status")) {
             HStack(spacing: DD.Space.sm) {
                 if let t = model.wifi.transport, model.wifi.connected {
-                    StatusPill(text: t == "ble" ? tr("Bluetooth") : tr("Wi-Fi"), kind: .link)
+                    StatusPill(text: t == "ble" ? tr("Bluetooth") : (t == "usb" ? tr("USB") : tr("Wi-Fi")), kind: .link)
                 }
                 Text(stateText).font(DD.Font.callout).foregroundStyle(DD.dim)
                 if model.onBluetooth, let r = ble.rssi {

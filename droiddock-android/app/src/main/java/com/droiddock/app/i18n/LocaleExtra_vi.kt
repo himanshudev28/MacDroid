@@ -43,6 +43,7 @@ internal val extra_vi: Map<String, String> = mapOf(
     "Connected" to "Đã kết nối",
     "Connected to {mac}" to "Đã kết nối với {mac}",
     "Connected · Bluetooth" to "Đã kết nối · Bluetooth",
+    "Connected · USB" to "Đã kết nối · USB",
     "Connected · Wi-Fi" to "Đã kết nối · Wi-Fi",
     "Continue" to "Tiếp tục",
     "Control" to "Điều khiển",

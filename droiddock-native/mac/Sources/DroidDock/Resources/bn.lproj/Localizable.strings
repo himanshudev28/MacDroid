@@ -252,6 +252,7 @@
 "Connect a phone via USB or wireless ADB from the Devices tab." = "ডিভাইস ট্যাব থেকে USB বা ওয়্যারলেস ADB দিয়ে একটি ফোন কানেক্ট করুন।";
 "Connect an ADB device to manage these." = "এগুলো পরিচালনা করতে একটি ADB ডিভাইস সংযুক্ত করুন।";
 "Connect over" = "এর মাধ্যমে সংযোগ করুন";
+"Connect over USB when plugged in" = "প্লাগ ইন থাকলে USB দিয়ে সংযুক্ত হোন";
 "Connect phone to see calls" = "কল দেখতে ফোন কানেক্ট করুন";
 "Connect the phone over ADB to mirror this way" = "এভাবে মিরর করতে ফোনটি ADB-তে সংযুক্ত করুন";
 "Connect the phone over ADB to take a screenshot" = "স্ক্রিনশট নিতে ফোনটি ADB-তে সংযুক্ত করুন";
@@ -1319,6 +1320,7 @@
 "Use the port from the pairing dialog. It differs from the main port on the Wireless debugging screen." = "পেয়ারিং ডায়ালগের পোর্ট ব্যবহার করুন। এটি ওয়্যারলেস ডিবাগিং স্ক্রিনের প্রধান পোর্ট থেকে আলাদা।";
 "Use your phone's camera as a live feed on this Mac." = "আপনার ফোনের ক্যামেরা এই Mac-এ সরাসরি ফিড হিসেবে ব্যবহার করুন।";
 "Uses Bluetooth only when Wi-Fi to your phone is unavailable, and switches back automatically." = "আপনার ফোনের সাথে Wi-Fi না থাকলেই কেবল ব্লুটুথ ব্যবহার করে এবং নিজে থেকেই আবার Wi-Fi-তে ফিরে আসে।";
+"Uses the cable when your phone is plugged in. Needs USB debugging turned on on the phone." = "ফোন প্লাগ ইন থাকলে ক্যাবল ব্যবহার করে। ফোনে USB ডিবাগিং চালু থাকতে হবে।";
 "Verification code copied" = "যাচাইকরণ কোড কপি হয়েছে";
 "Verification codes" = "যাচাইকরণ কোড";
 "Verifying…" = "যাচাই করা হচ্ছে…";

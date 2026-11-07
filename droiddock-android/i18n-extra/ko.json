@@ -217,5 +217,6 @@
   "Opening {label} on your Mac": "Mac에서 {label} 여는 중",
   "Couldn't open {label}": "{label}을(를) 열 수 없습니다",
   "Saved to Downloads": "다운로드에 저장됨",
-  "Pull failed": "가져오기 실패"
+  "Pull failed": "가져오기 실패",
+  "Connected · USB": "연결됨 · 블루투스"
 }

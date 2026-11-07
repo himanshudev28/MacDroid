@@ -111,6 +111,14 @@ object ConnectionManager {
 
     val connected = MutableStateFlow(false)
     val macName = MutableStateFlow<String?>(null)
+    /** True while the live link runs over the USB cable (the Mac's `adb reverse`, i.e. via 127.0.0.1). */
+    val usb = MutableStateFlow(false)
+
+    /** USB plugged in: try the loopback now, and once more after ~2 s (the Mac needs ~1 s to set up the reverse). */
+    fun onUsbPlugged() {
+        NetworkWatch.poke()
+        scope.launch { delay(2_000); NetworkWatch.poke() }
+    }
     val lastEvent = MutableStateFlow("idle")
     // 0 = active; Long.MAX_VALUE = until resume; else epoch-ms deadline (auto-resume).
     val pausedUntil = MutableStateFlow(0L)
@@ -263,6 +271,7 @@ object ConnectionManager {
         // Registered once, process-wide. This is what lets the loop below sleep
         // on the network instead of polling it — see [NetworkWatch].
         NetworkWatch.start(appCtx)
+        UsbWatch.start(appCtx)
         // check-then-launch must be atomic: this is called from many threads and entry points.
         synchronized(loopLock) {
             if (!netWatching) {
@@ -550,7 +559,14 @@ object ConnectionManager {
                 }
                 return false
             }
-            for (ip in reachableFirst(pairing)) {
+            // USB first: with the cable in, the Mac's `adb reverse` makes it appear at 127.0.0.1 (refused
+            // instantly otherwise). Pinned pairings only, so the token never goes to a local listener in plain.
+            loopbackCandidate(pairing)?.let { lo ->
+                currentCoroutineContext().ensureActive()
+                triedThisRound += lo
+                if (attempt(lo, pairing, loopback = true)) linked = true
+            }
+            if (!linked) for (ip in reachableFirst(pairing)) {
                 triedThisRound += ip
                 if (tryIp(ip)) {
                     linked = true
@@ -633,12 +649,14 @@ object ConnectionManager {
     }
 
     /** Tries one address; if the session opens, suspends until it dies. Returns true if it ever connected. */
-    private suspend fun attempt(ip: String, pairing: Pairing): Boolean {
+    /** [loopback]: the USB route (`adb reverse` on the Mac). Short connect timeout, quiet UI, and no
+     *  security-problem side effects, since any local app could be listening on 127.0.0.1. */
+    private suspend fun attempt(ip: String, pairing: Pairing, loopback: Boolean = false): Boolean {
         val closed = CompletableDeferred<Unit>()
         var didConnect = false
         // Per-attempt, so a late failure from an older socket can't touch it.
         val mismatch = java.util.concurrent.atomic.AtomicBoolean(false)
-        lastEvent.value = "connecting to $ip…"
+        if (!loopback) lastEvent.value = "connecting to $ip…"
 
         // A pinned Mac is reached over wss:// with its key pinned, and never over ws://.
         lastAttemptMismatch = false
@@ -649,8 +667,10 @@ object ConnectionManager {
             return false
         }
         val overTls = pairing.fp != null
-        val request = Request.Builder().url(LinkTls.urlFor(ip, pairing.port, pairing.fp)).build()
-        val http = pairing.fp?.let { LinkTls.clientFor(client, it) } ?: client
+        val port = if (loopback) USB_LOOPBACK_PORT else pairing.port
+        val request = Request.Builder().url(LinkTls.urlFor(ip, port, pairing.fp)).build()
+        var http = pairing.fp?.let { LinkTls.clientFor(client, it) } ?: client
+        if (loopback) http = http.newBuilder().connectTimeout(USB_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS).build()
         val socket = http.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 val hello = buildHello(pairing)
@@ -710,7 +730,9 @@ object ConnectionManager {
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 // Wrong key from a pinned Mac: say so, and keep to TLS (the next attempt is wss:// again).
-                if (LinkTls.isPinMismatch(t)) {
+                if (loopback) {
+                    // Nothing (or not our Mac) behind the reverse: say nothing, try the LAN next.
+                } else if (LinkTls.isPinMismatch(t)) {
                     mismatch.set(true)
                     lastEvent.value = LinkTls.IDENTITY_CHANGED
                 } else if (overTls && LinkTls.looksLikeNonTlsServer(t)) {
@@ -767,6 +789,7 @@ object ConnectionManager {
         ws = null
         wsLink = null
         wifiUpSince = 0L
+        usb.value = false
         LinkSecurity.encrypted.value = null
         wifiDownSince = System.currentTimeMillis()
         roundFailed = false
@@ -1295,10 +1318,13 @@ object ConnectionManager {
         // Sealed binary frames are negotiated separately.
         frameKey = if (macCaps.value.contains(LinkCrypto.CAP_FRAMES)) LinkCrypto.derive(pairing.token) else null
         lastEvent.value = "linked"
+        usb.value = ip == USB_LOOPBACK
         refreshState()
         runCatching {
-            Prefs.promoteActiveIp(appCtx, pairing.token, ip)
-            Prefs.markSeen(appCtx, pairing.token, ip, macName.value)
+            // The loopback address is a route, not the Mac's address: never store it.
+            val lan = ip.takeUnless { it == USB_LOOPBACK }
+            if (lan != null) Prefs.promoteActiveIp(appCtx, pairing.token, lan)
+            Prefs.markSeen(appCtx, pairing.token, lan, macName.value)
             knownDevices.value = Prefs.knownDevices(appCtx)
         }
         TransferManager.attach(appCtx, socket)

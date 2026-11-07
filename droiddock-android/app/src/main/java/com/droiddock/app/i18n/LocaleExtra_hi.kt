@@ -43,6 +43,7 @@ internal val extra_hi: Map<String, String> = mapOf(
     "Connected" to "जुड़ा हुआ",
     "Connected to {mac}" to "{mac} से जुड़ा है",
     "Connected · Bluetooth" to "जुड़ा हुआ · ब्लूटूथ",
+    "Connected · USB" to "जुड़ा हुआ · ब्लूटूथ",
     "Connected · Wi-Fi" to "जुड़ा हुआ · Wi-Fi",
     "Continue" to "जारी रखें",
     "Control" to "नियंत्रण",

@@ -49,7 +49,7 @@ struct PhoneCard: View {
         var m = DDPhoneCardModel(state: state, name: model.wifi.phoneName ?? "")
         m.battery = model.batteryPercent
         m.charging = model.isCharging
-        m.transport = model.onBluetooth ? .ble : (model.isConnected ? (usb ? .wifiAndUsb : .wifi) : (usb ? .usb : .none))
+        m.transport = model.onBluetooth ? .ble : (model.isConnected && model.wifi.transport == "usb" ? .usb : model.isConnected ? (usb ? .wifiAndUsb : .wifi) : (usb ? .usb : .none))
         m.link = model.linkQuality.map { LinkQualityLevel(grade: $0.grade) }
         m.rttMs = model.linkQuality?.rttMs.map { Int($0.rounded()) }
         m.nowPlaying = shell.nowPlaying(model)

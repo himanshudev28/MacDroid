@@ -90,4 +90,25 @@ class Review3FixesTest {
         assertNull(SafeNames.dirUnder(File(storage, "emulated/10").path, roots))
         assertNull(SafeNames.dirUnder(File(storage, "1A2B-3C4D/../emulated/10").path, roots))
     }
+
+    // ---- USB loopback ----
+    @Test fun `usb tunnel port sits below the ephemeral range`() {
+        // 32768–60999 is Android's ip_local_port_range; a port inside it collides with outgoing sockets.
+        assertTrue(USB_LOOPBACK_PORT in 1025 until 32768)
+    }
+
+    @Test fun `loopback candidate only for a pinned pairing`() {
+        val fp = "Xyk_wGH8yYL1D7E_YjfBy2aaODRCsf-jBA4-20BdAdU"
+        assertEquals("127.0.0.1", loopbackCandidate(Pairing(listOf("10.0.0.2"), 48484, "t", "Mac", fp)))
+        assertNull(loopbackCandidate(Pairing(listOf("10.0.0.2"), 48484, "t", "Mac", null)))
+        assertNull(loopbackCandidate(Pairing(listOf("10.0.0.2"), 48484, "t", "Mac", "not-a-valid-pin")))
+    }
+
+    @Test fun `usb plug-in triggers wake`() {
+        assertTrue(UsbWatch.isPlugIn("android.intent.action.ACTION_POWER_CONNECTED", false))
+        assertTrue(UsbWatch.isPlugIn("android.hardware.usb.action.USB_STATE", true))
+        assertFalse(UsbWatch.isPlugIn("android.hardware.usb.action.USB_STATE", false))
+        assertFalse(UsbWatch.isPlugIn("android.intent.action.ACTION_POWER_DISCONNECTED", true))
+        assertFalse(UsbWatch.isPlugIn(null, true))
+    }
 }

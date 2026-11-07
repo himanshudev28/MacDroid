@@ -43,6 +43,7 @@ internal val extra_ar: Map<String, String> = mapOf(
     "Connected" to "متصل",
     "Connected to {mac}" to "متصل بـ {mac}",
     "Connected · Bluetooth" to "متصل · بلوتوث",
+    "Connected · USB" to "متصل · بلوتوث",
     "Connected · Wi-Fi" to "متصل · Wi-Fi",
     "Continue" to "متابعة",
     "Control" to "التحكم",

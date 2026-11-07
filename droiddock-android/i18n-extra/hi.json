@@ -217,5 +217,6 @@
   "Opening {label} on your Mac": "आपके Mac पर {label} खोला जा रहा है",
   "Couldn't open {label}": "{label} नहीं खुल सका",
   "Saved to Downloads": "डाउनलोड में सहेजा गया",
-  "Pull failed": "लाना विफल रहा"
+  "Pull failed": "लाना विफल रहा",
+  "Connected · USB": "जुड़ा हुआ · ब्लूटूथ"
 }

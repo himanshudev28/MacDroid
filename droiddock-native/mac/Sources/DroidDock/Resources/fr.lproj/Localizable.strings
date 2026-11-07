@@ -252,6 +252,7 @@
 "Connect a phone via USB or wireless ADB from the Devices tab." = "Connectez un téléphone en USB ou en ADB sans fil depuis l'onglet Appareils.";
 "Connect an ADB device to manage these." = "Connectez un appareil ADB pour les gérer.";
 "Connect over" = "Se connecter via";
+"Connect over USB when plugged in" = "Se connecter par USB une fois branché";
 "Connect phone to see calls" = "Connectez le téléphone pour voir les appels";
 "Connect the phone over ADB to mirror this way" = "Connectez le téléphone via ADB pour recopier ainsi";
 "Connect the phone over ADB to take a screenshot" = "Connectez le téléphone via ADB pour faire une capture d'écran";
@@ -1319,6 +1320,7 @@
 "Use the port from the pairing dialog. It differs from the main port on the Wireless debugging screen." = "Utilisez le port de la boîte de dialogue d'association. Il diffère du port principal de l'écran Débogage sans fil.";
 "Use your phone's camera as a live feed on this Mac." = "Utilisez la caméra de votre téléphone comme flux en direct sur ce Mac.";
 "Uses Bluetooth only when Wi-Fi to your phone is unavailable, and switches back automatically." = "N'utilise le Bluetooth que lorsque le Wi-Fi vers votre téléphone est indisponible, et revient automatiquement.";
+"Uses the cable when your phone is plugged in. Needs USB debugging turned on on the phone." = "Utilise le câble quand le téléphone est branché. Le débogage USB doit être activé sur le téléphone.";
 "Verification code copied" = "Code de vérification copié";
 "Verification codes" = "Codes de vérification";
 "Verifying…" = "Vérification…";

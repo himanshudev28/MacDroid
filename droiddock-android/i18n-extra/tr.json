@@ -217,5 +217,6 @@
   "Opening {label} on your Mac": "{label} Mac'inizde açılıyor",
   "Couldn't open {label}": "{label} açılamadı",
   "Saved to Downloads": "İndirilenler'e kaydedildi",
-  "Pull failed": "Alınamadı"
+  "Pull failed": "Alınamadı",
+  "Connected · USB": "Bağlı · USB"
 }

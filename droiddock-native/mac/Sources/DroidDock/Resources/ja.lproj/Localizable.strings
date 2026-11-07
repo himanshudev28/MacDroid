@@ -252,6 +252,7 @@
 "Connect a phone via USB or wireless ADB from the Devices tab." = "「デバイス」タブから USB またはワイヤレス ADB でスマートフォンを接続してください。";
 "Connect an ADB device to manage these." = "これらを管理するには、ADB デバイスを接続してください。";
 "Connect over" = "接続方法";
+"Connect over USB when plugged in" = "接続時は USB で接続";
 "Connect phone to see calls" = "着信を表示するにはスマートフォンを接続してください";
 "Connect the phone over ADB to mirror this way" = "この方法でミラーリングするには、スマートフォンを ADB で接続してください";
 "Connect the phone over ADB to take a screenshot" = "スクリーンショットを撮るには、スマートフォンを ADB で接続してください";
@@ -1319,6 +1320,7 @@
 "Use the port from the pairing dialog. It differs from the main port on the Wireless debugging screen." = "ペアリングダイアログに表示されるポートを使用してください。「ワイヤレスデバッグ」画面のメインポートとは異なります。";
 "Use your phone's camera as a live feed on this Mac." = "スマートフォンのカメラをこの Mac のライブ映像として使えます。";
 "Uses Bluetooth only when Wi-Fi to your phone is unavailable, and switches back automatically." = "スマートフォンとの Wi-Fi が使えないときだけ Bluetooth を使い、自動的に元へ戻ります。";
+"Uses the cable when your phone is plugged in. Needs USB debugging turned on on the phone." = "スマートフォンをケーブルで接続しているときにケーブルを使います。スマートフォンで USB デバッグを有効にする必要があります。";
 "Verification code copied" = "認証コードをコピーしました";
 "Verification codes" = "認証コード";
 "Verifying…" = "検証中…";

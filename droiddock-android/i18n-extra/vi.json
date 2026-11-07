@@ -217,5 +217,6 @@
   "Opening {label} on your Mac": "Đang mở {label} trên Mac của bạn",
   "Couldn't open {label}": "Không thể mở {label}",
   "Saved to Downloads": "Đã lưu vào Tải xuống",
-  "Pull failed": "Tải về thất bại"
+  "Pull failed": "Tải về thất bại",
+  "Connected · USB": "Đã kết nối · USB"
 }

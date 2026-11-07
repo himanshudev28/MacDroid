@@ -217,5 +217,6 @@
   "Opening {label} on your Mac": "جارٍ فتح {label} على جهاز Mac",
   "Couldn't open {label}": "تعذّر فتح {label}",
   "Saved to Downloads": "تم الحفظ في التنزيلات",
-  "Pull failed": "فشل الجلب"
+  "Pull failed": "فشل الجلب",
+  "Connected · USB": "متصل · بلوتوث"
 }

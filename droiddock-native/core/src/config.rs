@@ -217,6 +217,11 @@ pub struct Config {
     #[serde(default = "default_true")]
     pub vd_keep_awake: bool,
 
+    /// Connect over the USB cable when the phone is plugged in (`adb reverse` of the WS port), even
+    /// when the phone isn't on the Mac's Wi-Fi.
+    #[serde(default = "default_true")]
+    pub usb_link: bool,
+
     // ── scrcpy passthrough (all opt-in; absent flags = scrcpy's own default) ──
     /// `h264` (scrcpy's default — the flag is not passed at all) or `h265`.
     /// Not defaulted to H.265 on purpose: naming a codec the phone can't
@@ -456,6 +461,7 @@ impl Default for Config {
             app_window_chrome: false,
             app_window_keep_alive: false,
             vd_keep_awake: true,
+            usb_link: true,
             mirror_codec: default_mirror_codec(),
             mirror_audio: true,
             scrcpy_uhid: false,
@@ -602,6 +608,17 @@ mod tests {
         assert_eq!(cfg.menubar_text, "battery", "missing keys fall back to defaults");
         assert_eq!(cfg.low_battery_pct, 20);
         assert!(!cfg.encrypt_link);
+        assert!(cfg.usb_link, "the USB link defaults on for older configs");
+    }
+
+    #[test]
+    fn usb_link_setting_round_trips_under_its_camel_case_key() {
+        let mut cfg = Config::default();
+        assert!(cfg.usb_link);
+        cfg.usb_link = false;
+        let json = serde_json::to_string(&cfg).unwrap();
+        assert!(json.contains("\"usbLink\":false"));
+        assert!(!serde_json::from_str::<Config>(&json).unwrap().usb_link);
     }
 
     #[test]

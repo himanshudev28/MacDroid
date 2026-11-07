@@ -103,7 +103,7 @@ pub struct QualityReport {
     pub rtt_ms: Option<f64>,
     /// `good` | `fair` | `weak` | `stalled`.
     pub grade: &'static str,
-    /// `"wifi"` | `"ble"` — which link the numbers describe. Additive.
+    /// `"wifi"` | `"usb"` | `"ble"` — which link the numbers describe. Additive.
     pub transport: Option<&'static str>,
 }
 

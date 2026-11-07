@@ -43,6 +43,7 @@ internal val extra_tr: Map<String, String> = mapOf(
     "Connected" to "Bağlı",
     "Connected to {mac}" to "{mac} cihazına bağlı",
     "Connected · Bluetooth" to "Bağlı · Bluetooth",
+    "Connected · USB" to "Bağlı · USB",
     "Connected · Wi-Fi" to "Bağlı · Wi-Fi",
     "Continue" to "Devam",
     "Control" to "Denetim",

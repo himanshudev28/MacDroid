@@ -217,5 +217,6 @@
   "Opening {label} on your Mac": "Membuka {label} di Mac-mu",
   "Couldn't open {label}": "Tidak dapat membuka {label}",
   "Saved to Downloads": "Disimpan ke Unduhan",
-  "Pull failed": "Gagal mengambil"
+  "Pull failed": "Gagal mengambil",
+  "Connected · USB": "Terhubung · USB"
 }

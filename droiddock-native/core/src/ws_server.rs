@@ -123,6 +123,14 @@ struct WsLink {
     up_since_ms: i64,
     /// The socket runs inside TLS (so `key` / `frame_key` stay `None`).
     tls: bool,
+    /// The peer was loopback: the phone reached us through `adb reverse` (the USB link).
+    usb: bool,
+}
+
+/// A WS peer on loopback is the USB link (`adb reverse` makes the phone's connection arrive from
+/// 127.0.0.1 / ::1); nothing else can reach a loopback address.
+pub(crate) fn is_usb_peer(ip: std::net::IpAddr) -> bool {
+    ip.is_loopback()
 }
 
 /// The Bluetooth half. Always sealed at L2 by `ble_link`, never by `key`.
@@ -178,11 +186,13 @@ pub async fn is_connected(state: &SharedState) -> bool {
     state.phone.lock().await.is_some()
 }
 
-/// Which link ANY-class traffic uses right now: `"wifi"`, `"ble"` or `None`.
+/// Which link ANY-class traffic uses right now: `"wifi"`, `"usb"` (the WS link over the cable),
+/// `"ble"` or `None`.
 fn transport_of(p: &PhoneHandle, ws_primary: bool) -> Option<&'static str> {
+    let ws = |w: &WsLink| if w.usb { "usb" } else { "wifi" };
     match (&p.ws, &p.ble) {
-        (Some(_), None) => Some("wifi"),
-        (Some(_), Some(_)) if ws_primary => Some("wifi"),
+        (Some(w), None) => Some(ws(w)),
+        (Some(w), Some(_)) if ws_primary => Some(ws(w)),
         (_, Some(_)) => Some("ble"),
         (None, None) => None,
     }
@@ -199,7 +209,7 @@ pub async fn link_security(state: &SharedState) -> &'static str {
 
 fn security_of(p: &PhoneHandle, ws_primary: bool) -> &'static str {
     match transport_of(p, ws_primary) {
-        Some("wifi") => match &p.ws {
+        Some("wifi" | "usb") => match &p.ws {
             Some(w) if w.tls => "tls",
             Some(w) if w.key.is_some() => "aes",
             Some(_) => "plain",
@@ -450,7 +460,7 @@ pub struct WifiStatus {
     /// a button that does nothing is worse than no button.
     #[serde(default)]
     pub caps: Vec<String>,
-    /// `"wifi"` | `"ble"` | null. Additive (BLE fallback).
+    /// `"wifi"` | `"usb"` | `"ble"` | null. Additive (BLE fallback, USB link).
     pub transport: Option<&'static str>,
     /// `tls` | `aes` | `ble` | `plain` | `none`. Additive.
     #[serde(default)]
@@ -699,7 +709,7 @@ static LAST_SEC: std::sync::Mutex<&'static str> = std::sync::Mutex::new("none");
 
 fn security_label(transport: Option<&'static str>) -> &'static str {
     match transport {
-        Some("wifi") => *WIFI_SEC.lock().unwrap(),
+        Some("wifi" | "usb") => *WIFI_SEC.lock().unwrap(),
         Some(_) => "ble",
         None => "none",
     }
@@ -1053,6 +1063,7 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                         kill: Some(kill_tx.take().expect("hello only authenticates once per connection")),
                         up_since_ms: now_ms(),
                         tls: secure,
+                        usb: is_usb_peer(peer_ip),
                     };
                     my_link_id = Some(link.id);
                     let Some(reg) = register_link(
@@ -2044,6 +2055,15 @@ pub fn mac_name(app: &AppHandle) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loopback_peers_are_the_usb_link() {
+        use std::net::IpAddr;
+        assert!(is_usb_peer("127.0.0.1".parse::<IpAddr>().unwrap()));
+        assert!(is_usb_peer("::1".parse::<IpAddr>().unwrap()));
+        assert!(!is_usb_peer("192.168.1.20".parse::<IpAddr>().unwrap()));
+        assert!(!is_usb_peer("fe80::1".parse::<IpAddr>().unwrap()));
+    }
 
     #[test]
     fn pre_auth_limits_are_per_ip_and_global() {

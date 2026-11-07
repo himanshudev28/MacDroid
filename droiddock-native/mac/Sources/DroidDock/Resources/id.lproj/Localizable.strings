@@ -252,6 +252,7 @@
 "Connect a phone via USB or wireless ADB from the Devices tab." = "Sambungkan ponsel lewat USB atau ADB nirkabel dari tab Perangkat.";
 "Connect an ADB device to manage these." = "Hubungkan perangkat ADB untuk mengelolanya.";
 "Connect over" = "Hubungkan lewat";
+"Connect over USB when plugged in" = "Hubungkan lewat USB saat dicolokkan";
 "Connect phone to see calls" = "Sambungkan ponsel untuk melihat panggilan";
 "Connect the phone over ADB to mirror this way" = "Hubungkan ponsel lewat ADB untuk mencerminkan dengan cara ini";
 "Connect the phone over ADB to take a screenshot" = "Hubungkan ponsel lewat ADB untuk mengambil tangkapan layar";
@@ -1319,6 +1320,7 @@
 "Use the port from the pairing dialog. It differs from the main port on the Wireless debugging screen." = "Gunakan port dari dialog pemasangan. Port ini berbeda dari port utama di layar Debugging nirkabel.";
 "Use your phone's camera as a live feed on this Mac." = "Gunakan kamera ponsel Anda sebagai siaran langsung di Mac ini.";
 "Uses Bluetooth only when Wi-Fi to your phone is unavailable, and switches back automatically." = "Hanya memakai Bluetooth saat Wi-Fi ke ponsel Anda tidak tersedia, lalu beralih kembali secara otomatis.";
+"Uses the cable when your phone is plugged in. Needs USB debugging turned on on the phone." = "Memakai kabel saat ponsel dicolokkan. Perlu USB debugging aktif di ponsel.";
 "Verification code copied" = "Kode verifikasi disalin";
 "Verification codes" = "Kode verifikasi";
 "Verifying…" = "Memverifikasi…";

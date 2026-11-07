@@ -59,6 +59,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.Icon
 import com.droiddock.app.ConnectionManager
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.droiddock.app.KnownDevice
 import com.droiddock.app.LinkSecurity
 import com.droiddock.app.t
@@ -237,8 +238,10 @@ internal fun ConnectionHeroCard(
         paired    -> knownName ?: t("Searching…")
         else      -> t("Not paired")
     }
+    val usb by ConnectionManager.usb.collectAsStateWithLifecycle()
     val status = when {
         isPaused  -> pauseSubtitle(pausedUntil)
+        connected && usb -> t("Connected · USB")
         connected && transport == com.droiddock.app.link.Transport.BLE -> t("Connected · Bluetooth")
         connected && secure == true -> t("Connected · Encrypted")
         connected && secure == false -> t("Connected · Not encrypted")
