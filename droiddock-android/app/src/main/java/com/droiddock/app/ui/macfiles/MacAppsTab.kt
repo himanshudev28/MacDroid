@@ -152,10 +152,10 @@ internal fun MacAppsTab(connected: Boolean) {
                             scope.launch {
                                 runCatching { ConnectionManager.macAppLaunch(pkg) }
                                     .onSuccess {
-                                        Toast.makeText(ctx, "Opening $label on your Mac", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(ctx, t("Opening {label} on your Mac", "label" to label), Toast.LENGTH_SHORT).show()
                                     }
                                     .onFailure {
-                                        Toast.makeText(ctx, it.message ?: "Couldn't open $label", Toast.LENGTH_LONG).show()
+                                        Toast.makeText(ctx, it.message ?: t("Couldn't open {label}", "label" to label), Toast.LENGTH_LONG).show()
                                     }
                             }
                         },

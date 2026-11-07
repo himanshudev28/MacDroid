@@ -88,6 +88,11 @@ class MirrorService : Service() {
             // projection consent no longer backs a mediaProjection service), and
             // it used to throw straight out of onStartCommand and kill the app.
             startForegroundNotif(source)
+            // A second start while streaming: tear the current stream down first.
+            if (encoder != null || projection != null || cameraDevice != null || virtualDisplay != null) {
+                releaseStream()
+                startedJson = null
+            }
             if (source == "camera") {
                 startCamera(intent?.getIntExtra(EXTRA_FACING, CameraCharacteristics.LENS_FACING_BACK)
                     ?: CameraCharacteristics.LENS_FACING_BACK)
@@ -179,7 +184,8 @@ class MirrorService : Service() {
         projection = proj
         proj.registerCallback(object : MediaProjection.Callback() {
             override fun onStop() {
-                stopSelf()
+                // A superseded projection (restart) stops without ending the service.
+                if (projection === proj) stopSelf()
             }
         }, null)
 
@@ -518,27 +524,38 @@ class MirrorService : Service() {
         encoder?.let { requestSyncFrame(it) }
     }
 
-    override fun onDestroy() {
-        if (instance === this) instance = null
-        DockWidget.refresh(applicationContext)
-        startedJson = null
+    /** Release everything a running stream holds. Used by [onDestroy] and before a
+     *  second start (camera-start / fresh consent while already streaming), so the old
+     *  encoder, VirtualDisplay, camera and projection are never silently overwritten. */
+    private fun releaseStream() {
         running = false
         runCatching { audio?.stop() }
         audio = null
         runCatching { drainThread?.join(300) }
+        drainThread = null
         runCatching { captureSession?.close() }
         runCatching { cameraDevice?.close() }
         runCatching { camThread?.quitSafely() }
         runCatching { virtualDisplay?.release() }
         runCatching { encoder?.stop() }
         runCatching { encoder?.release() }
-        runCatching { projection?.stop() }
+        val oldProj = projection
+        // Clear first: the projection's onStop callback must not stopSelf() a service that is restarting.
+        projection = null
+        runCatching { oldProj?.stop() }
         captureSession = null
         cameraDevice = null
         camThread = null
         virtualDisplay = null
         encoder = null
-        projection = null
+        configBytes = null
+    }
+
+    override fun onDestroy() {
+        if (instance === this) instance = null
+        DockWidget.refresh(applicationContext)
+        startedJson = null
+        releaseStream()
         runCatching { ConnectionManager.send(JSONObject().put("type", "mirror-stopped")) }
         super.onDestroy()
     }

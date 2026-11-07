@@ -40,6 +40,36 @@ data class TransferRecord(
     val success: Boolean
 )
 
+/** Names and destinations that arrive from the Mac are untrusted: they must not be able to
+ *  escape the folder they are written to. Pure functions so they are unit-testable. */
+object SafeNames {
+    /** The basename of [raw] (splitting on `/` and `\\`), or null for `.`, `..`, empty or control-only names. */
+    fun baseName(raw: String): String? {
+        val last = raw.substringAfterLast('/').substringAfterLast('\\')
+            .filter { it.code >= 0x20 && it.code != 0x7f }
+            .trim()
+        if (last.isEmpty() || last == "." || last == "..") return null
+        return last
+    }
+
+    private val VOLUME_NAME = Regex("^[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}$")
+
+    /** Removable-volume roots (`/storage/XXXX-XXXX`: SD cards, USB drives) found under [storage].
+     *  Other users' `/storage/emulated/<n>` never match. */
+    fun volumeRoots(storage: File = File("/storage")): List<File> =
+        storage.listFiles()?.filter { it.isDirectory && VOLUME_NAME.matches(it.name) } ?: emptyList()
+
+    /** [raw] resolved to a canonical directory that is one of [roots] or below one; null otherwise. */
+    fun dirUnder(raw: String, roots: List<File>): File? {
+        val dir = runCatching { File(raw).canonicalFile }.getOrNull() ?: return null
+        val ok = roots.any { r ->
+            val root = runCatching { r.canonicalFile }.getOrNull() ?: return@any false
+            dir.path == root.path || dir.path.startsWith(root.path + File.separator)
+        }
+        return if (ok) dir else null
+    }
+}
+
 /** Phase 6a A3 — binary file transfer over the app link. Isolated from the JSON
  *  message path; ConnectionManager hands binary frames + fs-* control here. */
 object TransferManager {
@@ -127,6 +157,11 @@ object TransferManager {
                 val p      = pendingPhonePush.remove(reqId) ?: return
                 val job    = scope.launch { streamToMac(p, tid) }
                 outgoing[tid] = job
+            }
+            // Mac refused the push before acking (e.g. no downloads dir): fail it so the UI's onResult fires.
+            "phone-push-error" -> {
+                val p = pendingPhonePush.remove(msg.optString("reqId")) ?: return
+                p.onResult(false, msg.optString("error").ifEmpty { "Mac refused the file" })
             }
             // Mac confirmed it received the file (or rejected it)
             "phone-push-result" -> {
@@ -221,11 +256,11 @@ object TransferManager {
         } ?: 0L
 
     /** Send a photo thumbnail (small, single frame) keyed by the request id. */
-    fun sendThumb(reqId: Int, bytes: ByteArray) {
+    fun sendThumb(reqId: Long, bytes: ByteArray) {
         if (ws == null) return
         val b = Buffer()
         b.writeByte(KIND_THUMB)
-        b.writeInt(reqId)
+        b.writeInt(reqId.toInt()) // the binary header carries 32 bits
         b.writeInt(0)
         b.write(bytes)
         ConnectionManager.sendBinary(b.readByteArray())
@@ -253,7 +288,9 @@ object TransferManager {
         name: String,
         onProgress: (bytesReceived: Long, totalBytes: Long) -> Unit
     ): Result<File> {
-        val dest = FileRepo.uniqueDest(File("/sdcard/Download/"), name)
+        val safeName = SafeNames.baseName(name)
+            ?: return Result.failure(IllegalArgumentException("invalid file name"))
+        val dest = FileRepo.uniqueDest(File("/sdcard/Download/"), safeName)
         incomingMacFs[transferId] = MacFsPullReceiver(dest, size, onProgress)
         val completion = CompletableDeferred<Result<File>>()
         pendingMacFsPull[reqId] = MacFsPullEntry(transferId, completion)
@@ -380,8 +417,18 @@ object TransferManager {
         val socket = ws ?: return
         try {
             if (!FileRepo.hasAllFiles()) throw SecurityException("Grant All-files access in the DroidDock app")
-            val dir = File(msg.optString("dest", "/sdcard/Download/").ifBlank { "/sdcard/Download/" })
-            val name = msg.optString("name", "file")
+            val roots = listOf(
+                android.os.Environment.getExternalStorageDirectory(),
+                File("/sdcard"), File("/storage/emulated/0"),
+            ) + SafeNames.volumeRoots() + runCatching {
+                val sm = appCtx?.getSystemService(android.os.storage.StorageManager::class.java)
+                if (android.os.Build.VERSION.SDK_INT >= 30)
+                    sm?.storageVolumes?.mapNotNull { it.directory } ?: emptyList() else emptyList()
+            }.getOrDefault(emptyList())
+            val dir = SafeNames.dirUnder(msg.optString("dest", "/sdcard/Download/").ifBlank { "/sdcard/Download/" }, roots)
+                ?: throw SecurityException("Destination is outside shared storage")
+            val name = SafeNames.baseName(msg.optString("name", "file"))
+                ?: throw IllegalArgumentException("Invalid file name")
             // The Mac sets overwrite=true only for edit-in-place writeback,
             // where the whole point is to replace the file the user opened.
             // uniqueDest() would instead fork every save into "name (2).ext"

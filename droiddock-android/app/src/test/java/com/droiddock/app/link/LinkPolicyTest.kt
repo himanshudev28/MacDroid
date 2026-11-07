@@ -33,7 +33,7 @@ class TransportClassTest {
     @Test fun macToPhone() {
         val d = TransportClassifier.Dir.MAC_TO_PHONE
         for (t in listOf("welcome", "caps", "ping", "pong", "mac-info", "mac-media", "reply", "dismiss", "notif-action",
-            "action-call", "action-sms", "call-action", "ring", "health", "health-fix", "media-cmd", "sms-threads",
+            "action-call", "call-action", "ring", "health", "health-fix", "media-cmd", "sms-threads",
             "sms-messages", "sms-send", "app-launch", "link-mode", "link-prefer")) {
             assertEquals(t, TransportClass.ANY, c("""{"type":"$t"}""", d))
         }

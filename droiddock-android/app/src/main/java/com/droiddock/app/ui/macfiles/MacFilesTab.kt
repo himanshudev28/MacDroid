@@ -210,7 +210,7 @@ internal fun MacFilesTab(connected: Boolean) {
                             pullingPath = null
                             Toast.makeText(
                                 ctx,
-                                result.fold({ "Saved to Downloads" }, { e -> e.message ?: "Pull failed" }),
+                                result.fold({ t("Saved to Downloads") }, { e -> e.message ?: t("Pull failed") }),
                                 Toast.LENGTH_SHORT
                             ).show()
                         }

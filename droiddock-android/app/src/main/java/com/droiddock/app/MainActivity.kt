@@ -7,6 +7,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -107,6 +109,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        // Coming to the foreground ends any long reconnect backoff.
+        ConnectionManager.wake(applicationContext)
         com.droiddock.app.ui.theme.glass.GlassKillSwitch.onStart(applicationContext)
     }
 
@@ -125,8 +129,12 @@ class MainActivity : ComponentActivity() {
         CrashNotifier.install(this)
         AppearanceStore.load(this)
         if (Prefs.load(this) != null) BridgeService.start(this)
-        intent?.data?.toString()?.takeIf { it.startsWith("droiddock://pair") }
-            ?.let { pairFlow.value = it }
+        // Only on a fresh launch. A recreation (rotation, theme change) hands back the
+        // same intent, and re-reading it would re-offer a link the user already handled.
+        if (savedInstanceState == null) {
+            intent?.data?.toString()?.takeIf { it.startsWith("droiddock://pair") }
+                ?.let { pairFlow.value = it }
+        }
         setContent {
             val pairUri by pairFlow.collectAsStateWithLifecycle()
             val appearance by AppearanceStore.state.collectAsStateWithLifecycle()
@@ -157,7 +165,34 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         intent.data?.toString()?.takeIf { it.startsWith("droiddock://pair") }
             ?.let { pairFlow.value = it }
+        // Consumed: a later recreation must not see this link again.
+        setIntent(Intent(intent).setData(null))
     }
+}
+
+/** The one QR-scan configuration: QR only, silent, free to rotate. */
+internal fun scanOptions() = ScanOptions().apply {
+    setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+    setBeepEnabled(false)
+    setOrientationLocked(false)
+}
+
+/** A preference mirrored into Compose state: reads once, and every [set] updates the UI and persists. */
+@Stable
+internal class PrefState<T>(initial: T, private val write: (T) -> Unit) {
+    var value by mutableStateOf(initial)
+        private set
+    fun set(v: T) { value = v; write(v) }
+}
+
+@Composable
+internal fun <T> rememberPref(read: () -> T, write: (T) -> Unit): PrefState<T> =
+    remember { PrefState(read(), write) }
+
+/** Tabs a saved `defaultTab` may legitimately point at in [layout]; anything else (a legacy id) falls back to Home. */
+internal fun validTabs(layout: NavLayout): Set<String> = buildSet {
+    add(Dest.HOME); add(Dest.FILES); add(Dest.CONTROL); add(Dest.SETTINGS)
+    if (layout == NavLayout.CLASSIC_5) add(Dest.CLIPBOARD)
 }
 
 /**
@@ -199,10 +234,8 @@ internal fun DroidDockScreen(
     val macName     by ConnectionManager.macName.collectAsStateWithLifecycle()
     val pausedUntil by ConnectionManager.pausedUntil.collectAsStateWithLifecycle()
     val isPaused    = pausedUntil != 0L
-    val macCaps     by ConnectionManager.macCaps.collectAsStateWithLifecycle()
     val macInfo     by ConnectionManager.macInfo.collectAsStateWithLifecycle()
     val knownDevices by ConnectionManager.knownDevices.collectAsStateWithLifecycle()
-    val disconnected by ConnectionManager.manuallyDisconnected.collectAsStateWithLifecycle()
 
     var paired      by remember { mutableStateOf(Prefs.load(ctx) != null) }
     // First run only: anyone already paired (an upgrade) skips straight to the app.
@@ -241,16 +274,18 @@ internal fun DroidDockScreen(
     // row's first frame is already right instead of flashing "Grant" at someone
     // who granted it months ago.
     var deviceAdmin by remember { mutableStateOf(LockAdmin.isActive(ctx)) }
-    var clipAuto    by remember { mutableStateOf(Prefs.clipboardAuto(ctx)) }
+    val clipAuto = rememberPref({ Prefs.clipboardAuto(ctx) }, { Prefs.setClipboardAuto(ctx, it) })
     var overlayOk   by remember { mutableStateOf(Settings.canDrawOverlays(ctx)) }
-    var autoMirror  by remember { mutableStateOf(Prefs.autoMirror(ctx)) }
-    var expandNet   by remember { mutableStateOf(Prefs.expandNetworking(ctx)) }
-    var clipKeepHistory by remember { mutableStateOf(Prefs.clipboardHistory(ctx)) }
-    var defaultTab  by remember { mutableStateOf(Prefs.defaultTab(ctx)) }
-    var crashNotify by remember { mutableStateOf(Prefs.notifyOnCrash(ctx)) }
+    val autoMirror = rememberPref({ Prefs.autoMirror(ctx) }, { Prefs.setAutoMirror(ctx, it) })
+    val expandNet = rememberPref({ Prefs.expandNetworking(ctx) }, { Prefs.setExpandNetworking(ctx, it) })
+    val clipKeepHistory = rememberPref({ Prefs.clipboardHistory(ctx) }, { Prefs.setClipboardHistory(ctx, it) })
+    val defaultTab = rememberPref({ Prefs.defaultTab(ctx) }, { Prefs.setDefaultTab(ctx, it) })
+    val crashNotify = rememberPref({ Prefs.notifyOnCrash(ctx) }, { Prefs.setNotifyOnCrash(ctx, it) })
     var showManual  by rememberSaveable { mutableStateOf(false) }
     var showGuide   by rememberSaveable { mutableStateOf(false) }
     var showPause   by rememberSaveable { mutableStateOf(false) }
+    // A deep link waiting for the user's Pair / Cancel. Saveable so the sheet survives rotation.
+    var pendingLink by rememberSaveable { mutableStateOf<String?>(null) }
     // Found by the throttled check below. Its only job out here is the dot on
     // the Settings nav item — the row that acts on it lives in SettingsTab.
     var newRelease  by remember { mutableStateOf<UpdateChecker.Release?>(null) }
@@ -266,7 +301,7 @@ internal fun DroidDockScreen(
             when (val saved = Prefs.defaultTab(ctx)) {
                 "dynamic" -> if (Prefs.load(ctx) == null) "connect" else "home"
                 "clipboard" -> if (appearance.layout == NavLayout.CLASSIC_5) "clipboard" else "home"
-                else -> saved
+                else -> if (saved in validTabs(appearance.layout)) saved else "home"
             }
         )
     }
@@ -287,13 +322,24 @@ internal fun DroidDockScreen(
         if (uri == null) return@rememberLauncherForActivityResult
         sending = true
         ConnectionManager.sendFileToMac(uri, ctx) { ok, err ->
-            sending = false
-            Toast.makeText(
-                ctx,
-                if (ok) "File sent to Mac" else (err ?: "Send failed"),
-                Toast.LENGTH_SHORT
-            ).show()
+            // The callback runs on an OkHttp / IO thread; Toast and Compose state need the main one.
+            Handler(Looper.getMainLooper()).post {
+                sending = false
+                Toast.makeText(
+                    ctx,
+                    if (ok) t("File sent to Mac") else (err ?: t("Send failed")),
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
         }
+    }
+
+    // Pairing can change from outside this screen (a widget, a tile, the service, another
+    // activity), so re-derive from the stored active pairing whenever the device list changes.
+    LaunchedEffect(knownDevices) {
+        val active = Prefs.load(ctx)
+        activeToken = active?.token
+        paired = active != null
     }
 
     val applyPairing: (Pairing, Boolean) -> Unit = { pairing, fromQr ->
@@ -302,7 +348,7 @@ internal fun DroidDockScreen(
         ConnectionManager.onPaired(ctx, pairing, fromQr)
         paired = true
         activeToken = pairing.token
-        Toast.makeText(ctx, "Paired with ${pairing.macName}", Toast.LENGTH_SHORT).show()
+        Toast.makeText(ctx, t("Paired with {name}", "name" to pairing.macName), Toast.LENGTH_SHORT).show()
     }
 
     // Permission state, re-read only while a screen that shows it is open.
@@ -349,10 +395,28 @@ internal fun DroidDockScreen(
         }
     }
 
+    // A deep link is untrusted input: never pair from it directly. Valid links wait for the
+    // user's confirmation; links without a key fingerprint are refused outright.
     LaunchedEffect(pairUri) {
         pairUri ?: return@LaunchedEffect
         clearPairUri()
-        handleQr(pairUri)
+        when (evaluateDeepLink(pairUri)) {
+            is DeepLinkDecision.Confirm -> pendingLink = pairUri
+            DeepLinkDecision.RefusedNoFingerprint -> Toast.makeText(
+                ctx, t("This link can't be verified. Scan the QR code from inside DroidDock instead."), Toast.LENGTH_LONG
+            ).show()
+            DeepLinkDecision.Invalid -> Toast.makeText(ctx, t("Not a DroidDock QR code"), Toast.LENGTH_SHORT).show()
+        }
+    }
+    val pendingPairing = remember(pendingLink) {
+        (pendingLink?.let { evaluateDeepLink(it) } as? DeepLinkDecision.Confirm)?.pairing
+    }
+    if (pendingPairing != null) {
+        DeepLinkConfirmSheet(
+            pairing = pendingPairing,
+            onCancel = { pendingLink = null },
+            onPair = { pendingLink = null; applyPairing(pendingPairing, false) },
+        )
     }
 
     val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
@@ -362,11 +426,7 @@ internal fun DroidDockScreen(
     val cameraPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) scanLauncher.launch(ScanOptions().apply {
-            setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-            setBeepEnabled(false)
-            setOrientationLocked(false)
-        })
+        if (granted) scanLauncher.launch(scanOptions())
         else Toast.makeText(ctx, t("Camera permission needed to scan QR"), Toast.LENGTH_SHORT).show()
     }
 
@@ -407,11 +467,7 @@ internal fun DroidDockScreen(
     val launchScan = {
         val hasCam = ctx.checkSelfPermission(Manifest.permission.CAMERA) ==
                 PackageManager.PERMISSION_GRANTED
-        if (hasCam) scanLauncher.launch(ScanOptions().apply {
-            setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-            setBeepEnabled(false)
-            setOrientationLocked(false)
-        })
+        if (hasCam) scanLauncher.launch(scanOptions())
         else cameraPermLauncher.launch(Manifest.permission.CAMERA)
     }
 
@@ -430,6 +486,9 @@ internal fun DroidDockScreen(
     }
 
     if (showGuide) {
+        // Dialog flags are cleared on the way in: they live in rememberSaveable state that
+        // would otherwise still be true when the guide closes and re-open the sheet.
+        LaunchedEffect(Unit) { showManual = false; showPause = false }
         FeatureGuideScreen(onBack = { showGuide = false })
         return
     }
@@ -465,186 +524,34 @@ internal fun DroidDockScreen(
         },
     ) { tab ->
         when (tab) {
-                "home" -> {
-                    val event by ConnectionManager.lastEvent.collectAsStateWithLifecycle()
-                    val macMedia by ConnectionManager.macMedia.collectAsStateWithLifecycle()
-                    val transport by ConnectionManager.transport.collectAsStateWithLifecycle()
-                    val secure by LinkSecurity.encrypted.collectAsStateWithLifecycle()
-                    val identityChanged by LinkSecurity.identityChanged.collectAsStateWithLifecycle()
-                    val securityProblem by LinkSecurity.problem.collectAsStateWithLifecycle()
-                    HomeTab(
-                    transport   = transport,
-                    secure      = secure,
-                    identityChanged = identityChanged,
-                    securityProblem = securityProblem,
-                    connected   = connected,
-                    isPaused    = isPaused,
-                    paired      = paired,
-                    macName     = macName,
-                    macInfo     = macInfo,
-                    event       = event,
-                    pausedUntil = pausedUntil,
-                    devices     = knownDevices,
-                    activeToken = activeToken,
-                    disconnected = disconnected,
-                    canControlMac = macCaps.contains("remote"),
-                    macMedia    = macMedia,
-                    onPause     = { showPause = true },
-                    onResume    = { ConnectionManager.resume(ctx) },
-                    onQuickConnect = { ConnectionManager.quickConnect(ctx) },
-                    onDisconnect   = { ConnectionManager.disconnect(ctx) },
-                    onPickDevice   = { device ->
-                        ConnectionManager.connectTo(ctx, device)
-                        activeToken = device.token
-                        paired = true
-                    },
-                    onRemoveDevice = { device ->
-                        if (device.token == activeToken) {
-                            forgetActiveMac()
-                        } else {
-                            // Not the Mac we're linked to: drop its entry (and its pin) only.
-                            ConnectionManager.forget(ctx, device.token)
-                            Toast.makeText(ctx, t("Removed {name}", "name" to device.macName), Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    onGoToConnect = { currentTab = "connect" },
-                    onGoToFiles   = { currentTab = "files" },
-                    clipboard = if (appearance.layout == NavLayout.CLASSIC_5) null else ({
-                        val clipHistory by ConnectionManager.clipHistory.collectAsStateWithLifecycle()
-                        val shell = LocalShellActions.current
-                        HomeClipboardCard(clipHistory, connected, onOpen = { shell.openClipboard() })
-                    }),
-                    )
-                }
-                "connect" -> ConnectTab(
-                    onBack      = { currentTab = "home" },
-                    connected   = connected,
-                    paired      = paired,
-                    macName     = macName,
-                    onScan      = launchScan,
-                    onManual    = { showManual = true },
-                    onForget    = { forgetActiveMac() },
-                )
-                "files" -> {
-                val activeTransfers by TransferManager.activeTransfers.collectAsStateWithLifecycle()
-                val recentTransfers by TransferManager.recentTransfers.collectAsStateWithLifecycle()
-                FilesScreen(
-                    macFsAvailable = macCaps.contains("macfs"),
-                    connected      = connected,
-                ) { FilesTab(
-                    connected       = connected,
-                    sending         = sending,
-                    activeTransfers = activeTransfers,
-                    recentTransfers = recentTransfers,
-                    onSendFile = { if (!sending) filePicker.launch("*/*") },
-                    onSendClipboard = {
-                        val cm   = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        val text = readClipboardText(cm, ctx)
-                        val sent = text.isNotEmpty() && ConnectionManager.sendClipboardText(text)
-                        Toast.makeText(
-                            ctx,
-                            when {
-                                text.isEmpty() -> "Clipboard is empty"
-                                sent -> "Sent to Mac"
-                                else -> "Not connected to Mac"
-                            },
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    },
-                ) }
-                }
-                "clipboard" -> {
-                val clipHistory by ConnectionManager.clipHistory.collectAsStateWithLifecycle()
-                ClipboardTab(
-                    connected     = connected,
-                    history       = clipHistory,
-                    keepHistory   = clipKeepHistory,
-                    onKeepHistory = { v ->
-                        clipKeepHistory = v
-                        Prefs.setClipboardHistory(ctx, v)
-                        if (!v) ConnectionManager.clearClipHistory()
-                    },
-                )
-                }
-                "control" -> ControlScreen(
-                    remoteAvailable  = macCaps.contains("remote"),
-                    macAppsAvailable = macCaps.contains("macapps"),
-                    connected        = connected,
-                ) { MirrorTab(
-                    connected   = connected,
-                    overlayOk   = overlayOk,
-                    autoMirror  = autoMirror,
-                    onEnableOverlay = {
-                        runCatching {
-                            ctx.startActivity(
-                                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                    Uri.parse("package:${ctx.packageName}"))
-                            )
-                        }
-                        Toast.makeText(ctx, t("Allow DroidDock to display over other apps"), Toast.LENGTH_LONG).show()
-                    },
-                    onToggleAutoMirror = { v ->
-                        autoMirror = v; Prefs.setAutoMirror(ctx, v)
-                        if (!v) MirrorService.stop(ctx)
-                    },
-                ) }
-                "settings" -> SettingsTab(
-                    clipA11y    = clipA11y,
-                    clipAuto    = clipAuto,
-                    notifAccess = notifAccess,
-                    phonePerms  = phonePerms,
-                    allFiles    = allFiles,
-                    deviceAdmin = deviceAdmin,
-                    themeMode   = themeMode,
-                    onThemeMode = onThemeMode,
-                    pitchBlack  = pitchBlack,
-                    onPitchBlack = onPitchBlack,
-                    onOpenConnect = { currentTab = "connect" },
-                    crashNotify = crashNotify,
-                    onCrashNotify = { v ->
-                        crashNotify = v
-                        Prefs.setNotifyOnCrash(ctx, v)
-                    },
-                    defaultTab  = defaultTab,
-                    onDefaultTab = { tab ->
-                        defaultTab = tab
-                        Prefs.setDefaultTab(ctx, tab)
-                    },
-                    expandNet   = expandNet,
-                    onExpandNet = { v ->
-                        expandNet = v
-                        Prefs.setExpandNetworking(ctx, v)
-                    },
-                    onEnableClip = {
-                        runCatching { ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-                        Toast.makeText(ctx, t("Find DroidDock Clipboard and turn it on"), Toast.LENGTH_LONG).show()
-                    },
-                    onToggleClipAuto = { v -> clipAuto = v; Prefs.setClipboardAuto(ctx, v) },
-                    onEnableNotif = {
-                        runCatching { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
-                    },
-                    onGrantPhonePerms = { permLauncher.launch(PHONE_PERMS) },
-                    onGrantFiles = {
-                        runCatching {
-                            if (Build.VERSION.SDK_INT >= 30) {
-                                ctx.startActivity(
-                                    Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
-                                        .setData(Uri.parse("package:${ctx.packageName}"))
-                                )
-                            }
-                        }
-                    },
-                    onBattery = {
-                        runCatching {
-                            ctx.startActivity(
-                                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                                    .setData(Uri.parse("package:${ctx.packageName}"))
-                            )
-                        }
-                    },
-                    onOpenGuide = { showGuide = true },
-                    knownUpdate = newRelease,
-                )
+            "home" -> HomeDest(
+                layout = appearance.layout, paired = paired, activeToken = activeToken,
+                onPause = { showPause = true },
+                onPickDevice = { device ->
+                    ConnectionManager.connectTo(ctx, device)
+                    activeToken = device.token
+                    paired = true
+                },
+                onForgetActive = { forgetActiveMac() },
+                onGoToConnect = { currentTab = "connect" },
+                onGoToFiles = { currentTab = "files" },
+            )
+            "connect" -> ConnectDest(
+                paired = paired, onBack = { currentTab = "home" },
+                onScan = launchScan, onManual = { showManual = true }, onForget = { forgetActiveMac() },
+            )
+            "files" -> FilesDest(sending = sending, onSendFile = { if (!sending) filePicker.launch("*/*") })
+            "clipboard" -> ClipboardDest(keepHistory = clipKeepHistory)
+            "control" -> ControlDest(overlayOk = overlayOk, autoMirror = autoMirror)
+            "settings" -> SettingsDest(
+                perms = PermissionSnapshot(notifAccess, phonePerms, allFiles, clipA11y, overlayOk, deviceAdmin),
+                clipAuto = clipAuto, expandNet = expandNet, crashNotify = crashNotify, defaultTab = defaultTab,
+                themeMode = themeMode, onThemeMode = onThemeMode, pitchBlack = pitchBlack, onPitchBlack = onPitchBlack,
+                onOpenConnect = { currentTab = "connect" },
+                onGrantPhonePerms = { permLauncher.launch(PHONE_PERMS) },
+                onOpenGuide = { showGuide = true },
+                knownUpdate = newRelease,
+            )
             else -> Unit
         }
     }

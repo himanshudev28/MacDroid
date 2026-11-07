@@ -58,19 +58,23 @@ class BridgeService : Service() {
         }
     }
 
+    /** True once startForeground succeeded. A service started with startForegroundService() must
+     *  reach it within ~5 s; if the first try failed, onStartCommand retries it once. */
+    private var foregrounded = false
+    private var watching = false
+
     override fun onCreate() {
         super.onCreate()
         createChannel()
-        if (!startInForeground(buildNotification("Waiting for Mac…"))) {
-            // The system refused the foreground start (background-start restriction,
-            // FGS quota). Going on would leave a service that never called
-            // startForeground, which Android kills with an ANR — so bow out. The
-            // next time the app is opened, MainActivity starts it again from the
-            // foreground, where the start is always allowed.
-            stopSelf()
-            return
-        }
+        foregrounded = startInForeground(buildNotification("Waiting for Mac…"))
+        if (foregrounded) watchState()
+        // No stopSelf() here: it does not stop the pending onStartCommand, which would run
+        // ensureLoop on a service that never went foreground. onStartCommand decides instead.
+    }
 
+    private fun watchState() {
+        if (watching) return
+        watching = true
         scope.launch {
             combine(
                 ConnectionManager.connected, ConnectionManager.pausedUntil, ConnectionManager.transport,
@@ -88,6 +92,16 @@ class BridgeService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (!foregrounded) {
+            foregrounded = startInForeground(buildNotification("Waiting for Mac…"))
+            if (!foregrounded) {
+                // The system refused the foreground start (background-start restriction, FGS quota).
+                // Bow out without touching the link; the next app launch starts us from the foreground.
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            watchState()
+        }
         ConnectionManager.ensureLoop(applicationContext)
         if (!observing &&
             checkSelfPermission(android.Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED

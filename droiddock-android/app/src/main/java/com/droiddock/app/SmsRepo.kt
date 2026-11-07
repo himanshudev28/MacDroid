@@ -10,7 +10,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object SmsRepo {
-    private val nameCache = HashMap<String, String?>()
+    // "" = looked up, no contact. ConcurrentHashMap: hit from IO handlers and CallReceiver threads.
+    private val nameCache = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     fun threads(ctx: Context, max: Int = 30): JSONArray {
         val arr = JSONArray()
@@ -78,8 +79,7 @@ object SmsRepo {
 
     fun name(ctx: Context, address: String): String? {
         if (address.isBlank()) return null
-        nameCache[address]?.let { return it }
-        if (nameCache.containsKey(address)) return null
+        nameCache[address]?.let { return it.ifEmpty { null } }
         var result: String? = null
         runCatching {
             val uri = Uri.withAppendedPath(
@@ -89,8 +89,8 @@ object SmsRepo {
                 uri, arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME), null, null, null
             )?.use { c -> if (c.moveToFirst()) result = c.getString(0) }
         }
-        if (nameCache.size > 200) nameCache.clear()
-        nameCache[address] = result
+        if (nameCache.size > 200) nameCache.clear() // a racing put just re-fills; harmless
+        nameCache[address] = result ?: ""
         return result
     }
 }

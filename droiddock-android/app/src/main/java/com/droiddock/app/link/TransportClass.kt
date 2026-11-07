@@ -21,7 +21,7 @@ object TransportClassifier {
 
     private val MAC_ANY = setOf(
         "welcome", "caps", "ping", "pong", "clipboard", "mac-info", "mac-media", "reply", "dismiss",
-        "notif-action", "action-call", "action-sms", "call-action", "ring", "health", "health-fix",
+        "notif-action", "action-call", "call-action", "ring", "health", "health-fix",
         "media-cmd", "sms-threads", "sms-messages", "sms-send", "app-launch", "link-mode", "link-prefer",
     )
 

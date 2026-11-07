@@ -119,7 +119,8 @@ fun DockMenu(
     val currentEntries = rememberUpdatedState(entries)
     val dismiss = rememberUpdatedState(onDismissRequest)
     val shape = RoundedCornerShape(20.dp)
-    val origin = TransformOrigin(if (alignEnd) 1f else 0f, 0f)
+    val rtl = androidx.compose.ui.platform.LocalLayoutDirection.current == LayoutDirection.Rtl
+    val origin = TransformOrigin(if (alignEnd != rtl) 1f else 0f, 0f)
 
     Popup(
         popupPositionProvider = remember(alignEnd, density) { MenuPositionProvider(alignEnd, with(density) { 4.dp.roundToPx() }) },
@@ -211,7 +212,9 @@ fun DockMenu(
 
 private class MenuPositionProvider(private val alignEnd: Boolean, private val gap: Int) : PopupPositionProvider {
     override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset {
-        val x = (if (alignEnd) anchorBounds.right - popupContentSize.width else anchorBounds.left)
+        // alignEnd means the reading-direction end: the left edge in RTL.
+        val endIsRight = layoutDirection == LayoutDirection.Ltr
+        val x = (if (alignEnd == endIsRight) anchorBounds.right - popupContentSize.width else anchorBounds.left)
             .coerceIn(0, max(0, windowSize.width - popupContentSize.width))
         val below = anchorBounds.bottom + gap
         val y = if (below + popupContentSize.height <= windowSize.height) below

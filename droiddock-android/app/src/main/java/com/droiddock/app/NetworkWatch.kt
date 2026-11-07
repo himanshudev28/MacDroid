@@ -4,8 +4,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
-import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -47,11 +46,8 @@ object NetworkWatch {
     /** Coalescing "something changed, stop waiting" nudge. Capacity 1 with
      *  DROP_OLDEST: a burst of callbacks during a Wi-Fi handover should wake the
      *  loop once, not queue five wake-ups it will act on one at a time. */
-    private val wake = MutableSharedFlow<Unit>(
-        replay = 0,
-        extraBufferCapacity = 1,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
+    // Sticky: a poke that lands while the loop is mid-round (not sleeping) still shortens the next sleep.
+    private val wake = Channel<Unit>(Channel.CONFLATED)
 
     @Volatile private var started = false
     /** The current default network, so a late onLost for an old one is ignored. */
@@ -108,7 +104,7 @@ object NetworkWatch {
 
     /** Wake anything sleeping in [sleepOrWake] right now. Safe from any thread. */
     fun poke() {
-        wake.tryEmit(Unit)
+        wake.trySend(Unit)
     }
 
     /** Park until there is a default network. Returns at once when there is. */
@@ -127,6 +123,6 @@ object NetworkWatch {
     /** Sleep up to [ms]; true if woken early because the network changed. */
     suspend fun sleepOrWake(ms: Long): Boolean {
         if (ms <= 0) return false
-        return withTimeoutOrNull(ms) { wake.first(); true } ?: false
+        return withTimeoutOrNull(ms) { wake.receive(); true } ?: false
     }
 }

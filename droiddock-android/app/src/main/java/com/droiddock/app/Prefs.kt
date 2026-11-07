@@ -119,8 +119,9 @@ fun encodeDevices(list: List<KnownDevice>): String {
 
 /**
  * Upsert on pairing: keeps `lastSeenAt`, and keeps the old `fp` when the new pairing has none.
- * A QR scan is [authoritative]: its `fp` (even null) replaces the stored pin, so re-pairing with
- * a Mac that no longer does TLS clears the pin instead of dialling wss:// forever.
+ * A pin is never downgraded to null, not even by a QR scan (a LAN attacker who could show a
+ * pin-less QR would otherwise strip TLS). A QR carrying a *different* non-null `fp` still
+ * replaces it. [authoritative] is kept for API compatibility and no longer changes the null case.
  */
 fun mergePairing(existing: List<KnownDevice>, p: Pairing, authoritative: Boolean = false): List<KnownDevice> {
     val prior = existing.firstOrNull { it.token == p.token }
@@ -130,7 +131,7 @@ fun mergePairing(existing: List<KnownDevice>, p: Pairing, authoritative: Boolean
         port = p.port,
         token = p.token,
         lastSeenAt = prior?.lastSeenAt ?: 0L,
-        fp = if (authoritative) p.fp else p.fp ?: prior?.fp,
+        fp = p.fp ?: prior?.fp,
     ), protectToken = p.token)
 }
 

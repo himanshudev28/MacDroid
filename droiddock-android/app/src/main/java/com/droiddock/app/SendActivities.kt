@@ -19,7 +19,8 @@ class SendClipboardActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        ConnectionManager.ensureLoop(applicationContext)
+        I18n.load(applicationContext)
+        ConnectionManager.wake(applicationContext)
         // safety net: never linger
         Handler(Looper.getMainLooper()).postDelayed({ if (!isFinishing) finish() }, 1500)
     }
@@ -44,7 +45,7 @@ class SendClipboardActivity : Activity() {
             val ok = ConnectionManager.sendClipboardImage(image)
             Toast.makeText(
                 this,
-                if (ok) "Image sent to Mac" else "Not connected to Mac",
+                if (ok) t("Image sent to Mac") else t("Not connected to Mac"),
                 Toast.LENGTH_SHORT
             ).show()
             finish()
@@ -59,9 +60,9 @@ class SendClipboardActivity : Activity() {
         Toast.makeText(
             this,
             when {
-                text.isEmpty() -> "Clipboard is empty"
-                sent -> "Sent to Mac"
-                else -> "Not connected to Mac"
+                text.isEmpty() -> t("Clipboard is empty")
+                sent -> t("Sent to Mac")
+                else -> t("Not connected to Mac")
             },
             Toast.LENGTH_SHORT
         ).show()
@@ -73,10 +74,11 @@ class SendClipboardActivity : Activity() {
 class ProcessTextActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        ConnectionManager.ensureLoop(applicationContext)
+        I18n.load(applicationContext)
+        ConnectionManager.wake(applicationContext)
         val text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString().orEmpty()
         val sent = text.isNotEmpty() && ConnectionManager.sendClipboardText(text)
-        Toast.makeText(this, if (sent) "Sent to Mac" else "Not connected to Mac", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, if (sent) t("Sent to Mac") else t("Not connected to Mac"), Toast.LENGTH_SHORT).show()
         finish()
     }
 }
@@ -85,10 +87,11 @@ class ProcessTextActivity : Activity() {
 class ShareTextActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        ConnectionManager.ensureLoop(applicationContext)
+        I18n.load(applicationContext)
+        ConnectionManager.wake(applicationContext)
         val text = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
         val sent = text.isNotEmpty() && ConnectionManager.sendClipboardText(text)
-        Toast.makeText(this, if (sent) "Sent to Mac" else "Not connected to Mac", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, if (sent) t("Sent to Mac") else t("Not connected to Mac"), Toast.LENGTH_SHORT).show()
         finish()
     }
 }
@@ -97,7 +100,8 @@ class ShareTextActivity : Activity() {
 class ShareFileActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        ConnectionManager.ensureLoop(applicationContext)
+        I18n.load(applicationContext)
+        ConnectionManager.wake(applicationContext)
         val uri: android.net.Uri? = when {
             intent.action == Intent.ACTION_SEND ->
                 @Suppress("DEPRECATION")
@@ -105,16 +109,16 @@ class ShareFileActivity : Activity() {
             else -> null
         }
         if (uri == null) {
-            Toast.makeText(this, "No file to send", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, t("No file to send"), Toast.LENGTH_SHORT).show()
             finish()
             return
         }
-        Toast.makeText(this, "Sending to Mac…", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, t("Sending to Mac…"), Toast.LENGTH_SHORT).show()
         ConnectionManager.sendFileToMac(uri, applicationContext) { ok, err ->
             Handler(android.os.Looper.getMainLooper()).post {
                 Toast.makeText(
                     applicationContext,
-                    if (ok) "File sent to Mac" else (err ?: "Send failed"),
+                    if (ok) t("File sent to Mac") else (err ?: t("Send failed")),
                     Toast.LENGTH_SHORT
                 ).show()
             }

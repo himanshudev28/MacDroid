@@ -206,7 +206,7 @@ object ConnectionManager {
     private fun nextMacFsReqId() = "pfs${macFsSeq.getAndIncrement()}"
     private val pendingMacFs = ConcurrentHashMap<String, CompletableDeferred<JSONObject>>()
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    internal val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var loopJob: Job? = null
     @Volatile private var ws: WebSocket? = null
     @Volatile private var wsLink: WsLink? = null
@@ -221,7 +221,7 @@ object ConnectionManager {
     // Last copy we couldn't deliver (link was down). Flushed on the next reconnect
     // so a copy made during a Wi-Fi blip / Mac restart still reaches the Mac.
     @Volatile private var pendingClip: String? = null
-    private lateinit var appCtx: Context
+    internal lateinit var appCtx: Context
 
     private val client = OkHttpClient.Builder()
         .pingInterval(20, TimeUnit.SECONDS)
@@ -249,15 +249,31 @@ object ConnectionManager {
         BleStack.sync(ctx)
     }
 
+    private val loopLock = Any()
+
+    /** [ensureLoop], plus "try the Mac right now": ends any long idle backoff. For user-driven
+     *  entry points (app foreground, share, tile, widget, an incoming call). */
+    fun wake(ctx: Context) {
+        ensureLoop(ctx)
+        NetworkWatch.poke()
+    }
+
     fun ensureLoop(ctx: Context) {
         appCtx = ctx.applicationContext
         // Registered once, process-wide. This is what lets the loop below sleep
         // on the network instead of polling it — see [NetworkWatch].
         NetworkWatch.start(appCtx)
-        if (!netWatching) {
-            netWatching = true
-            scope.launch { NetworkWatch.online.collect { reevaluateLinks() } }
+        // check-then-launch must be atomic: this is called from many threads and entry points.
+        synchronized(loopLock) {
+            if (!netWatching) {
+                netWatching = true
+                scope.launch { NetworkWatch.online.collect { reevaluateLinks() } }
+            }
+            ensureLoopLocked()
         }
+    }
+
+    private fun ensureLoopLocked() {
         // The SharedPreferences reads and the legacy-pairing migration used to
         // run right here, on whichever (usually main) thread called us; the
         // first read of the prefs file blocks on disk. They now run on the IO
@@ -387,16 +403,20 @@ object ConnectionManager {
     fun restart(ctx: Context) {
         appCtx = ctx.applicationContext
         pausedUntil.value = Prefs.pausedUntil(appCtx)
-        loopJob?.cancel()
-        loopJob = scope.launch { connectLoop() }
+        synchronized(loopLock) {
+            loopJob?.cancel()
+            loopJob = scope.launch { connectLoop() }
+        }
     }
 
     /** Forget-the-Mac teardown: stop the connect loop and drop any live socket.
      *  A later [ensureLoop] (e.g. after re-pairing) starts a fresh loop. */
     fun shutdown() {
         LinkSecurity.clearProblems()
-        loopJob?.cancel()
-        loopJob = null
+        synchronized(loopLock) {
+            loopJob?.cancel()
+            loopJob = null
+        }
         ws?.let { s -> runCatching { s.close(1000, "unpaired") }; cleanup(s) }
         ws = null
         wsLink = null
@@ -441,9 +461,10 @@ object ConnectionManager {
         // loop the same way, so either "go again" affordance must clear both.
         manuallyDisconnected.value = false
         lastEvent.value = "resuming…"
-        loopJob?.cancel()
-        loopJob = null
-        loopJob = scope.launch { connectLoop() }
+        synchronized(loopLock) {
+            loopJob?.cancel()
+            loopJob = scope.launch { connectLoop() }
+        }
     }
 
     private suspend fun connectLoop() {
@@ -562,7 +583,9 @@ object ConnectionManager {
             }
             if (!linked) LinkSecurity.identityChanged.value = tried > 0 && mismatched == tried
             if (tlsUpgradeNow.getAndSet(false)) { backoff = 2_000L; continue }
-            backoff = if (linked) 2_000L else minOf(backoff * 2, 15_000L)
+            backoff = if (linked) 2_000L else nextBackoff(backoff)
+            // Grows to 5 min while the Mac stays unreachable (a sleeping Mac must not cost battery all night);
+            // any network change, foreground ([wake]) or other wake trigger resets it to 2 s below.
             // Interruptible: Wi-Fi coming back is exactly the moment the Mac
             // becomes reachable again, and waiting out the rest of a 15s
             // backoff to discover that is the difference between a reconnect
@@ -771,7 +794,7 @@ object ConnectionManager {
 
     /** Auto mode (+ "Display over other apps") launches the consent flow directly with no
      *  tap on the phone; otherwise it posts a tappable notification. */
-    private fun launchMirror(source: String, facing: Int) {
+    internal fun launchMirror(source: String, facing: Int) {
         val auto = Prefs.autoMirror(appCtx) && android.provider.Settings.canDrawOverlays(appCtx)
         if (auto) MirrorPermissionActivity.start(appCtx, source, facing)
         else MirrorPermissionActivity.request(appCtx, source, facing)
@@ -873,275 +896,34 @@ object ConnectionManager {
                 reply(link, out)
                 lastEvent.value = if (r?.ok == true) "open → app" else "open failed"
             }
-            "sms-threads" -> respond(link, msg, "sms-threads") {
-                it.put("threads", SmsRepo.threads(appCtx))
+            else -> {
+                val type = msg.optString("type")
+                // Each feature owns its message types; the first to claim one handles it.
+                MessagingHandlers.handle(link, msg, type) || FileHandlers.handle(link, msg, type) ||
+                    MacFsHandlers.handle(msg, type) || CallHandlers.handle(link, msg, type) ||
+                    AppsMediaHandlers.handle(link, msg, type) || MirrorHandlers.handle(link, msg, type)
             }
-            "sms-messages" -> respond(link, msg, "sms-messages") {
-                val tid = msg.optLong("threadId")
-                val (address, messages) = SmsRepo.messages(appCtx, tid, if (link.kind == LinkKind.BLE) 50 else 60)
-                it.put("threadId", tid).put("address", address).put("messages", messages)
-            }
-            "sms-send" -> respond(link, msg, "sms-send") {
-                SmsRepo.send(appCtx, msg.optString("address"), msg.optString("text"))
-                it.put("ok", true)
-            }
-            "contacts" -> respond(link, msg, "contacts") {
-                it.put("contacts", ContactsRepo.list(appCtx))
-            }
-            "fs-list" -> respond(link, msg, "fs-list") {
-                it.put("entries", FileRepo.list(msg.optString("path")))
-            }
-            "fs-delete" -> respond(link, msg, "fs-delete") {
-                FileRepo.delete(msg.optString("path"))
-                it.put("ok", true)
-            }
-            // MKCOL from the Finder mount. The only write the mount
-            // needed that had no phone-side operation already.
-            "fs-mkdir" -> respond(link, msg, "fs-mkdir") {
-                it.put("path", FileRepo.mkdir(msg.optString("path"), msg.optString("name")))
-            }
-            "fs-rename" -> respond(link, msg, "fs-rename") {
-                val newPath = FileRepo.rename(msg.optString("path"), msg.optString("newName"))
-                it.put("ok", true).put("newPath", newPath)
-            }
-            "fs-pull", "fs-push-begin", "fs-push-done", "fs-cancel",
-            "phone-push", "phone-push-result" ->
-                TransferManager.onControl(msg)
-            "mac-fs-list-result", "mac-fs-list-error", "mac-fs-pull-begin" -> {
-                pendingMacFs.remove(msg.optString("reqId"))?.complete(msg)
-            }
-            // Mac apps ride the same pending registry as mac-fs: both are
-            // phone-initiated requests to the Mac, keyed by our own reqId.
-            "mac-apps-list", "mac-app-launch" -> {
-                pendingMacFs.remove(msg.optString("reqId"))?.complete(msg)
-            }
-            "mac-fs-pull-done" -> TransferManager.onMacFsPullControl(msg)
-            "mac-fs-pull-error" -> {
-                // Arrives either before a transfer begins (still in this registry,
-                // e.g. a bad path) or mid-transfer after mac-fs-pull-begin already
-                // handed off to TransferManager — the message has no transferId to
-                // tell us which, so check both in order.
-                val pending = pendingMacFs.remove(msg.optString("reqId"))
-                if (pending != null) pending.complete(msg)
-                else TransferManager.onMacFsPullControl(msg)
-            }
-            "photos-list" -> respond(link, msg, "photos-list") {
-                it.put("items", PhotoRepo.list(appCtx, msg.optInt("offset", 0), msg.optInt("limit", 500)))
-            }
-            "photo-thumb" -> {
-                val reqId = msg.optInt("reqId")
-                val id = msg.optLong("id")
-                val kind = msg.optString("kind", "image")
-                scope.launch {
-                    try {
-                        TransferManager.sendThumb(reqId, PhotoRepo.thumbBytes(appCtx, id, kind))
-                    } catch (e: Exception) {
-                        reply(
-                            link,
-                            JSONObject().put("type", "photo-thumb-error")
-                                .put("reqId", reqId).put("error", e.message ?: "thumb failed")
-                        )
-                    }
-                }
-            }
-            "action-call" -> {
-                val number = msg.optString("number")
-                if (number.isNotEmpty()) {
-                    val canCall = appCtx.checkSelfPermission(
-                        android.Manifest.permission.CALL_PHONE
-                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                    // place the call directly if allowed, else just open the dialer
-                    val action = if (canCall) Intent.ACTION_CALL else Intent.ACTION_DIAL
-                    val intent = Intent(action).setData(Uri.parse("tel:$number"))
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    // Arm before starting: on a fast dial the OFFHOOK
-                    // broadcast can beat us back here, and an unarmed
-                    // receiver drops it as a call the Mac never knew
-                    // about — leaving the Mac stuck on "Calling…".
-                    if (canCall) CallReceiver.armOutgoing(appCtx, number)
-                    runCatching { appCtx.startActivity(intent) }
-                }
-            }
-            // Answer / hang up / mute / speaker for the current call.
-            // Replies with the audio state the device really ended up in
-            // rather than the state that was asked for — see CallControl.
-            "call-action" -> respond(link, msg, "call-action-result") {
-                val action = msg.optString("action")
-                require(action in CallControl.ACTIONS) { "unknown call action" }
-                val on = if (msg.has("on")) msg.optBoolean("on") else null
-                val outcome = CallControl.perform(appCtx, action, on)
-                it.put("ok", outcome.ok)
-                outcome.error?.let { e -> it.put("error", e) }
-                outcome.muted?.let { m -> it.put("muted", m) }
-                outcome.speaker?.let { sp -> it.put("speaker", sp) }
-            }
-            // Find the phone. `on:false` stops it; the phone also stops
-            // itself after a minute and from its own notification, so a
-            // Mac that walks out of range can't leave it ringing.
-            "ring" -> respond(link, msg, "ring") {
-                val on = msg.optBoolean("on", true)
-                if (on) {
-                    Ringer.start(appCtx, msg.optInt("seconds", Ringer.DEFAULT_SECONDS))
-                        .getOrThrow()
-                } else {
-                    Ringer.stop(appCtx)
-                }
-                it.put("ringing", Ringer.ringing)
-            }
-            // Every grant this app needs, and what breaks without each —
-            // see PermissionHealth. Answered on demand rather than
-            // pushed: the probes are binder round trips, and nothing
-            // needs them until a Mac has the panel open.
-            "health" -> respond(link, msg, "health") {
-                it.put("items", PermissionHealth.snapshot(appCtx))
-            }
-            // Take the user to the screen that fixes one of them. The
-            // result distinguishes "opened it" from "left a
-            // notification", because a phone that cannot start
-            // activities from the background can only do the latter and
-            // the Mac must not claim otherwise.
-            "health-fix" -> respond(link, msg, "health-fix") {
-                it.put("result", PermissionHealth.openFix(appCtx, msg.optString("id")))
-            }
-            "action-sms" -> {
-                val number = msg.optString("number")
-                if (number.isNotEmpty()) {
-                    val intent = Intent(Intent.ACTION_SENDTO).setData(Uri.parse("smsto:$number"))
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    runCatching { appCtx.startActivity(intent) }
-                }
-            }
-            "media-cmd" -> MediaRemote.command(msg.optString("cmd"), msg.optInt("value"))
-            // ── Tier B: wallpaper / apps ─────────────────────────────
-            "wallpaper" -> respond(link, msg, "wallpaper") {
-                it.put(
-                    "data",
-                    android.util.Base64.encodeToString(
-                        WallpaperRepo.bytes(appCtx), android.util.Base64.NO_WRAP
-                    )
+        }
+    }
+
+    /** Completes the pending phone-initiated Mac request (mac-fs-*, Mac apps) this reply answers; false if none. */
+    internal fun completePendingMacFs(msg: JSONObject): Boolean {
+        val pending = pendingMacFs.remove(msg.optString("reqId")) ?: return false
+        pending.complete(msg)
+        return true
+    }
+
+    /** Sends a thumbnail/icon binary frame for [reqId] from IO; on failure replies `<type>` with the error. */
+    internal fun thumbAsync(link: Link, reqId: Long, errType: String, fallback: String, bytes: () -> ByteArray) {
+        scope.launch {
+            try {
+                TransferManager.sendThumb(reqId, bytes())
+            } catch (e: Exception) {
+                reply(
+                    link,
+                    JSONObject().put("type", errType).put("reqId", reqId).put("error", e.message ?: fallback)
                 )
             }
-            "screenshot" -> {
-                val reqId = msg.optLong("reqId")
-                AccessibilityControl.takeScreenshot { png, err ->
-                    val out = ScreenshotReply.build(reqId, png, err)
-                    // A refused send (outbound queue full) used to vanish and the
-                    // Mac waited out its 20 s timeout; say why instead.
-                    if (!reply(link, out) && !out.has("error")) {
-                        reply(link, ScreenshotReply.build(reqId, null, "Screenshot too large to send; try again"))
-                    }
-                }
-            }
-            "apps-list" -> respond(link, msg, "apps-list") {
-                it.put("apps", AppsRepo.list(appCtx))
-            }
-            "app-icon" -> {
-                // Same shape as photo-thumb: the icon rides the existing
-                // KIND_THUMB binary frame keyed by reqId, so no new
-                // transport is introduced for it.
-                val reqId = msg.optInt("reqId")
-                val pkg = msg.optString("pkg")
-                scope.launch {
-                    try {
-                        TransferManager.sendThumb(reqId, AppsRepo.iconBytes(appCtx, pkg))
-                    } catch (e: Exception) {
-                        reply(
-                            link,
-                            JSONObject().put("type", "app-icon-error")
-                                .put("reqId", reqId)
-                                .put("error", e.message ?: "icon failed")
-                        )
-                    }
-                }
-            }
-            "app-launch" -> {
-                val pkg = msg.optString("pkg")
-                if (pkg.isNotEmpty()) {
-                    val ok = AppsRepo.launch(appCtx, pkg)
-                    lastEvent.value = if (ok) "opened $pkg" else "could not open $pkg"
-                }
-            }
-            "mirror-start" -> {
-                // Additive fields — a Mac that predates them sends none
-                // and the service keeps its own defaults.
-                MirrorService.setQuality(
-                    msg.optInt("bitrate"), msg.optInt("fps"), msg.optInt("maxSize")
-                )
-                MirrorService.setCodec(msg.optString("codec"))
-                MirrorService.setAudio(msg.optBoolean("audio"))
-                val inst = MirrorService.instance
-                if (inst != null && inst.isScreenAlive()) inst.resumeStreaming()
-                else launchMirror(
-                    "screen", android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
-                )
-            }
-            "mirror-pause" -> MirrorService.instance?.pauseVideo()
-            "mirror-resume" -> MirrorService.instance?.resumeVideo()
-            "mirror-stop", "camera-stop" -> {
-                // Always fully stop so the phone clears its cast/screen-share
-                // notification. In Auto mode the next mirror-start will re-show
-                // the system consent dialog directly (no notification needed).
-                MirrorService.stop(appCtx)
-            }
-            "camera-start" -> {
-                MirrorService.setQuality(
-                    msg.optInt("bitrate"), msg.optInt("fps"), msg.optInt("maxSize")
-                )
-                MirrorService.setCodec(msg.optString("codec"))
-                MirrorService.setAudio(false)
-                val facing = if (msg.optString("facing") == "front")
-                    android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT
-                else
-                    android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
-                launchMirror("camera", facing)
-            }
-            "camera-flip" -> {
-                val facing = if (msg.optString("facing") == "front")
-                    android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT
-                else
-                    android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
-                MirrorService.instance?.flip(facing)
-            }
-            // Screen control. All four need the accessibility service;
-            // without it they no-op silently, so tell the Mac once
-            // rather than letting the user keep clicking at a live
-            // video that never responds.
-            "mirror-tap", "mirror-swipe", "mirror-key", "mirror-text" ->
-                // Lock is the one action with a second route. Device
-                // admin's `lockNow()` needs no accessibility service,
-                // which is what keeps the Mac's Lock button alive for
-                // anyone who has to keep accessibility off for their
-                // banking apps. Tried first; falls through to the
-                // accessibility path when the admin isn't granted.
-                if (msg.optString("type") == "mirror-key" &&
-                    msg.optString("key") == "lock" &&
-                    LockAdmin.lock(appCtx)
-                ) {
-                    lastEvent.value = "locked by Mac"
-                } else if (!AccessibilityControl.available()) {
-                    reportControlUnavailable(
-                        link,
-                        // A failed Lock has a fix the others don't:
-                        // grant device admin and it stops needing the
-                        // accessibility service at all. Worth naming,
-                        // since this is the button people reach for
-                        // *because* they keep accessibility off.
-                        wasLock = msg.optString("type") == "mirror-key" &&
-                            msg.optString("key") == "lock"
-                    )
-                } else when (msg.optString("type")) {
-                    "mirror-tap" -> AccessibilityControl.tap(msg.optDouble("x"), msg.optDouble("y"))
-                    "mirror-swipe" -> AccessibilityControl.swipe(
-                        msg.optDouble("x1"), msg.optDouble("y1"),
-                        msg.optDouble("x2"), msg.optDouble("y2"), msg.optInt("dur", 120)
-                    )
-                    "mirror-key" -> AccessibilityControl.key(msg.optString("key"))
-                    "mirror-text" -> when (msg.optString("op")) {
-                        "backspace" -> AccessibilityControl.backspace()
-                        "enter" -> AccessibilityControl.typeText("\n")
-                        else -> AccessibilityControl.typeText(msg.optString("text"))
-                    }
-                }
         }
     }
 
@@ -1160,7 +942,7 @@ object ConnectionManager {
 
     /** Reply on a specific socket (the listener has `webSocket` in hand before
      *  `ws` is even assigned), still honouring the session key. */
-    private fun reply(link: Link, obj: JSONObject): Boolean {
+    internal fun reply(link: Link, obj: JSONObject): Boolean {
         if (link.sendJson(obj)) return true
         // Too big for Bluetooth: say so instead of leaving the request to time out (BLE-DESIGN §2.2).
         if (link.kind == LinkKind.BLE && obj.has("reqId") && !obj.has("error")) {
@@ -1187,7 +969,7 @@ object ConnectionManager {
      * a permission they already granted is worse than saying nothing. The field
      * is optional — an older Mac ignores it and shows its generic text.
      */
-    private fun reportControlUnavailable(link: Link, wasLock: Boolean = false) {
+    internal fun reportControlUnavailable(link: Link, wasLock: Boolean = false) {
         val now = android.os.SystemClock.elapsedRealtime()
         if (now - lastControlWarnAt < 5_000) return
         lastControlWarnAt = now
@@ -1340,7 +1122,23 @@ object ConnectionManager {
     }
 
     /** Replies to a reqId-tagged request from the Mac, converting failures into readable errors. */
-    private fun respond(link: Link, req: JSONObject, type: String, build: (JSONObject) -> Unit) {
+    /** [respond] on the IO scope, for handlers that can take long (contacts, SMS, file listings, ...):
+     *  OkHttp delivers every message on one reader thread, and blocking it stalls pings and touch. The
+     *  reply still carries the request's `reqId` (it is read from [req] inside [respond]). */
+    /** All fs-* operations run here, one at a time, so their effects keep the order the Mac sent them in
+     *  (a list after a delete must see the delete) while staying off OkHttp's reader thread. */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val fsDispatcher = Dispatchers.IO.limitedParallelism(1)
+
+    internal fun respondFs(link: Link, req: JSONObject, type: String, build: (JSONObject) -> Unit) {
+        scope.launch(fsDispatcher) { respond(link, req, type, build) }
+    }
+
+    internal fun respondAsync(link: Link, req: JSONObject, type: String, build: (JSONObject) -> Unit) {
+        scope.launch { respond(link, req, type, build) }
+    }
+
+    internal fun respond(link: Link, req: JSONObject, type: String, build: (JSONObject) -> Unit) {
         val out = JSONObject().put("type", type).put("reqId", req.optLong("reqId"))
         runCatching { build(out) }.onFailure { e ->
             out.put(
@@ -1822,7 +1620,7 @@ object ConnectionManager {
         withContext(Dispatchers.IO) { java.net.DatagramSocket().use { socket ->
             socket.broadcast = true
             socket.soTimeout = 1500
-            val payload = "DROIDDOCK:DISCOVER:$token".toByteArray()
+            val payload = DiscoveryAuth.payload(token)
             val targets = listOf(java.net.InetAddress.getByName("255.255.255.255")) +
                 LanAddrs.broadcastAddresses()
             for (t in targets) {

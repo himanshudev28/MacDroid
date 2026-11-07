@@ -31,7 +31,7 @@ class CallReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         if (intent.action != TelephonyManager.ACTION_PHONE_STATE_CHANGED) return
         val app = ctx.applicationContext
-        ConnectionManager.ensureLoop(app)
+        ConnectionManager.wake(app)
 
         // An internet call's notification already drives the Mac (VoipCalls): don't announce it twice,
         // and never with an empty "?" caller.
@@ -57,19 +57,35 @@ class CallReceiver : BroadcastReceiver() {
                 }
                 announced = true
                 lastState = TelephonyManager.EXTRA_STATE_RINGING
-                if (number.isNotEmpty()) {
-                    lastNumber = number
-                    lastName = SmsRepo.name(app, number) ?: ""
-                }
-                ConnectionManager.send(payload(app, "ringing"))
+                lastNumber = number
+                lastName = ""
+                // The contact lookup is a ContentResolver query: keep it off the main thread.
+                val pending = goAsync()
+                Thread({
+                    try {
+                        val name = runCatching { SmsRepo.name(app, number) }.getOrNull() ?: ""
+                        // A newer call/idle may have superseded this one while we looked.
+                        if (lastNumber == number) lastName = name
+                        // Only if the call is still ringing: OFFHOOK may have sent "active" meanwhile.
+                        synchronized(stateLock) {
+                            if (announced && lastNumber == number && lastState == TelephonyManager.EXTRA_STATE_RINGING) {
+                                ConnectionManager.send(payload(app, "ringing"))
+                            }
+                        }
+                    } finally {
+                        pending.finish()
+                    }
+                }, "call-name").start()
             }
 
             TelephonyManager.EXTRA_STATE_OFFHOOK -> {
                 // Dual-SIM devices and some OEM stacks repeat OFFHOOK; the Mac
                 // would restart its call timer on every repeat.
                 if (!announced || lastState == TelephonyManager.EXTRA_STATE_OFFHOOK) return
-                lastState = TelephonyManager.EXTRA_STATE_OFFHOOK
-                ConnectionManager.send(payload(app, "active"))
+                synchronized(stateLock) {
+                    lastState = TelephonyManager.EXTRA_STATE_OFFHOOK
+                    ConnectionManager.send(payload(app, "active"))
+                }
             }
 
             TelephonyManager.EXTRA_STATE_IDLE -> {
@@ -88,6 +104,7 @@ class CallReceiver : BroadcastReceiver() {
         @Volatile private var lastNumber = ""
         @Volatile private var lastName = ""
         @Volatile private var lastState = ""
+        private val stateLock = Any()
 
         /**
          * Tell this receiver that the Mac just placed a call, so the `OFFHOOK`
@@ -102,7 +119,12 @@ class CallReceiver : BroadcastReceiver() {
             announced = true
             lastState = ""
             lastNumber = number
-            lastName = runCatching { SmsRepo.name(ctx, number) }.getOrNull().orEmpty()
+            lastName = ""
+            // Called from the link's reader thread: look the name up elsewhere.
+            Thread({
+                val name = runCatching { SmsRepo.name(ctx, number) }.getOrNull().orEmpty()
+                if (lastNumber == number) lastName = name
+            }, "call-name").start()
         }
 
         /**

@@ -147,9 +147,9 @@ class TlsAddressBookTest {
     }
 
     @Test
-    fun `a QR scan without fp clears the stored pin`() {
+    fun `a QR scan without fp never downgrades the stored pin`() {
         val out = mergePairing(listOf(dev(fpA, seen = 9)), Pairing(listOf("10.0.0.9"), 48484, "tok", "Mac", null), authoritative = true).single()
-        assertNull(out.fp)
+        assertEquals(fpA, out.fp)
         assertEquals(9L, out.lastSeenAt)
     }
 
