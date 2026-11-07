@@ -8,6 +8,20 @@ to a generic body.
 
 ---
 
+## v3.6.2
+
+Update both apps: the new trackpad gestures need 3.6.2 on the Mac and on the phone.
+
+**Your Mac, on your phone: a better remote**
+- **Hold the arrow keys.** Holding an arrow on the D-pad now keeps moving, like a real keyboard,
+  until you let go. Before, a hold moved only once.
+- **Two-finger scroll.** Drag with two fingers on the trackpad to scroll on the Mac, smoothly.
+- **Two-finger tap** right-clicks.
+- **Three-finger swipes.** Up opens Mission Control, down shows the app's windows, left and
+  right switch desktops. They use the Mac's standard Control-arrow shortcuts.
+- **Pinch** to zoom in and out.
+- A hint under the trackpad lists the gestures. Older Macs get scrolling and right-click only.
+
 ## v3.6.1
 
 Update both apps: the USB link needs 3.6.1 on the Mac and on the phone.
