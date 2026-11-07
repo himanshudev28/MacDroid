@@ -2,6 +2,8 @@
 package com.droiddock.app.i18n
 
 internal val extra_zh: Map<String, String> = mapOf(
+    "2 fingers: scroll · tap for right-click" to "双指：滚动 · 轻点右键",
+    "2 fingers: scroll · tap for right-click · 3 fingers: Mission Control & desktops · pinch: zoom" to "双指：滚动 · 轻点右键 · 三指：调度中心和桌面 · 捏合：缩放",
     "4 tabs" to "4 个标签页",
     "A home hub of tiles, no tab bar" to "磁贴式主页中心，无标签栏",
     "A link asked DroidDock to pair with the Mac below. Only continue if you started this from your own Mac." to "有链接请求 DroidDock 与下面的 Mac 配对。只有在你自己从 Mac 上发起时才继续。",

@@ -218,5 +218,7 @@
   "Couldn't open {label}": "No se pudo abrir {label}",
   "Saved to Downloads": "Guardado en Descargas",
   "Pull failed": "Error al descargar",
-  "Connected · USB": "Conectado · USB"
+  "Connected · USB": "Conectado · USB",
+  "2 fingers: scroll · tap for right-click · 3 fingers: Mission Control & desktops · pinch: zoom": "2 dedos: desplazar · toca para clic derecho · 3 dedos: Mission Control y escritorios · pellizcar: zoom",
+  "2 fingers: scroll · tap for right-click": "2 dedos: desplazar · toca para clic derecho"
 }

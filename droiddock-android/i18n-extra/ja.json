@@ -218,5 +218,7 @@
   "Couldn't open {label}": "{label} を開けませんでした",
   "Saved to Downloads": "ダウンロードに保存しました",
   "Pull failed": "取得に失敗しました",
-  "Connected · USB": "接続済み · USB"
+  "Connected · USB": "接続済み · USB",
+  "2 fingers: scroll · tap for right-click · 3 fingers: Mission Control & desktops · pinch: zoom": "2本指：スクロール · タップで右クリック · 3本指：Mission Control とデスクトップ · ピンチ：ズーム",
+  "2 fingers: scroll · tap for right-click": "2本指：スクロール · タップで右クリック"
 }

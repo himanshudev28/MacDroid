@@ -2,6 +2,8 @@
 package com.droiddock.app.i18n
 
 internal val extra_it: Map<String, String> = mapOf(
+    "2 fingers: scroll · tap for right-click" to "2 dita: scorri · tocca per clic destro",
+    "2 fingers: scroll · tap for right-click · 3 fingers: Mission Control & desktops · pinch: zoom" to "2 dita: scorri · tocca per clic destro · 3 dita: Mission Control e scrivanie · pizzica: zoom",
     "4 tabs" to "4 schede",
     "A home hub of tiles, no tab bar" to "Una home a riquadri, senza barra delle schede",
     "A link asked DroidDock to pair with the Mac below. Only continue if you started this from your own Mac." to "Un link ha chiesto a DroidDock di associarsi al Mac qui sotto. Continua solo se l'hai avviato tu dal tuo Mac.",

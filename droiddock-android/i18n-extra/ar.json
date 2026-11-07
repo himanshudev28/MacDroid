@@ -218,5 +218,7 @@
   "Couldn't open {label}": "تعذّر فتح {label}",
   "Saved to Downloads": "تم الحفظ في التنزيلات",
   "Pull failed": "فشل الجلب",
-  "Connected · USB": "متصل · بلوتوث"
+  "Connected · USB": "متصل · بلوتوث",
+  "2 fingers: scroll · tap for right-click · 3 fingers: Mission Control & desktops · pinch: zoom": "إصبعان: تمرير · نقرة لنقر يمين · 3 أصابع: Mission Control وأسطح المكتب · قرص: تكبير",
+  "2 fingers: scroll · tap for right-click": "إصبعان: تمرير · نقرة لنقر يمين"
 }

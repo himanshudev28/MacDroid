@@ -218,5 +218,7 @@
   "Couldn't open {label}": "無法開啟 {label}",
   "Saved to Downloads": "已儲存到「下載」",
   "Pull failed": "拉取失敗",
-  "Connected · USB": "已連線 · 藍牙"
+  "Connected · USB": "已連線 · 藍牙",
+  "2 fingers: scroll · tap for right-click · 3 fingers: Mission Control & desktops · pinch: zoom": "雙指：捲動 · 輕點右鍵 · 三指：調度中心與桌面 · 捏合：縮放",
+  "2 fingers: scroll · tap for right-click": "雙指：捲動 · 輕點右鍵"
 }

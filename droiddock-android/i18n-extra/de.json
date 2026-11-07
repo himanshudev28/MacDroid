@@ -218,5 +218,7 @@
   "Couldn't open {label}": "{label} konnte nicht geöffnet werden",
   "Saved to Downloads": "In Downloads gespeichert",
   "Pull failed": "Abruf fehlgeschlagen",
-  "Connected · USB": "Verbunden · USB"
+  "Connected · USB": "Verbunden · USB",
+  "2 fingers: scroll · tap for right-click · 3 fingers: Mission Control & desktops · pinch: zoom": "2 Finger: scrollen · Tippen für Rechtsklick · 3 Finger: Mission Control & Schreibtische · Zoomen: Pinch",
+  "2 fingers: scroll · tap for right-click": "2 Finger: scrollen · Tippen für Rechtsklick"
 }

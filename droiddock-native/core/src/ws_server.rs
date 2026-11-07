@@ -1965,6 +1965,7 @@ pub fn feature_caps(app: &AppHandle) -> Vec<String> {
     if crate::mac_remote::enabled(app) {
         caps.push(crate::mac_remote::CAP.to_string());
         caps.push(crate::mac_remote::CAP_DRAG.to_string());
+        caps.push(crate::mac_remote::CAP_GESTURES.to_string());
     }
     // Absolute brightness slider: same authority as the rest of remote control,
     // and only when the built-in display can actually be read.

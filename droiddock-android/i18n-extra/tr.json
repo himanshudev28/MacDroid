@@ -218,5 +218,7 @@
   "Couldn't open {label}": "{label} açılamadı",
   "Saved to Downloads": "İndirilenler'e kaydedildi",
   "Pull failed": "Alınamadı",
-  "Connected · USB": "Bağlı · USB"
+  "Connected · USB": "Bağlı · USB",
+  "2 fingers: scroll · tap for right-click · 3 fingers: Mission Control & desktops · pinch: zoom": "2 parmak: kaydır · dokun: sağ tık · 3 parmak: Mission Control ve masaüstleri · çimdik: yakınlaştır",
+  "2 fingers: scroll · tap for right-click": "2 parmak: kaydır · dokun: sağ tık"
 }

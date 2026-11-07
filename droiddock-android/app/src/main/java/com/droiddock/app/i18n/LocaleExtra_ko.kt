@@ -2,6 +2,8 @@
 package com.droiddock.app.i18n
 
 internal val extra_ko: Map<String, String> = mapOf(
+    "2 fingers: scroll · tap for right-click" to "두 손가락: 스크롤 · 탭하면 오른쪽 클릭",
+    "2 fingers: scroll · tap for right-click · 3 fingers: Mission Control & desktops · pinch: zoom" to "두 손가락: 스크롤 · 탭하면 오른쪽 클릭 · 세 손가락: Mission Control 및 데스크탑 · 핀치: 확대/축소",
     "4 tabs" to "탭 4개",
     "A home hub of tiles, no tab bar" to "탭 바 없이 타일로 구성된 홈 허브",
     "A link asked DroidDock to pair with the Mac below. Only continue if you started this from your own Mac." to "링크가 DroidDock에 아래 Mac과 페어링하도록 요청했습니다. 직접 Mac에서 시작한 경우에만 계속하세요.",

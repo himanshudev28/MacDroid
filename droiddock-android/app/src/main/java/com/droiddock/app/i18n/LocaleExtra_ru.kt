@@ -2,6 +2,8 @@
 package com.droiddock.app.i18n
 
 internal val extra_ru: Map<String, String> = mapOf(
+    "2 fingers: scroll · tap for right-click" to "2 пальца: прокрутка · касание: правый клик",
+    "2 fingers: scroll · tap for right-click · 3 fingers: Mission Control & desktops · pinch: zoom" to "2 пальца: прокрутка · касание: правый клик · 3 пальца: Mission Control и рабочие столы · щипок: масштаб",
     "4 tabs" to "4 вкладки",
     "A home hub of tiles, no tab bar" to "Главная с плитками, без панели вкладок",
     "A link asked DroidDock to pair with the Mac below. Only continue if you started this from your own Mac." to "Ссылка просит DroidDock подключиться к указанному ниже Mac. Продолжайте, только если вы сами запустили это на своём Mac.",

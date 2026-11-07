@@ -218,5 +218,7 @@
   "Couldn't open {label}": "Không thể mở {label}",
   "Saved to Downloads": "Đã lưu vào Tải xuống",
   "Pull failed": "Tải về thất bại",
-  "Connected · USB": "Đã kết nối · USB"
+  "Connected · USB": "Đã kết nối · USB",
+  "2 fingers: scroll · tap for right-click · 3 fingers: Mission Control & desktops · pinch: zoom": "2 ngón: cuộn · chạm để nhấp chuột phải · 3 ngón: Mission Control và màn hình nền · chụm: thu phóng",
+  "2 fingers: scroll · tap for right-click": "2 ngón: cuộn · chạm để nhấp chuột phải"
 }

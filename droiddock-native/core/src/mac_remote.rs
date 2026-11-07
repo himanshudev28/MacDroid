@@ -36,6 +36,10 @@ pub const CAP: &str = "remote";
 /// has never heard of it just never sends the message.
 pub const CAP_DRAG: &str = "remotedrag";
 
+/// Advertised alongside `remote`: the Mac understands `{"type":"remote","action":"gesture","name":…}`
+/// and smooth pixel `mouse_scroll`. Additive.
+pub const CAP_GESTURES: &str = "remotegestures";
+
 /// A held mouse button with no phone activity for this long is released.
 pub const HOLD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -224,9 +228,15 @@ pub fn on_message(app: &AppHandle, raw: &Value) {
             }
         }
         "mouse_scroll" => {
-            let dx = num(raw, "dx").unwrap_or(0.0) as i32;
-            let dy = num(raw, "dy").unwrap_or(0.0) as i32;
-            imp::scroll(dx, dy);
+            // Pixels, in the direction the content should move (it follows the fingers).
+            imp::scroll(clamp_scroll(num(raw, "dx")), clamp_scroll(num(raw, "dy")));
+        }
+        "gesture" => {
+            if let Some((code, mods)) = raw.get("name").and_then(Value::as_str).and_then(gesture_keys) {
+                if GESTURE_LIMIT.lock().unwrap_or_else(|e| e.into_inner()).allow(std::time::Instant::now()) {
+                    imp::key_with(code, mods);
+                }
+            }
         }
         "key" => {
             if let Some(name) = raw.get("key").and_then(Value::as_str) {
@@ -370,6 +380,62 @@ fn keycode(name: &str) -> Option<u16> {
     })
 }
 
+/// Modifier bits for [`gesture_keys`] (kept platform-neutral so the table is testable).
+/// The device flags a physical key implies: arrows (123–126) carry Fn | NumericPad, F-keys carry Fn.
+#[cfg(target_os = "macos")]
+fn implied_key_flags(code: u16) -> objc2_core_graphics::CGEventFlags {
+    use objc2_core_graphics::CGEventFlags;
+    match code {
+        123..=126 => CGEventFlags::MaskSecondaryFn | CGEventFlags::MaskNumericPad,
+        96..=111 | 118 | 120 | 122 => CGEventFlags::MaskSecondaryFn, // F1–F12 key codes
+        _ => CGEventFlags(0),
+    }
+}
+
+const MOD_CTRL: u8 = 1;
+const MOD_CMD: u8 = 2;
+
+/// Named trackpad-style gestures → the default macOS shortcut (virtual key code, modifiers).
+/// Named verbs only: the phone can never send an arbitrary key combo.
+fn gesture_keys(name: &str) -> Option<(u16, u8)> {
+    Some(match name {
+        "mission_control" => (126, MOD_CTRL), // ⌃↑
+        "app_expose" => (125, MOD_CTRL),      // ⌃↓
+        "space_left" => (123, MOD_CTRL),      // ⌃←
+        "space_right" => (124, MOD_CTRL),     // ⌃→
+        "show_desktop" => (103, 0),           // F11
+        "zoom_in" => (24, MOD_CMD),           // ⌘=
+        "zoom_out" => (27, MOD_CMD),          // ⌘-
+        "app_switcher" => (48, MOD_CMD),      // ⌘⇥
+        _ => return None,
+    })
+}
+
+/// Gestures are limited to about 5 per second.
+struct GestureLimit(Option<std::time::Instant>);
+
+impl GestureLimit {
+    const MIN_GAP: std::time::Duration = std::time::Duration::from_millis(200);
+
+    fn allow(&mut self, now: std::time::Instant) -> bool {
+        if self.0.is_some_and(|t| now.saturating_duration_since(t) < Self::MIN_GAP) {
+            return false;
+        }
+        self.0 = Some(now);
+        true
+    }
+}
+
+static GESTURE_LIMIT: std::sync::Mutex<GestureLimit> = std::sync::Mutex::new(GestureLimit(None));
+
+/// Largest scroll per message and axis, in pixels.
+const MAX_SCROLL_PX: f64 = 400.0;
+
+fn clamp_scroll(v: Option<f64>) -> i32 {
+    let v = v.unwrap_or(0.0);
+    if v.is_finite() { v.clamp(-MAX_SCROLL_PX, MAX_SCROLL_PX).round() as i32 } else { 0 }
+}
+
 /// The media half of the allow-list — `NX_KEYTYPE_*` constants from
 /// `IOKit/hidsystem/ev_keymap.h`. These are not virtual key codes and can't be
 /// posted as ordinary key events; see `imp::media_key`.
@@ -455,11 +521,11 @@ mod imp {
     }
 
     pub fn scroll(dx: i32, dy: i32) {
-        // wheel1 is vertical, wheel2 horizontal — line units so the step
-        // matches a real trackpad rather than pixel-scrolling by a huge amount.
+        // wheel1 is vertical, wheel2 horizontal. Pixel units, so two-finger scrolling from the
+        // phone is smooth (the caller clamps each message).
         post(CGEvent::new_scroll_wheel_event2(
             None,
-            CGScrollEventUnit::Line,
+            CGScrollEventUnit::Pixel,
             2,
             dy,
             dx,
@@ -470,6 +536,27 @@ mod imp {
     pub fn key(code: u16) {
         post(CGEvent::new_keyboard_event(None, code, true));
         post(CGEvent::new_keyboard_event(None, code, false));
+    }
+
+    /// A key press with modifiers (`MOD_*` bits), for the named gestures.
+    pub fn key_with(code: u16, mods: u8) {
+        let mut flags = CGEventFlags(0);
+        if mods & super::MOD_CTRL != 0 {
+            flags |= CGEventFlags::MaskControl;
+        }
+        if mods & super::MOD_CMD != 0 {
+            flags |= CGEventFlags::MaskCommand;
+        }
+        // Real arrow keys always carry the Fn + NumericPad flags, and function keys carry Fn. macOS
+        // registers its Mission Control / Spaces shortcuts with them (⌃↑ is stored as 0x840000 =
+        // Control | Fn), so a synthetic ⌃↑ with Control alone never matches the shortcut.
+        flags |= super::implied_key_flags(code);
+        for down in [true, false] {
+            if let Some(ev) = CGEvent::new_keyboard_event(None, code, down) {
+                CGEvent::set_flags(Some(&ev), flags);
+                post(Some(ev));
+            }
+        }
     }
 
     pub fn type_text(text: &str) {
@@ -648,6 +735,7 @@ mod imp {
     pub fn mouse_click(_button: &str) {}
     pub fn scroll(_dx: i32, _dy: i32) {}
     pub fn key(_code: u16) {}
+    pub fn key_with(_code: u16, _mods: u8) {}
     pub fn type_text(_text: &str) {}
     pub fn media_key(_code: i32) {}
     pub fn lock_screen() {}
@@ -693,6 +781,43 @@ static TYPE_BUDGET: std::sync::Mutex<TypeBudget> = std::sync::Mutex::new(TypeBud
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gesture_table_and_unknown_names() {
+        use super::{gesture_keys as g, MOD_CMD, MOD_CTRL};
+        assert_eq!(g("mission_control"), Some((126, MOD_CTRL)));
+        assert_eq!(g("app_expose"), Some((125, MOD_CTRL)));
+        assert_eq!(g("space_left"), Some((123, MOD_CTRL)));
+        assert_eq!(g("space_right"), Some((124, MOD_CTRL)));
+        assert_eq!(g("show_desktop"), Some((103, 0)));
+        assert_eq!(g("zoom_in"), Some((24, MOD_CMD)));
+        assert_eq!(g("zoom_out"), Some((27, MOD_CMD)));
+        assert_eq!(g("app_switcher"), Some((48, MOD_CMD)));
+        for bad in ["", "lock", "cmd+q", "MISSION_CONTROL"] {
+            assert_eq!(g(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn gestures_are_limited_to_about_five_per_second() {
+        use super::GestureLimit;
+        use std::time::{Duration, Instant};
+        let t0 = Instant::now();
+        let mut l = GestureLimit(None);
+        assert!(l.allow(t0));
+        assert!(!l.allow(t0 + Duration::from_millis(100)));
+        assert!(l.allow(t0 + Duration::from_millis(250)));
+    }
+
+    #[test]
+    fn scroll_is_clamped_per_axis() {
+        use super::clamp_scroll as c;
+        assert_eq!(c(Some(10.4)), 10);
+        assert_eq!(c(Some(9999.0)), 400);
+        assert_eq!(c(Some(-9999.0)), -400);
+        assert_eq!(c(None), 0);
+        assert_eq!(c(Some(f64::NAN)), 0);
+    }
+
     #[test]
     fn type_budget_limits_and_refills() {
         use super::TypeBudget;

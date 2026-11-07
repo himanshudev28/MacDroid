@@ -218,5 +218,7 @@
   "Couldn't open {label}": "Impossible d'ouvrir {label}",
   "Saved to Downloads": "Enregistré dans Téléchargements",
   "Pull failed": "Échec du téléchargement",
-  "Connected · USB": "Connecté · USB"
+  "Connected · USB": "Connecté · USB",
+  "2 fingers: scroll · tap for right-click · 3 fingers: Mission Control & desktops · pinch: zoom": "2 doigts : défiler · toucher pour clic droit · 3 doigts : Mission Control et bureaux · pincer : zoom",
+  "2 fingers: scroll · tap for right-click": "2 doigts : défiler · toucher pour clic droit"
 }

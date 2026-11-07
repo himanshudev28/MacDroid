@@ -218,5 +218,7 @@
   "Couldn't open {label}": "Не удалось открыть {label}",
   "Saved to Downloads": "Сохранено в «Загрузки»",
   "Pull failed": "Не удалось скачать",
-  "Connected · USB": "Подключено · USB"
+  "Connected · USB": "Подключено · USB",
+  "2 fingers: scroll · tap for right-click · 3 fingers: Mission Control & desktops · pinch: zoom": "2 пальца: прокрутка · касание: правый клик · 3 пальца: Mission Control и рабочие столы · щипок: масштаб",
+  "2 fingers: scroll · tap for right-click": "2 пальца: прокрутка · касание: правый клик"
 }

@@ -2,6 +2,8 @@
 package com.droiddock.app.i18n
 
 internal val extra_vi: Map<String, String> = mapOf(
+    "2 fingers: scroll · tap for right-click" to "2 ngón: cuộn · chạm để nhấp chuột phải",
+    "2 fingers: scroll · tap for right-click · 3 fingers: Mission Control & desktops · pinch: zoom" to "2 ngón: cuộn · chạm để nhấp chuột phải · 3 ngón: Mission Control và màn hình nền · chụm: thu phóng",
     "4 tabs" to "4 tab",
     "A home hub of tiles, no tab bar" to "Màn hình chính dạng ô, không có thanh tab",
     "A link asked DroidDock to pair with the Mac below. Only continue if you started this from your own Mac." to "Một liên kết yêu cầu DroidDock ghép nối với Mac bên dưới. Chỉ tiếp tục nếu chính bạn đã bắt đầu việc này từ Mac của mình.",

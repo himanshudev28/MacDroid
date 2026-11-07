@@ -218,5 +218,7 @@
   "Couldn't open {label}": "{label} খোলা যায়নি",
   "Saved to Downloads": "ডাউনলোডে সংরক্ষিত হয়েছে",
   "Pull failed": "আনা ব্যর্থ হয়েছে",
-  "Connected · USB": "সংযুক্ত · ব্লুটুথ"
+  "Connected · USB": "সংযুক্ত · ব্লুটুথ",
+  "2 fingers: scroll · tap for right-click · 3 fingers: Mission Control & desktops · pinch: zoom": "২ আঙুল: স্ক্রল · ট্যাপে রাইট-ক্লিক · ৩ আঙুল: Mission Control ও ডেস্কটপ · পিঞ্চ: জুম",
+  "2 fingers: scroll · tap for right-click": "২ আঙুল: স্ক্রল · ট্যাপে রাইট-ক্লিক"
 }

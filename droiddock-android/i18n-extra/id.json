@@ -218,5 +218,7 @@
   "Couldn't open {label}": "Tidak dapat membuka {label}",
   "Saved to Downloads": "Disimpan ke Unduhan",
   "Pull failed": "Gagal mengambil",
-  "Connected · USB": "Terhubung · USB"
+  "Connected · USB": "Terhubung · USB",
+  "2 fingers: scroll · tap for right-click · 3 fingers: Mission Control & desktops · pinch: zoom": "2 jari: gulir · ketuk untuk klik kanan · 3 jari: Mission Control & desktop · cubit: zoom",
+  "2 fingers: scroll · tap for right-click": "2 jari: gulir · ketuk untuk klik kanan"
 }

@@ -218,5 +218,7 @@
   "Couldn't open {label}": "{label}을(를) 열 수 없습니다",
   "Saved to Downloads": "다운로드에 저장됨",
   "Pull failed": "가져오기 실패",
-  "Connected · USB": "연결됨 · 블루투스"
+  "Connected · USB": "연결됨 · 블루투스",
+  "2 fingers: scroll · tap for right-click · 3 fingers: Mission Control & desktops · pinch: zoom": "두 손가락: 스크롤 · 탭하면 오른쪽 클릭 · 세 손가락: Mission Control 및 데스크탑 · 핀치: 확대/축소",
+  "2 fingers: scroll · tap for right-click": "두 손가락: 스크롤 · 탭하면 오른쪽 클릭"
 }

@@ -38,7 +38,11 @@ import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import com.droiddock.app.ui.theme.dockGlow
 import com.droiddock.app.ui.theme.glass.frostActive
@@ -73,6 +77,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.dp
 import com.droiddock.app.ConnectionManager
@@ -103,6 +108,9 @@ internal fun MacRemoteTab(connected: Boolean, previewDrag: Boolean? = null, prev
     // design, but a key's result lands on the Mac, so confirm locally.
     val caps by ConnectionManager.macCaps.collectAsState()
     val dragCap = previewDrag ?: caps.contains("remotedrag")
+    // Three-finger swipes and pinch need a Mac that understands the `gesture` action.
+    val gestureCap = gesturesEnabled(caps)
+    val gestureCapNow by rememberUpdatedState(gestureCap)
     // Hold-button state. `pressed` = a finger is on Hold; `locked` = drag lock.
     // `downSent` is the truth about what the Mac has been told.
     var holdPressed by remember { mutableStateOf(false) }
@@ -162,6 +170,36 @@ internal fun MacRemoteTab(connected: Boolean, previewDrag: Boolean? = null, prev
                     }
                     .pointerInput(connected) {
                         if (!connected) return@pointerInput
+                        // Two-finger scroll / right-click work with any Mac (existing verbs);
+                        // three-finger swipe and pinch only when it advertises "remotegestures".
+                        // Macs with "remotegestures" (3.6.2+) scroll in pixels; older ones read lines.
+                        val lines = LineScroller()
+                        detectTrackpadGestures(
+                            gesturesEnabled = { gestureCapNow },
+                            onScroll = { dx, dy ->
+                                if (gestureCapNow) {
+                                    ConnectionManager.sendRemote("mouse_scroll") {
+                                        it.put("dx", dx.toDouble()).put("dy", dy.toDouble())
+                                    }
+                                } else {
+                                    val (lx, ly) = lines.add(dx, dy)
+                                    if (lx != 0 || ly != 0) ConnectionManager.sendRemote("mouse_scroll") {
+                                        it.put("dx", lx).put("dy", ly)
+                                    }
+                                }
+                            },
+                            onTwoFingerTap = {
+                                haptics.tap()
+                                ConnectionManager.sendRemote("mouse_click") { it.put("button", "right") }
+                            },
+                            onGesture = { name ->
+                                haptics.threshold()
+                                ConnectionManager.sendRemote("gesture") { it.put("name", name) }
+                            },
+                        )
+                    }
+                    .pointerInput(connected) {
+                        if (!connected) return@pointerInput
                         var travelled = 0f
                         detectDragGestures(
                             onDragStart = { travelled = 0f },
@@ -209,6 +247,14 @@ internal fun MacRemoteTab(connected: Boolean, previewDrag: Boolean? = null, prev
                 }
             }
         }
+        val padHint: @Composable () -> Unit = {
+            Text(
+                if (gestureCap) t("2 fingers: scroll · tap for right-click · 3 fingers: Mission Control & desktops · pinch: zoom")
+                else t("2 fingers: scroll · tap for right-click"),
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+            )
+        }
         val hold: @Composable () -> Unit = {
             if (dragCap && connected) {
                 HoldButton(
@@ -239,11 +285,11 @@ internal fun MacRemoteTab(connected: Boolean, previewDrag: Boolean? = null, prev
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(sp.xs)
                 ) {
-                    ArrowKey(Icons.Outlined.KeyboardArrowUp, t("Up"), haptics, "up")
+                    ArrowKey(Icons.Outlined.KeyboardArrowUp, t("Up"), haptics, "up", connected)
                     Row(horizontalArrangement = Arrangement.spacedBy(sp.xs)) {
-                        ArrowKey(Icons.Outlined.KeyboardArrowLeft, t("Left"), haptics, "left")
-                        ArrowKey(Icons.Outlined.KeyboardArrowDown, t("Down"), haptics, "down")
-                        ArrowKey(Icons.Outlined.KeyboardArrowRight, t("Right"), haptics, "right")
+                        ArrowKey(Icons.Outlined.KeyboardArrowLeft, t("Left"), haptics, "left", connected)
+                        ArrowKey(Icons.Outlined.KeyboardArrowDown, t("Down"), haptics, "down", connected)
+                        ArrowKey(Icons.Outlined.KeyboardArrowRight, t("Right"), haptics, "right", connected)
                     }
                 }
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(sp.xs)) {
@@ -296,6 +342,7 @@ internal fun MacRemoteTab(connected: Boolean, previewDrag: Boolean? = null, prev
                 Column(Modifier.weight(1.15f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(sp.s)) {
                     hint()
                     pad(Modifier.fillMaxWidth().weight(1f))
+                    padHint()
                 }
                 Column(
                     Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
@@ -311,6 +358,7 @@ internal fun MacRemoteTab(connected: Boolean, previewDrag: Boolean? = null, prev
                 hint()
                 // The trackpad takes all the slack, floored at a size worth dragging on.
                 pad(Modifier.fillMaxWidth().weight(1f).heightIn(min = 240.dp))
+                padHint()
                 hold()
                 keys()
                 typing()
@@ -336,13 +384,49 @@ internal fun RemoteKey(label: String, modifier: Modifier = Modifier, feel: () ->
     )
 }
 
+/**
+ * A d-pad arrow that repeats while held: one `key` on press, then every [KeyRepeat.INTERVAL_MS]
+ * after [KeyRepeat.DELAY_MS], until release, cancel, leaving composition or the link dropping.
+ * Touch is handled on the Initial pass and consumed, so the button's own click doesn't fire a
+ * second key; the click remains for TalkBack and keyboards.
+ */
 @Composable
-private fun ArrowKey(icon: androidx.compose.ui.graphics.vector.ImageVector, description: String, haptics: DockHaptics, key: String) {
-    DockIconButton(
-        icon = icon,
-        contentDescription = description,
-        onClick = { haptics.longPress(); sendKey(key) },
-    )
+private fun ArrowKey(icon: androidx.compose.ui.graphics.vector.ImageVector, description: String, haptics: DockHaptics, key: String, connected: Boolean) {
+    val linkUp by rememberUpdatedState(connected)
+    Box(
+        Modifier.pointerInput(key) {
+            // One persistent pointer loop tracks the pressed state; the repeat runs as a job that is
+            // cancelled when the last pointer lifts, on cancel, or when this leaves composition.
+            coroutineScope {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    down.consume()
+                    var repeat: Job? = null
+                    try {
+                        if (linkUp) {
+                            haptics.longPress(); sendKey(key)
+                            repeat = launch {
+                                delay(KeyRepeat.DELAY_MS)
+                                while (isActive && linkUp) { sendKey(key); delay(KeyRepeat.INTERVAL_MS) }
+                            }
+                        }
+                        do {
+                            val e = awaitPointerEvent(PointerEventPass.Initial)
+                            e.changes.forEach { it.consume() }
+                        } while (e.changes.any { it.pressed })
+                    } finally {
+                        repeat?.cancel()
+                    }
+                }
+            }
+        }
+    ) {
+        DockIconButton(
+            icon = icon,
+            contentDescription = description,
+            onClick = { if (linkUp) { haptics.longPress(); sendKey(key) } },
+        )
+    }
 }
 
 /**
