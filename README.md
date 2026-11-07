@@ -138,6 +138,7 @@ It's two apps that talk to each other:
 | 📱 | **Device management** | Remembered Macs, Quick Connect, Disconnect, and switching between Macs — discovered over mDNS. |
 | 📜 | **Clipboard history** | This session's clips, both directions. Memory-only and capped on purpose — persisting it would be a plaintext log of passwords and OTPs. |
 | ⚡ | **Quick Settings tiles** | Toggle the connection and the accessibility service straight from the Android shade. |
+| 🔌 | **USB link** | Plug the phone into the Mac (USB debugging on) and DroidDock connects over the cable, even with the phone on another network or with Wi-Fi off. Encrypted, set up automatically, and shown as **USB** in both apps. |
 | 🔑 | **Verification codes** | When a text or app notification carries a one-time code, the Mac offers **Copy code** on the banner, the notification and the list. It can also copy codes for you (off by default) and clear them from the clipboard after a minute. Apps whose previews you hide are skipped, and a copied code is never synced back to the phone. |
 | 🤖 | **Shortcuts & Raycast** | AppleScript commands (ring phone, send clipboard, send files, phone battery, start mirroring, open the command bar, send a text) for Shortcuts' *Run AppleScript* action and Raycast scripts. Sample scripts are in [`droiddock-native/docs/raycast/`](droiddock-native/docs/raycast/). Anything that sends data or rings asks first, and file sends always ask. |
 

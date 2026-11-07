@@ -8,6 +8,28 @@ to a generic body.
 
 ---
 
+## v3.6.1
+
+Update both apps: the USB link needs 3.6.1 on the Mac and on the phone.
+
+**New**
+- **USB link.** With the phone plugged into the Mac and USB debugging on, DroidDock connects
+  over the cable, even when the phone is on another network or has Wi-Fi off. The Mac sets the
+  cable route up by itself, the phone uses it first, and both apps show **USB** as the
+  connection. It is always encrypted: the phone only uses the cable for a Mac it has already
+  paired with securely. Turn it off in Settings › Connection › Connection mode.
+
+**Bluetooth fallback**
+- **Failed Bluetooth connections now back off.** A connection that dropped straight away was
+  retried every few seconds; retries now wait 3 s, then longer, up to a minute.
+- **The phone accepts a reconnecting Mac.** A Mac that reconnected while the phone still held
+  its old Bluetooth session was turned away, and the old session could then close the new one.
+- **Lighter searching.** After 10 minutes without finding the phone, the Mac scans for 10 seconds
+  each minute instead of 15. It searches continuously again as soon as the phone or a link
+  appears, the Mac wakes, the network changes, or you change the connection mode.
+- **Clear logs.** Both apps now record why a Bluetooth connection ended (Mac: Console,
+  subsystem `com.droiddock.mac`, category `ble`; Android: `adb logcat -s DDBle`).
+
 ## v3.6.0
 
 Update both apps: a 3.6 phone finds its Mac on a new network only through a 3.6 Mac.
