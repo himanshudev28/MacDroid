@@ -29,6 +29,44 @@ const OUTBOX_CAP: usize = 32;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const KEEPALIVE: Duration = Duration::from_secs(15);
 const IGNORE_MS: i64 = 60_000;
+/// One diagnostic line per reason per window; repeats are counted and reported with the next line.
+const LOG_WINDOW_MS: i64 = 30_000;
+
+/// Pure rate limiter behind [`ble_log`]: `Some(suppressed)` when a line may be printed now.
+#[derive(Default)]
+pub(crate) struct LogLimiter(HashMap<String, (i64, u32)>);
+
+impl LogLimiter {
+    pub(crate) fn admit(&mut self, key: &str, now: i64) -> Option<u32> {
+        // Some keys carry free-form error text: bound the map over a long uptime.
+        if self.0.len() > 128 {
+            self.0.retain(|_, v| now - v.0 < LOG_WINDOW_MS);
+        }
+        let e = self.0.entry(key.to_string()).or_insert((i64::MIN / 2, 0));
+        if now - e.0 >= LOG_WINDOW_MS {
+            let n = e.1;
+            *e = (now, 0);
+            Some(n)
+        } else {
+            e.1 += 1;
+            None
+        }
+    }
+}
+
+static LOG_LIMITER: OnceLock<Mutex<LogLimiter>> = OnceLock::new();
+
+/// Release-safe, rate-limited `[ble]` diagnostic (stderr), one line per `key` per 30 s.
+pub(crate) fn ble_log(key: &str, msg: &str) {
+    let n = LOG_LIMITER.get_or_init(Default::default).lock().unwrap().admit(key, now_ms());
+    if let Some(n) = n {
+        if n > 0 {
+            eprintln!("[ble] {key}: {msg} (+{n} similar suppressed)");
+        } else {
+            eprintln!("[ble] {key}: {msg}");
+        }
+    }
+}
 
 fn now_ms() -> i64 {
     crate::config::now_ms()
@@ -51,6 +89,13 @@ pub fn next_mid() -> String {
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
 static POKE: Notify = Notify::const_new();
+static KICK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Go back to continuous scanning now (the phone was seen, the network changed, ...). Safe from any thread.
+pub fn kick_scan() {
+    KICK.store(true, Ordering::Relaxed);
+    poke();
+}
 
 /// Wake the policy task. Cheap; callable from anywhere.
 pub fn poke() {
@@ -218,13 +263,19 @@ impl Conn {
 
     /// Ask Swift to cancel this connection.
     pub fn kill(&self) {
+        self.kill_why("unspecified");
+    }
+
+    /// Same, naming the reason in the (rate-limited) log.
+    pub fn kill_why(&self, why: &str) {
+        ble_log(&format!("close:{why}"), &format!("asking the Mac side to drop {} ({why})", self.id));
         self.st.lock().unwrap().closed = true;
         let _ = self.app.emit("ble-control", json!({ "op": "drop", "conn": self.id }));
     }
 
     fn bye_and_kill(&self, reason: u8) {
         self.queue_ctl(ble_link::OP_BYE, vec![reason]);
-        self.kill();
+        self.kill_why(&format!("BYE reason {reason}"));
     }
 
     fn is_live(&self) -> bool {
@@ -294,8 +345,8 @@ impl Conn {
                         }
                     }
                 }
-                Ev::Bye(_) => {
-                    self.kill();
+                Ev::Bye(r) => {
+                    self.kill_why(&format!("phone sent BYE {r:?}"));
                     return;
                 }
                 Ev::Json(v) => {
@@ -303,7 +354,7 @@ impl Conn {
                     if done {
                         ws_server::route_from_ble(&self.app, &state, v).await;
                     } else if !self.handle_hello(&state, v).await {
-                        self.kill();
+                        self.kill_why("hello rejected");
                         return;
                     }
                 }
@@ -319,14 +370,14 @@ impl Conn {
     /// The sealed JSON `hello`: the normal token check, then register the link.
     async fn handle_hello(self: &Arc<Self>, state: &SharedState, v: Value) -> bool {
         let Ok(Message::Hello { token, name, caps, device_id }) = serde_json::from_value::<Message>(v) else {
-            eprintln!("[ble] first sealed message was not a hello");
+            ble_log("hello", "first sealed message was not a hello");
             return false;
         };
         if token != self.app.state::<crate::AppState>().config.lock().unwrap().token {
-            eprintln!("[ble] hello token mismatch from {name:?}");
+            ble_log("hello", &format!("token mismatch from {name:?}"));
             return false;
         }
-        eprintln!("[ble] HANDSHAKE OK: {name:?} caps={caps:?}");
+        ble_log("handshake-ok", &format!("{name:?} caps={caps:?}"));
         let (id, reg) = ws_server::ble_attach(&self.app, state, name, device_id, caps, self.clone()).await;
         {
             let mut g = self.st.lock().unwrap();
@@ -341,12 +392,12 @@ impl Conn {
     }
 
     fn fail(&self, e: LinkErr) {
-        eprintln!("[ble] dropping {}: {e:?}", self.id);
+        ble_log("link-error", &format!("{}: {e:?}", self.id));
         if matches!(e, LinkErr::BadProof) {
             self.queue_raw(Session::fail_frame(1));
             ignore(&self.app, &self.id);
         }
-        self.kill();
+        self.kill_why(&format!("link error {e:?}"));
     }
 
     fn spawn_keepalive(self: &Arc<Self>) {
@@ -363,8 +414,7 @@ impl Conn {
                     g.unanswered_pings > 2
                 };
                 if dead {
-                    eprintln!("[ble] {} missed 2 PONGs, dropping", me.id);
-                    me.kill();
+                    me.kill_why("missed 2 PONGs");
                     return;
                 }
                 me.queue_ctl(ble_link::OP_PING, (now_ms() as u32).to_be_bytes().to_vec());
@@ -464,12 +514,19 @@ pub fn cmd_radio(app: &AppHandle, args: &Value) -> Result<Value, String> {
 
 pub fn cmd_connected(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let id = s(args, "conn")?;
+    ble_log("connected", &format!("{id} maxWrite={:?}", args.get("maxWrite")));
     let uuid = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
+    kick_scan();
     let token = live_config(app).token;
     {
         let h = hub(app);
         let mut g = h.0.lock().unwrap();
-        if g.ignore.get(&id).is_some_and(|until| *until > now_ms()) || live_config(app).connection_mode != "fallback" {
+        let ignored = g.ignore.get(&id).is_some_and(|until| *until > now_ms());
+        if ignored || live_config(app).connection_mode != "fallback" {
+            ble_log(
+                "reject-connect",
+                &format!("{id}: {}", if ignored { "recently failed (ignore window)" } else { "Mac is not in fallback mode" }),
+            );
             drop(g);
             let _ = app.emit("ble-control", json!({ "op": "drop", "conn": id }));
             return Ok(Value::Null);
@@ -482,9 +539,8 @@ pub fn cmd_connected(app: &AppHandle, args: &Value) -> Result<Value, String> {
             if !conn.is_live() {
                 let fresh_failure = !conn.st.lock().unwrap().closed;
                 if fresh_failure {
-                    eprintln!("[ble] handshake timeout for {}", conn.id);
                     ignore(&conn.app, &conn.id);
-                    conn.kill();
+                    conn.kill_why("handshake timeout (5 s)");
                 }
             }
         });
@@ -513,6 +569,8 @@ pub fn cmd_tx_done(app: &AppHandle, args: &Value) -> Result<Value, String> {
 
 pub async fn cmd_closed(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let id = s(args, "conn")?;
+    let why = args.get("reason").and_then(Value::as_str).unwrap_or("?");
+    ble_log(&format!("closed:{why}"), &format!("Swift closed {id} ({why})"));
     let conn = hub(app).0.lock().unwrap().conns.remove(&id);
     if let Some(conn) = conn {
         let link_id = {
@@ -698,6 +756,8 @@ pub struct In {
     pub paused: bool,
     pub prefer: Prefer,
     pub auto_return: bool,
+    /// One-shot: restart continuous scanning (network change, phone sighting, ...).
+    pub kick: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -722,8 +782,17 @@ pub struct Policy {
     changes: VecDeque<i64>,
     last_primary: Option<bool>,
     last_change: i64,
+    last_step: i64,
+    last_prefer: Option<Prefer>,
+    burst: bool,
 }
 
+/// After this long without finding the phone, scan in bursts instead of continuously.
+const BURST_AFTER: i64 = 600_000;
+const BURST_ON: i64 = 10_000;
+const BURST_PERIOD: i64 = 60_000;
+/// The policy never sleeps longer than 60 s while scanning, so a gap this big means the Mac slept.
+const WAKE_GAP: i64 = 120_000;
 const T_BACK: i64 = 10_000;
 const GRACE: i64 = 5_000;
 
@@ -743,7 +812,19 @@ impl Policy {
             changes: VecDeque::new(),
             last_primary: None,
             last_change: launch_ms,
+            last_step: launch_ms,
+            last_prefer: None,
+            burst: false,
         }
+    }
+
+    /// Back to continuous scanning (restarts the 10-minute clock).
+    fn reset_burst(&mut self, why: &str) {
+        if self.burst {
+            ble_log("burst-scan", &format!("leaving burst scanning: {why}"));
+            self.burst = false;
+        }
+        self.scan_started = None;
     }
 
     #[cfg(test)]
@@ -758,7 +839,10 @@ impl Policy {
         let mut next: Option<i64> = None;
         let mut at = |t: i64| next = Some(next.map_or(t, |n| n.min(t)));
 
+        let slept = now - self.last_step > WAKE_GAP;
+        self.last_step = now;
         if !i.fallback {
+            self.reset_burst("fallback off");
             if self.scan_on {
                 acts.push(Act::Scan(false));
                 self.scan_on = false;
@@ -772,6 +856,17 @@ impl Policy {
             self.was_ws_up = i.ws_up;
             return (acts, None);
         }
+
+        if slept && self.scan_started.is_some() {
+            self.reset_burst("Mac woke from sleep");
+        }
+        if i.kick {
+            self.reset_burst("phone seen or network changed");
+        }
+        if self.last_prefer.is_some_and(|p| p != i.prefer) {
+            self.reset_burst("link preference changed");
+        }
+        self.last_prefer = Some(i.prefer);
 
         if i.ws_up != self.was_ws_up {
             if !i.ws_up {
@@ -857,7 +952,11 @@ impl Policy {
             let started = *self.scan_started.get_or_insert(now);
             let elapsed = now - started;
             let epoch = ble_link::epoch_of(now);
-            let window_on = elapsed < 600_000 || (elapsed - 600_000) % 60_000 < 15_000;
+            if elapsed >= BURST_AFTER && !self.burst {
+                self.burst = true;
+                ble_log("burst-scan", "phone not found for 10 min: scanning 10 s every 60 s");
+            }
+            let window_on = elapsed < BURST_AFTER || (elapsed - BURST_AFTER) % BURST_PERIOD < BURST_ON;
             if window_on {
                 if !self.scan_on || now - self.last_scan_cmd >= 60_000 || epoch != self.scan_epoch {
                     acts.push(Act::Scan(true));
@@ -867,24 +966,24 @@ impl Policy {
                 }
                 at(self.last_scan_cmd + 60_000);
                 at((epoch as i64 + 1) * 900_000);
-                if elapsed < 600_000 {
-                    at(started + 600_000);
+                if elapsed < BURST_AFTER {
+                    at(started + BURST_AFTER);
                 } else {
-                    at(now + 15_000 - (elapsed - 600_000) % 60_000);
+                    at(now + BURST_ON - (elapsed - BURST_AFTER) % BURST_PERIOD);
                 }
             } else {
                 if self.scan_on {
                     acts.push(Act::Scan(false));
                     self.scan_on = false;
                 }
-                at(now + 60_000 - (elapsed - 600_000) % 60_000);
+                at(now + BURST_PERIOD - (elapsed - BURST_AFTER) % BURST_PERIOD);
             }
         } else {
             if self.scan_on {
                 acts.push(Act::Scan(false));
                 self.scan_on = false;
             }
-            self.scan_started = None;
+            self.reset_burst("phone or link present, or scanning not allowed");
             if can_scan {
                 at(self.no_wifi_since + 3_000);
             }
@@ -948,6 +1047,7 @@ pub async fn run(app: AppHandle, state: SharedState) {
             paused,
             prefer,
             auto_return: cfg.ble_auto_return,
+            kick: KICK.swap(false, Ordering::Relaxed),
         };
         let (acts, next) = policy.step(&input);
         for a in acts {
@@ -972,7 +1072,7 @@ pub async fn run(app: AppHandle, state: SharedState) {
                         if a == Act::Bye {
                             c.queue_ctl(ble_link::OP_BYE, vec![ble_link::BYE_HANDBACK]);
                         } else {
-                            c.kill();
+                            c.kill_why("hand back to Wi-Fi (grace over)");
                         }
                     }
                 }
@@ -1007,6 +1107,7 @@ mod tests {
             paused: false,
             prefer: Prefer::Auto,
             auto_return: true,
+            kick: false,
         }
     }
 
@@ -1065,13 +1166,111 @@ mod tests {
         assert!(p.step(&i).0.is_empty());
         i.now = 1_060_000;
         assert_eq!(p.step(&i).0, vec![Act::Scan(true)]);
-        // 10 minutes of fruitless scanning: 15 s on / 45 s off
+        // 10 minutes of fruitless scanning: 10 s on / 50 s off
         let started = 1_000_000;
-        i.now = started + 600_000 + 20_000; // off window
+        let a: Vec<_> = drive(&mut p, &mut i, 1_070_000, started + 600_000 + 20_000, 10_000);
+        assert!(a.iter().any(|(_, a)| *a == Act::Scan(false)), "off window: {a:?}");
+        let a: Vec<_> = drive(&mut p, &mut i, started + 600_000 + 30_000, started + 600_000 + 60_000, 10_000);
+        assert!(a.iter().any(|(_, a)| *a == Act::Scan(true)), "next on window: {a:?}");
+    }
+
+    /// Drives the policy once a minute from `from` to `to` (inclusive), returning (time, act) pairs.
+    fn drive(p: &mut Policy, i: &mut In, from: i64, to: i64, step: i64) -> Vec<(i64, Act)> {
+        let mut out = vec![];
+        let mut t = from;
+        while t <= to {
+            i.now = t;
+            for a in p.step(i).0 {
+                out.push((t, a));
+            }
+            t += step;
+        }
+        out
+    }
+
+    #[test]
+    fn burst_mode_starts_after_10_min_and_runs_10s_on_50s_off() {
+        let mut p = Policy::new(0);
+        let mut i = base(1_000_000);
+        let start = 1_000_000;
+        // continuous until 10 min: never a Scan(false)
+        let early = drive(&mut p, &mut i, start, start + 599_000, 1_000);
+        assert!(early.iter().all(|(_, a)| *a == Act::Scan(true)), "{early:?}");
+        assert!(!p.burst);
+        let burst = drive(&mut p, &mut i, start + 600_000, start + 600_000 + 180_000, 1_000);
+        assert!(p.burst);
+        let offs: Vec<i64> = burst.iter().filter(|(_, a)| *a == Act::Scan(false)).map(|(t, _)| t - start - 600_000).collect();
+        let ons: Vec<i64> = burst.iter().filter(|(_, a)| *a == Act::Scan(true)).map(|(t, _)| t - start - 600_000).collect();
+        assert_eq!(offs, vec![10_000, 70_000, 130_000], "off after 10 s of each minute");
+        assert!(ons.contains(&60_000) && ons.contains(&120_000), "on again every 60 s: {ons:?}");
+    }
+
+    #[test]
+    fn burst_wakeup_times_are_scheduled() {
+        let mut p = Policy::new(0);
+        let mut i = base(1_000_000);
+        drive(&mut p, &mut i, 1_000_000, 1_000_000 + 590_000, 30_000);
+        i.now = 1_000_000 + 600_000 + 3_000;
+        let (_, next) = p.step(&i);
+        assert_eq!(next, Some(1_000_000 + 600_000 + 10_000), "wakes when the 10 s window ends");
+        i.now = 1_000_000 + 600_000 + 20_000;
+        let (_, next) = p.step(&i);
+        assert_eq!(next, Some(1_000_000 + 600_000 + 60_000), "wakes when the pause ends");
+    }
+
+    fn into_burst(p: &mut Policy, i: &mut In) {
+        drive(p, i, 1_000_000, 1_000_000 + 600_000 + 20_000, 30_000); // ends in the off window
+        i.now = 1_000_000 + 600_000 + 20_000;
+        p.step(i);
+        assert!(p.burst && !p.scanning());
+    }
+
+    #[test]
+    fn burst_resets_when_a_link_comes_up_or_phone_seen() {
+        for case in 0..3 {
+            let mut p = Policy::new(0);
+            let mut i = base(1_000_000);
+            into_burst(&mut p, &mut i);
+            i.now += 1_000;
+            match case {
+                0 => i.ble_present = true,   // phone connected
+                1 => i.ws_up = true,         // Wi-Fi link up
+                _ => i.kick = true,          // phone sighted / network changed
+            }
+            let a = p.step(&i).0;
+            assert!(!p.burst, "case {case}");
+            if case == 2 {
+                assert!(a.contains(&Act::Scan(true)), "continuous scanning resumes at once");
+            }
+            // after the link is gone again the 10-minute clock starts over
+            i.kick = false; i.ble_present = false; i.ws_up = false;
+            i.now += 10_000;
+            p.step(&i);
+            i.now += 30_000;
+            p.step(&i);
+            assert!(!p.burst, "case {case}: fresh 10 minutes");
+            assert!(p.scanning(), "case {case}");
+        }
+    }
+
+    #[test]
+    fn burst_resets_after_sleep_and_on_preference_change() {
+        let mut p = Policy::new(0);
+        let mut i = base(1_000_000);
+        into_burst(&mut p, &mut i);
+        i.now += 600_000; // the Mac slept for 10 minutes
         let a = p.step(&i).0;
-        assert!(a.contains(&Act::Scan(false)));
-        i.now = started + 600_000 + 60_000; // next on window
-        assert!(p.step(&i).0.contains(&Act::Scan(true)));
+        assert!(!p.burst);
+        assert!(a.contains(&Act::Scan(true)), "wake restarts scanning");
+
+        let mut p = Policy::new(0);
+        let mut i = base(1_000_000);
+        into_burst(&mut p, &mut i);
+        i.now += 1_000;
+        i.prefer = Prefer::Ble; // "Use Bluetooth now"
+        let a = p.step(&i).0;
+        assert!(!p.burst);
+        assert!(a.contains(&Act::Scan(true)));
     }
 
     #[test]
@@ -1175,6 +1374,17 @@ mod tests {
         }
         assert!(p.t_back > T_BACK);
         assert!(p.t_back <= 60_000);
+    }
+
+    #[test]
+    fn log_limiter_one_line_per_window_and_counts_repeats() {
+        let mut l = LogLimiter::default();
+        assert_eq!(l.admit("a", 1_000), Some(0));
+        assert_eq!(l.admit("a", 2_000), None);
+        assert_eq!(l.admit("a", 3_000), None);
+        assert_eq!(l.admit("b", 3_000), Some(0), "keys are independent");
+        assert_eq!(l.admit("a", 1_000 + LOG_WINDOW_MS), Some(2), "reports what was suppressed");
+        assert_eq!(l.admit("a", 1_001 + LOG_WINDOW_MS), None);
     }
 
     #[test]

@@ -102,6 +102,8 @@ pub async fn run(app: AppHandle, port: u16) {
             // back-off was earned on the old network.
             if !advertised.is_empty() {
                 crate::pacing::poke_reconnect();
+                // A new network may bring the phone back in range: scan continuously again.
+                crate::ble_policy::kick_scan();
             }
             // Tell the UI so the pairing QR / address row follow the new LAN.
             let _ = app.emit("pairing-changed", serde_json::json!({}));

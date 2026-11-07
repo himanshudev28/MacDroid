@@ -51,6 +51,9 @@ internal class BleGattServer(private val ctx: Context, private val host: Host) {
     private var service: BluetoothGattService? = null
     @Volatile private var ready = false
     @Volatile private var current: Conn? = null
+    /** The address whose stale session was just replaced, and when (see the DISCONNECTED branch). */
+    @Volatile private var replacedAddr: String? = null
+    @Volatile private var replacedAt = 0L
 
     val isReady get() = ready
     val hasConnection get() = current != null
@@ -66,6 +69,7 @@ internal class BleGattServer(private val ctx: Context, private val host: Host) {
         private var closeWhenDrained = false
         @Volatile var closed = false
         @Volatile private var welcomed = false
+        private val openedAt = System.currentTimeMillis()
         private val deadline = Runnable { if (!welcomed) disconnect("handshake timeout") }
 
         fun armHandshakeTimer() { main.postDelayed(deadline, HANDSHAKE_MS) }
@@ -117,9 +121,20 @@ internal class BleGattServer(private val ctx: Context, private val host: Host) {
             }
         }
 
+        /** Drop this connection without cancelling the GATT link (a new one with the same address is live). */
+        fun disconnectQuietly() {
+            if (closed) return
+            closed = true
+            main.removeCallbacks(deadline)
+            session.kill()
+            if (current === this) current = null
+            host.onClosed(this)
+        }
+
         fun disconnect(why: String) {
             if (closed) return
             closed = true
+            BleLog.i("close:$why", "${BleLog.who(device.address)} after ${System.currentTimeMillis() - openedAt} ms, state=${session.state} welcomed=$welcomed, we cancel the GATT link")
             main.removeCallbacks(deadline)
             session.kill()
             runCatching { server?.cancelConnection(device) }
@@ -185,13 +200,27 @@ internal class BleGattServer(private val ctx: Context, private val host: Host) {
     private val callback = object : BluetoothGattServerCallback() {
         override fun onServiceAdded(status: Int, svc: BluetoothGattService) {
             ready = status == BluetoothGatt.GATT_SUCCESS && svc.uuid == BleIds.SERVICE
+            BleLog.i("service-added", "status=$status ready=$ready")
             host.onServerReady(ready)
         }
 
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
+            BleLog.i("gatt-state", "${BleLog.who(device.address)} status=$status new=$newState hasCurrent=${current != null}")
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 val token = tokenProvider()
-                if (!ready || token == null || current != null) {
+                val stale = current?.takeIf { it.device.address == device.address }
+                if (stale != null) {
+                    // The same Mac is back but the old connection's disconnect never reached us (Samsung
+                    // delivers it late or not at all): replace it rather than refuse the Mac forever.
+                    BleLog.i("replace-stale", "${BleLog.who(device.address)} reconnected over a stale session")
+                    stale.disconnectQuietly()
+                    // The old link's DISCONNECTED may still arrive and carries the same address: remember
+                    // to swallow that one, or it would tear down the session we're about to create.
+                    replacedAddr = device.address
+                    replacedAt = android.os.SystemClock.elapsedRealtime()
+                }
+                if (token == null || !BleAdmission.accept(ready, true, current != null)) {
+                    BleLog.i("reject", "${BleLog.who(device.address)} ready=$ready token=${token != null} busy=${current != null}")
                     runCatching { server?.cancelConnection(device) }
                     return
                 }
@@ -199,6 +228,15 @@ internal class BleGattServer(private val ctx: Context, private val host: Host) {
                 current = c
                 c.armHandshakeTimer()
             } else {
+                if (device.address == replacedAddr &&
+                    android.os.SystemClock.elapsedRealtime() - replacedAt < LATE_DISCONNECT_MS
+                ) {
+                    // The replaced session's late disconnect: not the live one. (A real drop of the new
+                    // session is still caught by its handshake timer and missed pongs.)
+                    replacedAddr = null
+                    BleLog.i("late-disconnect-ignored", BleLog.who(device.address))
+                    return
+                }
                 current?.takeIf { it.device.address == device.address }?.disconnect("gatt disconnected")
             }
         }
@@ -252,6 +290,7 @@ internal class BleGattServer(private val ctx: Context, private val host: Host) {
                 server?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value)
             }
             val c = current ?: return
+            BleLog.i("cccd-write", "${BleLog.who(device.address)} value=${value?.joinToString("") { "%02x".format(it) }} hasCurrent=${current != null}")
             if (d.uuid == BleIds.CCCD && value != null && c.device.address == device.address &&
                 value.contentEquals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
             ) {
@@ -267,5 +306,14 @@ internal class BleGattServer(private val ctx: Context, private val host: Host) {
 
     private val subscribed = java.util.WeakHashMap<Conn, Boolean>()
 
-    companion object { const val HANDSHAKE_MS = 5_000L }
+    companion object {
+        const val HANDSHAKE_MS = 5_000L
+        /** How long after a replace-stale a DISCONNECTED for that address is taken as the old link's. */
+        const val LATE_DISCONNECT_MS = 2_000L
+    }
+}
+
+/** Pure admission rule for a new GATT connection. */
+internal object BleAdmission {
+    fun accept(serviceReady: Boolean, hasToken: Boolean, busy: Boolean) = serviceReady && hasToken && !busy
 }

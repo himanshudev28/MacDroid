@@ -1,5 +1,6 @@
 import Foundation
 import CoreBluetooth
+import os
 
 /// Bluetooth LE fallback, layer L1 (docs/BLE-NEARBY-DESIGN.md §4, §9b).
 ///
@@ -29,6 +30,14 @@ final class BleService: NSObject, @unchecked Sendable {
     private var conns: [UUID: Link] = [:]
     private var installed = false
 
+    // Diagnostics (release-safe; read with `log stream --predicate 'subsystem == "com.droiddock.mac" AND category == "ble"'`).
+    private let log = Logger(subsystem: "com.droiddock.mac", category: "ble")
+    private var limiter = BleLogLimiter()
+    /// Consecutive connections that died before the link was usable; drives the reconnect backoff.
+    private var failStreak = 0
+    private var scanHoldUntil = Date.distantPast
+    private var holdTimer: DispatchSourceTimer?
+
     /// One GATT connection.
     private final class Link {
         let peripheral: CBPeripheral
@@ -44,6 +53,9 @@ final class BleService: NSObject, @unchecked Sendable {
         var txSeq: UInt8 = 0
         var frames: [Data] = []         // queued L2 frames
         var fragments: [Data] = []      // the frame being written
+        let startedAt = Date()
+        var stage = "connecting"        // last step reached, for the close log
+        var why: String?                // why WE cancelled (nil: the peer or the radio did)
         init(_ p: CBPeripheral) { peripheral = p }
     }
 
@@ -76,6 +88,24 @@ final class BleService: NSObject, @unchecked Sendable {
         }
     }
 
+    // MARK: Diagnostics
+
+    /// One line per `key` per 30 s (repeats are counted), never containing identifiers beyond a short id.
+    private func note(_ key: String, _ detail: String) {
+        guard let suppressed = limiter.admit(key, now: Date().timeIntervalSince1970) else { return }
+        let extra = suppressed > 0 ? " (+\(suppressed) similar suppressed)" : ""
+        log.info("\(key, privacy: .public): \(detail, privacy: .public)\(extra, privacy: .public)")
+    }
+
+    private func short(_ p: CBPeripheral) -> String { String(p.identifier.uuidString.prefix(8)) }
+
+    /// Cancel a connection because of a step failure, remembering the reason for the close log.
+    private func abort(_ peripheral: CBPeripheral, _ why: String, _ detail: String = "") {
+        if let l = conns[peripheral.identifier] { l.why = why }
+        note("cancel:\(why)", "\(short(peripheral)) stage=\(conns[peripheral.identifier]?.stage ?? "?") \(detail)")
+        central?.cancelPeripheralConnection(peripheral)
+    }
+
     // MARK: Control from the core
 
     private func handleControl(_ data: Data) {
@@ -105,7 +135,7 @@ final class BleService: NSObject, @unchecked Sendable {
             }
         case "drop":
             if let s = o["conn"] as? String, let id = UUID(uuidString: s), let l = conns[id] {
-                central?.cancelPeripheralConnection(l.peripheral)
+                abort(l.peripheral, "core-drop", "core asked to close (see the [ble] close:* line in the core log)")
             }
         default: break
         }
@@ -130,6 +160,16 @@ final class BleService: NSObject, @unchecked Sendable {
 
     private func startScanIfPossible() {
         guard scanWanted, let c = central, c.state == .poweredOn else { return }
+        let hold = scanHoldUntil.timeIntervalSinceNow
+        if hold > 0 {                       // backing off after failed connects: come back later
+            holdTimer?.cancel()
+            let h = DispatchSource.makeTimerSource(queue: queue)
+            h.schedule(deadline: .now() + hold)
+            h.setEventHandler { [weak self] in self?.holdTimer = nil; self?.startScanIfPossible() }
+            h.resume()
+            holdTimer = h
+            return
+        }
         c.stopScan()
         c.scanForPeripherals(withServices: [svc], options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
         // A changed advertisement (rid rotation) may not be re-reported: restart every 60 s.
@@ -137,7 +177,8 @@ final class BleService: NSObject, @unchecked Sendable {
         let t = DispatchSource.makeTimerSource(queue: queue)
         t.schedule(deadline: .now() + 60, repeating: 60)
         t.setEventHandler { [weak self] in
-            guard let self, self.scanWanted, let c = self.central, c.state == .poweredOn, self.conns.isEmpty else { return }
+            guard let self, self.scanWanted, let c = self.central, c.state == .poweredOn, self.conns.isEmpty,
+                  self.scanHoldUntil.timeIntervalSinceNow <= 0 else { return }
             c.stopScan()
             c.scanForPeripherals(withServices: [self.svc], options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
         }
@@ -146,6 +187,7 @@ final class BleService: NSObject, @unchecked Sendable {
     }
 
     private func stopScan() {
+        holdTimer?.cancel(); holdTimer = nil
         scanRestart?.cancel(); scanRestart = nil
         central?.stopScan()
     }
@@ -279,10 +321,23 @@ final class BleService: NSObject, @unchecked Sendable {
         fire("ble_rx", ["conn": l.peripheral.identifier.uuidString, "seq": seq], body: frame)
     }
 
-    private func close(_ l: Link, reason: String) {
+    private func close(_ l: Link, reason: String, detail: String = "") {
+        guard conns[l.peripheral.identifier] === l else { return }   // already closed
         l.connectTimer?.cancel(); l.rssiTimer?.cancel()
         conns[l.peripheral.identifier] = nil
-        if l.registered { fire("ble_closed", ["conn": l.peripheral.identifier.uuidString, "reason": reason]) }
+        let age = Int(Date().timeIntervalSince(l.startedAt) * 1000)
+        let who = l.why.map { "we-cancelled:\($0)" } ?? "peer-or-radio"
+        note("close:\(reason)", "\(short(l.peripheral)) after \(age) ms stage=\(l.stage) registered=\(l.registered) by=\(who) \(detail)")
+        if l.registered { fire("ble_closed", ["conn": l.peripheral.identifier.uuidString, "reason": l.why ?? reason]) }
+        // A connection that never became usable (or died within seconds) must not be retried at once, forever.
+        if BleBackoff.isFailure(registered: l.registered, ageMs: age) { failStreak += 1 } else { failStreak = 0 }
+        let delay = BleBackoff.delay(failures: failStreak)
+        if delay > 0 {
+            scanHoldUntil = Date().addingTimeInterval(delay)
+            note("backoff", "\(failStreak) short-lived connection(s) in a row: next connect attempt in \(Int(delay)) s")
+        } else {
+            scanHoldUntil = .distantPast
+        }
         if scanWanted, conns.isEmpty { startScanIfPossible() }
     }
 }
@@ -311,30 +366,37 @@ extension BleService: CBCentralManagerDelegate, CBPeripheralDelegate {
         t.schedule(deadline: .now() + 10)
         t.setEventHandler { [weak self, weak l] in
             guard let self, let l, !l.registered else { return }
+            l.why = "connect-timeout"
             self.central?.cancelPeripheralConnection(l.peripheral)
             self.close(l, reason: "timeout")
         }
         t.resume()
         l.connectTimer = t
+        note("connect", "\(short(peripheral)) matched a rid; connecting")
         central.connect(peripheral, options: nil)
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        conns[peripheral.identifier]?.stage = "discover-services"
         peripheral.discoverServices([svc])
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        if let l = conns[peripheral.identifier] { close(l, reason: "error") }
+        if let l = conns[peripheral.identifier] { close(l, reason: "error", detail: "didFailToConnect \(Self.describe(error))") }
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
-        if let l = conns[peripheral.identifier] { close(l, reason: error == nil ? "disconnected" : "error") }
+        if let l = conns[peripheral.identifier] {
+            close(l, reason: error == nil ? "disconnected" : "error", detail: "didDisconnect \(Self.describe(error))")
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard error == nil, let s = peripheral.services?.first(where: { $0.uuid == svc }) else {
-            central?.cancelPeripheralConnection(peripheral); return
+            let found = peripheral.services?.map { $0.uuid.uuidString.prefix(8) }.joined(separator: ",") ?? "none"
+            abort(peripheral, "service-missing", "error=\(Self.describe(error)) services=[\(found)]"); return
         }
+        conns[peripheral.identifier]?.stage = "discover-characteristics"
         peripheral.discoverCharacteristics([m2p, p2m, infoC], for: s)
     }
 
@@ -342,15 +404,23 @@ extension BleService: CBCentralManagerDelegate, CBPeripheralDelegate {
         guard let l = conns[peripheral.identifier] else { return }
         l.m2p = service.characteristics?.first { $0.uuid == m2p }
         l.p2m = service.characteristics?.first { $0.uuid == p2m }
-        guard let n = l.p2m, l.m2p != nil else { central?.cancelPeripheralConnection(peripheral); return }
+        guard let n = l.p2m, l.m2p != nil else {
+            let found = service.characteristics?.map { $0.uuid.uuidString.prefix(8) }.joined(separator: ",") ?? "none"
+            abort(peripheral, "characteristics-missing", "error=\(Self.describe(error)) found=[\(found)]"); return
+        }
+        l.stage = "subscribe"
         peripheral.setNotifyValue(true, for: n)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
         guard let l = conns[peripheral.identifier], characteristic.uuid == p2m else { return }
-        guard error == nil, characteristic.isNotifying else { central?.cancelPeripheralConnection(peripheral); return }
+        guard error == nil, characteristic.isNotifying else {
+            abort(peripheral, "subscribe-failed", "error=\(Self.describe(error)) isNotifying=\(characteristic.isNotifying)"); return
+        }
         guard !l.registered else { return }
         l.registered = true
+        l.stage = "handshake"
+        note("subscribed", "\(short(peripheral)) notifications on; handing the link to the core")
         l.connectTimer?.cancel()
         let id = peripheral.identifier
         let maxWrite = peripheral.maximumWriteValueLength(for: .withoutResponse)
@@ -377,7 +447,7 @@ extension BleService: CBCentralManagerDelegate, CBPeripheralDelegate {
         guard let l = conns[peripheral.identifier], characteristic.uuid == p2m, let v = characteristic.value else { return }
         switch l.reasm.push(v, maxFrame: maxFrame) {
         case .success(let f): if let f { deliver(l, frame: f) }
-        case .failure: central?.cancelPeripheralConnection(peripheral)
+        case .failure: abort(peripheral, "bad-l1-frame", "reassembly error on a \(v.count)-byte value")
         }
     }
 
@@ -385,8 +455,39 @@ extension BleService: CBCentralManagerDelegate, CBPeripheralDelegate {
         if let l = conns[peripheral.identifier] { pump(l) }
     }
 
+    static func describe(_ e: Error?) -> String {
+        guard let e = e as NSError? else { return "nil" }
+        return "\(e.domain)#\(e.code) \(e.localizedDescription)"
+    }
+
     func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
         guard error == nil, let l = conns[peripheral.identifier], l.registered else { return }
         fire("ble_rssi", ["conn": peripheral.identifier.uuidString, "rssi": RSSI.intValue])
+    }
+}
+
+/// Pure helpers (no CoreBluetooth) so the policy is unit-testable.
+struct BleLogLimiter {
+    private var seen: [String: (at: TimeInterval, suppressed: Int)] = [:]
+    let window: TimeInterval = 30
+    /// Returns the number of lines suppressed since the last one when a line may be printed now, else nil.
+    mutating func admit(_ key: String, now: TimeInterval) -> Int? {
+        if let e = seen[key], now - e.at < window {
+            seen[key] = (e.at, e.suppressed + 1)
+            return nil
+        }
+        let n = seen[key]?.suppressed ?? 0
+        seen[key] = (now, 0)
+        return n
+    }
+}
+
+enum BleBackoff {
+    /// A link that never reached the handshake, or died within 5 s of connecting, counts as a failure.
+    static func isFailure(registered: Bool, ageMs: Int) -> Bool { !registered || ageMs < 5_000 }
+    /// 0 for the first failure (retry at once), then 3, 6, 12 ... capped at 60 s.
+    static func delay(failures: Int) -> TimeInterval {
+        guard failures > 1 else { return 0 }
+        return min(60, 3 * pow(2, Double(failures - 2)))
     }
 }

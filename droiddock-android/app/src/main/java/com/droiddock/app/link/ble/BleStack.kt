@@ -160,10 +160,14 @@ object BleStack {
     }
 
     private val host = object : BleGattServer.Host {
-        override fun onServerReady(ok: Boolean) { ConnectionManager.reevaluateLinks() }
+        override fun onServerReady(ok: Boolean) {
+            BleLog.i("server-ready", "ok=$ok")
+            ConnectionManager.reevaluateLinks()
+        }
 
         override fun onAuthenticated(conn: BleGattServer.Conn) {
             val ctx = appCtx ?: return
+            BleLog.i("authenticated", "L2 handshake passed; sending hello")
             val pairing = Prefs.load(ctx) ?: return
             // Step 6: the normal hello, now inside the sealed channel.
             conn.session.send(ConnectionManager.buildHello(pairing))
@@ -176,6 +180,7 @@ object BleStack {
         }
 
         override fun onAuthFailed() {
+            BleLog.i("auth-failed", "the Mac's proof was wrong (token mismatch?)")
             val now = System.currentTimeMillis()
             failures.addLast(now)
             while (failures.isNotEmpty() && now - failures.first() > 300_000) failures.removeFirst()
@@ -189,6 +194,7 @@ object BleStack {
         }
 
         override fun onClosed(conn: BleGattServer.Conn) {
+            BleLog.i("closed", "session over (wasLinked=${link?.conn === conn})")
             val l = link
             if (l != null && l.conn === conn) {
                 link = null

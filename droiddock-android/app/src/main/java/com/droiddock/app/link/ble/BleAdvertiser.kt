@@ -41,6 +41,7 @@ internal class BleAdvertiser(
 
     fun start() {
         if (running) return
+        BleLog.i("adv-start", "advertising on")
         running = true
         lowPower = false
         backoff = 5_000L
@@ -50,6 +51,7 @@ internal class BleAdvertiser(
 
     fun stop() {
         if (!running) return
+        BleLog.i("adv-stop", "advertising off")
         running = false
         main.removeCallbacks(stepDown); main.removeCallbacks(rotate); main.removeCallbacks(retry)
         halt()
@@ -104,6 +106,7 @@ internal class BleAdvertiser(
     }
 
     private fun failed(code: Int) {
+        BleLog.i("adv-failed", "code=$code legacy=$useLegacy")
         // ADVERTISE_FAILED_FEATURE_UNSUPPORTED (5 for sets, 5 for the legacy call): use the classic API.
         if (code == 5 && !useLegacy) { useLegacy = true; main.post { if (running) restart() }; return }
         onStatus(true) // "Bluetooth busy" in Permission Health
