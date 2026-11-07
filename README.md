@@ -138,6 +138,8 @@ It's two apps that talk to each other:
 | 📱 | **Device management** | Remembered Macs, Quick Connect, Disconnect, and switching between Macs — discovered over mDNS. |
 | 📜 | **Clipboard history** | This session's clips, both directions. Memory-only and capped on purpose — persisting it would be a plaintext log of passwords and OTPs. |
 | ⚡ | **Quick Settings tiles** | Toggle the connection and the accessibility service straight from the Android shade. |
+| 🔑 | **Verification codes** | When a text or app notification carries a one-time code, the Mac offers **Copy code** on the banner, the notification and the list. It can also copy codes for you (off by default) and clear them from the clipboard after a minute. Apps whose previews you hide are skipped, and a copied code is never synced back to the phone. |
+| 🤖 | **Shortcuts & Raycast** | AppleScript commands (ring phone, send clipboard, send files, phone battery, start mirroring, open the command bar, send a text) for Shortcuts' *Run AppleScript* action and Raycast scripts. Sample scripts are in [`droiddock-native/docs/raycast/`](droiddock-native/docs/raycast/). Anything that sends data or rings asks first, and file sends always ask. |
 
 ---
 
@@ -479,6 +481,7 @@ DroidDock/
 - [x] **Bluetooth LE fallback** when Wi-Fi drops, with automatic return
 - [x] **Second screen** and **notification app windows** with Back / Home / Recent
 - [x] **WhatsApp & internet calls** — caller name, decline and hang up from the Mac
+- [x] **Verification-code copy** and **AppleScript automation** for Shortcuts and Raycast
 - [ ] Talk and listen on phone calls through the Mac (proof of concept in progress)
 - [ ] TLS on the LAN link
 - [ ] Audio streaming (Mac → phone; phone → Mac shipped in v2.2.0)

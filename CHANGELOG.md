@@ -8,6 +8,75 @@ to a generic body.
 
 ---
 
+## v3.6.0
+
+Update both apps: a 3.6 phone finds its Mac on a new network only through a 3.6 Mac.
+
+**Security**
+- **Pairing links now ask first.** Opening a `droiddock://pair` link, including from the camera's
+  "Open DroidDock" banner, shows the Mac's name and address with Pair / Cancel. Before, any web
+  page or app could pair the phone silently. Links without the Mac's security key are refused.
+- **The pairing token no longer crosses the Wi-Fi in the clear.** When the phone searches for
+  the Mac, it now sends a short-lived signed code instead of the token.
+- **No unencrypted fallback.** Once a phone has connected with encryption, the Mac refuses
+  unencrypted connections for that pairing, however the request is dressed up.
+- **Reset pairing.** Settings › Privacy › Reset pairing… issues a new token and disconnects the
+  phone at once. The phone scans the new QR code to pair again.
+- **Passwords stay on the Mac.** Copies from password managers (marked concealed or transient)
+  are no longer synced to the phone.
+- **Safer file names.** Names sent by the phone can no longer write outside the photo-sync
+  folder or Downloads, and the phone's file pushes stay inside shared storage.
+- **Hardened link.** Limits on unauthenticated connections (per address and overall) and message
+  size, constant-time token checks, validated app names in every ADB command, and Android
+  backups no longer include the pairing token.
+
+**New**
+- **Verification codes.** A one-time code in a text or notification gets a **Copy code** button
+  on the Mac banner, the macOS notification and the Notifications list. Settings ›
+  Notifications › Verification codes can copy codes automatically (off by default) and clear
+  them after 30 s, 1 min or 2 min. Apps whose previews you hide are skipped, and a copied code is
+  never synced back to the phone.
+- **Shortcuts and Raycast.** New AppleScript commands: `ring phone`, `send clipboard`,
+  `send file`, `get battery`, `start mirroring`, `show command bar` and `send sms`. Use them from
+  Shortcuts' *Run AppleScript* action or Raycast (samples in `droiddock-native/docs/raycast/`).
+  Commands that send data or ring ask first; file sends always ask.
+- **`droiddock://` links ask before acting.** Links that send the clipboard or start mirroring
+  show a confirmation. `droiddock://commandbar` opens the command bar.
+
+**Fixed: Mac**
+- Saving a file through the Finder mount wrote a copy with a long hex name instead of updating
+  the file. A failed save no longer shows as saved, and the mount re-downloads files that
+  changed on the phone.
+- Downloads from the phone could arrive cut short but marked complete. Every transfer is now
+  size-checked and stops if it stalls.
+- A file shared from the phone no longer replaces a file of the same name in Downloads.
+- A damaged settings file no longer unpairs the phone: the Mac keeps a backup and restores it.
+- The banner's Reply no longer says "Reply sent" when it failed.
+- An incoming-call card and banner no longer stay on screen after the phone disconnects mid-ring.
+- After switching phones, the command bar and menus no longer show the previous phone's apps.
+- Shortcut conflicts are reported once, and a combo used twice inside DroidDock says so.
+- Notification toggles keep your change when you flip two apps quickly.
+- Second-screen windows: a double-click no longer opens two windows; the Back / Home / Recent
+  bar survives minimising and goes away when the phone disconnects.
+- Mirroring: Stop always ends the session, and Reset also resets the codec.
+- Now Playing on the phone card shows its album-art backdrop without a wallpaper.
+- Quick Share receives are size-checked, and the Dock's "Assign To" settings are no longer
+  wiped on an unreadable preferences file.
+
+**Fixed: Android**
+- "Send file to Mac" now confirms when it finishes, and no longer crashes when it fails.
+- Rotating the screen no longer re-applies a pairing link.
+- Big contact, message and file lists no longer stall the link or remote touch.
+- The phone reconnects after a reboot. While the Mac stays unreachable it retries less often
+  (at most once a minute) to save battery, and it reconnects right away when you open the app or
+  the network changes.
+- Pairing by IP checks the address and port before saving them.
+- Arabic: menus open on the correct side. More messages are translated.
+
+**Under the hood**
+- About 1,000 lines of dead or duplicated code removed or reorganised (`adb.rs`, the Android
+  message dispatcher, `MainActivity`, onboarding).
+
 ## v3.5.2
 
 - **Fixed: the phone couldn't find the Mac after a network change.** This happened most
