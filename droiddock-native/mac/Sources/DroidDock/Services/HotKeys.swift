@@ -151,6 +151,8 @@ final class HotKeys {
     private var handler: EventHandlerRef?
     private var suspended = false
     private var ringing = false
+    /// Failed registrations already toasted ("action|keys"), so re-registering on every edit doesn't repeat the warning.
+    private var warned: Set<String> = []
 
     private init() {
         bindings = Self.load()
@@ -215,17 +217,35 @@ final class HotKeys {
         for (_, ref) in refs { UnregisterEventHotKey(ref) }
         refs.removeAll()
         guard !suspended else { return }
+        var failedNow: Set<String> = []
+        var taken: [String: HotKeyAction] = [:]   // combos registered earlier in this pass
+        defer { warned = warned.intersection(failedNow) }
         for (idx, action) in HotKeyAction.allCases.enumerated() {
             guard let combo = bindings[action], combo.isValidGlobal else { continue }
+            let comboKey = "\(combo.keyCode)/\(combo.modifiers)"
+            if taken[comboKey] != nil {
+                // Same combo bound twice inside DroidDock: not another app's doing.
+                let w = "\(action.rawValue)|dup|\(comboKey)"
+                failedNow.insert(w)
+                if warned.insert(w).inserted {
+                    AppModel.shared.toast(.bad, tr("Shortcut {keys} is already used by another DroidDock action", ["keys": combo.glyphs]))
+                }
+                continue
+            }
             var ref: EventHotKeyRef?
             let id = EventHotKeyID(signature: hotKeySignature, id: UInt32(idx))
             let st = RegisterEventHotKey(combo.keyCode, combo.modifiers, id, GetApplicationEventTarget(), 0, &ref)
             if st == noErr, let ref {
                 refs[action] = ref
+                taken[comboKey] = action
                 dlog("hotkeys: registered \(action.rawValue) = \(combo.glyphs)")
             } else {
                 dlog("hotkeys: could not register \(action.rawValue) = \(combo.glyphs) (status \(st))")
-                AppModel.shared.toast(.bad, tr("Shortcut {keys} is taken by another app", ["keys": combo.glyphs]))
+                let w = "\(action.rawValue)|ext|\(comboKey)"
+                failedNow.insert(w)
+                if warned.insert(w).inserted {
+                    AppModel.shared.toast(.bad, tr("Shortcut {keys} is taken by another app", ["keys": combo.glyphs]))
+                }
             }
         }
     }

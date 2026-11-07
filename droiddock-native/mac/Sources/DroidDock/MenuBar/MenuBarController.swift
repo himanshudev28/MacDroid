@@ -135,8 +135,7 @@ final class MenuBarController: NSObject {
         let reduceMotion = Motion.systemReduceMotion
         let screen = bw.screen ?? NSScreen.main ?? NSScreen.screens[0]
         let vf = screen.visibleFrame
-        let maxH = min(vf.height - 16, 720)
-        let fit = min(max(host.fittingSize.height, 120), maxH)
+        let fit = Self.fittedHeight(host, in: vf)
         host.onFitChange = { [weak self] in self?.contentSizeChanged() }
 
         let btn = bw.frame
@@ -169,6 +168,11 @@ final class MenuBarController: NSObject {
         c.open(pillWidth: btn.width + Motion.Island.pillExtraWidth, pillCenterX: btn.midX - frame.minX,
                reduceMotion: reduceMotion) { [weak self] in self?.p_settled() }
         installMonitors()
+    }
+
+    /// The hosted content's height, clamped to 120...(screen - 16, at most 720).
+    private static func fittedHeight(_ host: NSView, in vf: NSRect) -> CGFloat {
+        min(max(host.fittingSize.height, 120), min(vf.height - 16, 720))
     }
 
     private func p_settled() { panel?.invalidateShadow() }
@@ -231,40 +235,35 @@ final class MenuBarController: NSObject {
         dlog("menubar fit changed")
         guard isOpen, !closing, let p = panel, let c = container, let host = hosting else { return }
         let vf = (p.screen ?? NSScreen.main)?.visibleFrame ?? .zero
-        let maxH = min(vf.height - 16, 720)
-        let h = min(max(host.fittingSize.height, 120), maxH)
+        let h = Self.fittedHeight(host, in: vf)
         guard abs(h - c.shapeHeight) > 0.5 else { return }
-        let reduce = Motion.systemReduceMotion
-        var f = p.frame
-        let top = f.maxY
+        let grow = h > p.frame.height
         shrinkWork?.cancel()
-        let grow = h > f.height
-        if grow {
-            f.size.height = h; f.origin.y = top - h
-            p.setFrame(f, display: false)
-            c.frame.size = f.size
-        }
-        c.layoutHost(height: h)
-        if reduce {
+        // Growing resizes the panel first (so the content has room); shrinking waits for the animation to finish.
+        if grow { setPanelHeight(h, panel: p, container: c) } else { c.layoutHost(height: h) }
+        if Motion.systemReduceMotion {
             c.setFinalHeight(h); c.settle()
-            if !grow { f.size.height = h; f.origin.y = top - h; p.setFrame(f, display: false); c.frame.size = f.size; c.layoutHost(height: h); c.settle() }
+            if !grow { setPanelHeight(h, panel: p, container: c); c.settle() }
             return
         }
         startShadowTracking(for: 0.4)
         c.animateHeight(to: h, duration: 0.28) { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, let p = self.panel, let c = self.container, self.isOpen else { return }
-                if !grow {
-                    var f = p.frame; let top = f.maxY
-                    f.size.height = h; f.origin.y = top - h
-                    p.setFrame(f, display: false)
-                    c.frame.size = f.size
-                    c.layoutHost(height: h)
-                    c.settle()
-                }
+                if !grow { self.setPanelHeight(h, panel: p, container: c); c.settle() }
                 p.invalidateShadow()
             }
         }
+    }
+
+    /// Sets the panel (and its container and hosted content) to height `h`, keeping the top edge where it is.
+    private func setPanelHeight(_ h: CGFloat, panel p: NSPanel, container c: IslandContainerView) {
+        var f = p.frame
+        f.origin.y = f.maxY - h
+        f.size.height = h
+        p.setFrame(f, display: false)
+        c.frame.size = f.size
+        c.layoutHost(height: h)
     }
 
     // MARK: Click outside

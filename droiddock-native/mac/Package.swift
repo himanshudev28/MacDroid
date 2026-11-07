@@ -16,7 +16,7 @@ let package = Package(
         .executableTarget(
             name: "DroidDock",
             dependencies: ["CDroidDockCore"],
-            exclude: ["Resources", "DesignSystem/DESIGN.md"],
+            exclude: ["Resources", "DesignSystem/DESIGN.md", "Scripting/DroidDock.sdef"],
             swiftSettings: [.swiftLanguageMode(.v5)],
             linkerSettings: [
                 .unsafeFlags(["-L", coreLibDir]),

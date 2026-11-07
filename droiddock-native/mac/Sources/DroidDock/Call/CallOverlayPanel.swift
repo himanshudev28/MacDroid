@@ -37,7 +37,7 @@ final class CallOverlayController {
     private func apply() {
         let call = AppModel.shared.activeCall
         CallControls.shared.sync(call)
-        if call?.state == "ringing", NotifPrefs.callRing { CallRinger.shared.start() } else { CallRinger.shared.stop() }
+        if call?.state == "ringing", NotifPrefs.callRing, NotifPrefs.callAlert != "off" { CallRinger.shared.start() } else { CallRinger.shared.stop() }
         guard let call, ["ringing", "active", "dialing"].contains(call.state) else { dismissedState = nil; hide(); return }
         if let d = dismissedState {
             if d == call.state { hide(); return }
@@ -144,10 +144,11 @@ final class CallOverlayController {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard AppModel.shared.activeCall?.state == "ringing" else { return event }
-            // Esc/Return belong to whatever window the user is in: only act when the call panel itself is key.
-            guard let panel = self?.panel, event.window === panel else { return event }
+            // Esc/Return belong to whatever window the user is in (the mirror window forwards Esc to the phone as Back):
+            // act only when the call panel itself is key.
+            guard let panel = self?.panel, let win = event.window, win === panel else { return event }
             // Never hijack typing: only act when no text field has focus and no modifiers are held.
-            if NSApp.keyWindow?.firstResponder is NSText { return event }
+            if win.firstResponder is NSText { return event }
             guard event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty else { return event }
             switch event.keyCode {
             case 36, 76:

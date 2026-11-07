@@ -5,10 +5,12 @@ import SwiftUI
 struct PrivacySettingsPane: View {
     @Environment(AppModel.self) private var model
     @AppStorage(PairingLock.defaultsKey) private var lockQR = false
+    @AppStorage(OTPPrefs.scriptingAllowSendKey) private var scriptingAllowSend = false
     @State private var axTrusted = true
     @State private var spacesBound = false
     @State private var spacesFixFailed = false
     @State private var reportCount = CrashReporter.reportFiles().count
+    @State private var confirmReset = false
 
     var body: some View {
         let remote = model.config?.remoteControl ?? false
@@ -62,6 +64,14 @@ struct PrivacySettingsPane: View {
 
             DDSection(tr("Privacy")) {
                 DescribedToggle(tr("Lock the pairing code"), detail: tr("Ask for Touch ID or your password before the pairing QR is shown."), isOn: $lockQR)
+                DescribedToggle(tr("Let scripts send without asking"), detail: tr("AppleScript, Shortcuts and Raycast can ring your phone, start mirroring, and send the clipboard and texts without a confirmation. Sending files always asks. When off, each one asks first."),
+                                symbol: "terminal", tint: Color(nsColor: .systemOrange), isOn: $scriptingAllowSend)
+                LabeledContent {
+                    Button(tr("Reset pairing…"), role: .destructive) { confirmReset = true }
+                } label: {
+                    RowLabel(title: tr("Reset pairing"), detail: tr("Makes a new pairing code. Use it if the code was shared or a phone should lose access."),
+                             symbol: "arrow.triangle.2.circlepath", tint: Color(nsColor: .systemOrange))
+                }
             }
 
             DDSection(tr("Crash reports"), footer: tr("Saved on this Mac only, in ~/Library/Logs/DroidDock. Nothing is ever sent anywhere.")) {
@@ -87,6 +97,23 @@ struct PrivacySettingsPane: View {
             }
         }
         .onAppear { reportCount = CrashReporter.reportFiles().count }
+        .alert(tr("Reset pairing?"), isPresented: $confirmReset) {
+            Button(tr("Reset pairing"), role: .destructive) { resetPairing() }
+            Button(tr("Cancel"), role: .cancel) {}
+        } message: {
+            Text(tr("Your phone will be disconnected and must scan the new QR code to pair again."))
+        }
+    }
+
+    private func resetPairing() {
+        Task {
+            do {
+                try await Core.shared.pairingReset()
+                await model.refreshPairing()   // the QR and token the Connection pane shows
+                if let c = try? await Core.shared.getConfig() { model.applyConfig(c) }
+                model.toast(.ok, tr("Pairing reset. Scan the new QR code on your phone."))
+            } catch { model.toast(.bad, error.localizedDescription) }
+        }
     }
 }
 

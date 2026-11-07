@@ -26,6 +26,7 @@ dsymutil "$APP/Contents/MacOS/DroidDock" -o "$ROOT/build/DroidDock.dSYM" 2>/dev/
 strip -x "$APP/Contents/MacOS/DroidDock"
 sed "s/__VERSION__/$VERSION/g" "$ROOT/mac/Info.plist" > "$APP/Contents/Info.plist"
 cp "$ROOT/mac/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+cp "$ROOT/mac/Sources/DroidDock/Scripting/DroidDock.sdef" "$APP/Contents/Resources/DroidDock.sdef"
 for d in "$ROOT"/mac/Sources/DroidDock/Resources/*.lproj; do cp -R "$d" "$APP/Contents/Resources/"; done
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 

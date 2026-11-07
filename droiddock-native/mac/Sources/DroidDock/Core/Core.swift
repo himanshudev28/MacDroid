@@ -119,6 +119,9 @@ final class Core: @unchecked Sendable {
     func shutdown() {
         guard isStarted else { return }
         dd_core_shutdown()
+        // Nothing answers after shutdown: fail what is still waiting so no caller hangs on its continuation.
+        lock.lock(); let waiting = pending; pending.removeAll(); lock.unlock()
+        for (_, c) in waiting { c.resume(throwing: CoreError.notStarted) }
     }
 
     // MARK: Invoke

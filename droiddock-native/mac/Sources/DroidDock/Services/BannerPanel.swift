@@ -29,7 +29,10 @@ final class BannerCenter {
             onClose: { [weak self] in self?.dismiss(id: n.id) },
             onOpenPhone: { [weak self] in self?.dismiss(id: n.id); NotificationClickActions.shared.open(key: n.id) },
             onReply: { [weak self] text in
-                Task { try? await Core.shared.notifReply(key: n.replyKey ?? n.id, text: text); AppModel.shared.toast(.ok, tr("Reply sent")) }
+                Task {
+                    do { try await Core.shared.notifReply(key: n.replyKey ?? n.id, text: text); AppModel.shared.toast(.ok, tr("Reply sent")) }
+                    catch { AppModel.shared.toast(.bad, error.localizedDescription) }
+                }
                 self?.dismiss(id: n.id)
             }))
         // Measure at the real width: the content is pinned to 360 pt and fixed vertically, so wrapped text counts.
@@ -40,8 +43,8 @@ final class BannerCenter {
         p.contentView = host
         model.panel = p
         // Any later height change (text wrap, reply field, masked preview) reported by the SwiftUI content re-runs layout.
-        model.onSizeChange = { [weak self, weak p, weak host] in
-            guard let p, let host else { return }
+        model.onSizeChange = { [weak self, weak p, weak host, weak model] in
+            guard let p, let host, let model else { return }
             let h = model.contentHeight > 1 ? model.contentHeight : host.fittingSize.height
             guard abs(p.frame.height - h) > 0.5 else { return }
             p.setContentSize(NSSize(width: self?.width ?? 360, height: h)); self?.layout()
@@ -131,6 +134,10 @@ private struct BannerView: View {
     @FocusState private var focused: Bool
 
     private var canOpenOnPhone: Bool { NotificationClickActions.shared.canOpenOnPhone(key: model.n.id) }
+    private var code: String? {
+        guard OTPPrefs.showCopyAction, model.n.id != "call" else { return nil }
+        return OTPDetector.extract(title: model.n.title, text: model.n.body)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: DD.Space.sm) {
@@ -147,7 +154,7 @@ private struct BannerView: View {
             }
             .contentShape(Rectangle())
             .onTapGesture(perform: onOpen)
-            if model.n.replyKey != nil || canOpenOnPhone {
+            if model.n.replyKey != nil || canOpenOnPhone || code != nil {
                 if model.replying {
                     HStack(spacing: DD.Space.sm) {
                         TextField(tr("Reply…"), text: $text).textFieldStyle(.roundedBorder).focused($focused)
@@ -159,6 +166,9 @@ private struct BannerView: View {
                 } else {
                     HStack(spacing: DD.Space.sm) {
                         Spacer()
+                        if let code {
+                            Button(tr("Copy code")) { SecretPasteboard.copySecret(code); onClose() }.controlSize(.small)
+                        }
                         if canOpenOnPhone { Button(tr("Open"), action: onOpenPhone).controlSize(.small) }
                         if model.n.replyKey != nil {
                             Button(tr("Reply")) { model.replying = true; model.panel?.makeKey(); focused = true }.controlSize(.small)

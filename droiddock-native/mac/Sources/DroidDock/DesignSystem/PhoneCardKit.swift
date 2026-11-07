@@ -216,9 +216,13 @@ struct DDPhoneCard: View {
 
     @State private var playerOpen = true
     @Environment(\.colorScheme) private var outerScheme
+    @Environment(\.ddReduceTransparency) private var reduceTransparency
 
     private var showPlayer: Bool { model.state == .connected && model.nowPlaying != nil && playerOpen }
-    private var onImagery: Bool { model.wallpaper != nil }
+    /// Light-on-dark content whenever imagery is behind it: the wallpaper, or the album-art wash when there is none.
+    private var onImagery: Bool {
+        model.wallpaper != nil || (showPlayer && model.nowPlaying?.artwork != nil && !reduceTransparency)
+    }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: DD.Radius.phone, style: .continuous)
@@ -261,25 +265,47 @@ struct DDPhoneCard: View {
     }
 
     /// connected ↔ reconnecting ↔ offline ↔ pairing: cross-fade with a 2 % settle, never from nothing.
-    private static var stateSwap: AnyTransition { .opacity.combined(with: .scale(scale: 0.98)) }
+    fileprivate static var stateSwap: AnyTransition { .opacity.combined(with: .scale(scale: 0.98)) }
 
     @ViewBuilder private var content: some View {
         switch model.state {
         case .connected:
-            // Never scroll: when the column is short, shed the least important rows (recent apps, then the volume
-            // button and the large clock) until the card fits.
-            GeometryReader { g in connected(level: fitLevel(height: g.size.height)) }
+            PhoneCardConnected(model: model, actions: actions, showPlayer: showPlayer, playerOpen: $playerOpen)
                 .ddTransition(Self.stateSwap)
-        case .connecting: connecting.ddTransition(Self.stateSwap)
-        case .disconnected: disconnected.ddTransition(Self.stateSwap)
-        case .pairing(let qr, let code): pairing(qr: qr, code: code).ddTransition(Self.stateSwap)
+        case .connecting, .disconnected, .pairing:
+            PhoneCardOffline(model: model, actions: actions).ddTransition(Self.stateSwap)
         }
     }
 
-    // Connected ────────────────────────────────────────────────────────────
+    private var accessibilitySummary: String {
+        switch model.state {
+        case .connected:
+            var parts = [model.name, tr("Connected over {t}", ["t": model.transport.title])]
+            if let b = model.battery { parts.append(tr("Battery {n} percent", ["n": b])) }
+            if let np = model.nowPlaying { parts.append(tr("Now playing {t}", ["t": np.title])) }
+            return parts.joined(separator: ", ")
+        case .connecting: return model.name.isEmpty ? tr("Reconnecting…") : tr("Reconnecting to {name}…", ["name": model.name])
+        case .disconnected: return tr("No phone linked")
+        case .pairing: return tr("Pair your phone")
+        }
+    }
+}
+
+/// The connected card: pill, name, clock, recent apps, player, quick actions and the status strip.
+private struct PhoneCardConnected: View {
+    var model: DDPhoneCardModel
+    var actions: DDPhoneCardActions
+    var showPlayer: Bool
+    @Binding var playerOpen: Bool
+
+    var body: some View {
+        // Never scroll: when the column is short, shed the least important rows (recent apps, then the volume
+        // button and the large clock) until the card fits.
+        GeometryReader { g in rows(level: fitLevel(height: g.size.height)) }
+    }
 
     /// Which rows fit in `height` points (approximate heights of the rows, measured on the real card).
-    private func fitLevel(height: CGFloat) -> Int {
+    func fitLevel(height: CGFloat) -> Int {
         let player: CGFloat = showPlayer ? 160 : 0
         let apps: CGFloat = model.recentApps.isEmpty ? 0 : 56
         let base: CGFloat = 330 + player           // pill, name, clock, quick actions, status strip + gaps
@@ -290,7 +316,7 @@ struct DDPhoneCard: View {
     }
 
     /// `level` 0 = everything; 1 = no recent apps; 2 = also compact clock, no volume; 3 = also tighter spacing.
-    private func connected(level: Int) -> some View {
+    private func rows(level: Int) -> some View {
         VStack(spacing: 0) {
             ConnectionPill(transport: model.transport, link: model.link, rttMs: model.rttMs,
                            style: .onCard, action: actions.onConnectionDetails)
@@ -352,8 +378,21 @@ struct DDPhoneCard: View {
             }
         }
     }
+}
 
-    // Other states ─────────────────────────────────────────────────────────
+/// Reconnecting, offline and pairing states.
+private struct PhoneCardOffline: View {
+    var model: DDPhoneCardModel
+    var actions: DDPhoneCardActions
+
+    @ViewBuilder var body: some View {
+        switch model.state {
+        // Own identity + transition per state, so connecting / offline / pairing still cross-fade into each other.
+        case .pairing(let qr, let code): pairing(qr: qr, code: code).id("pairing").ddTransition(DDPhoneCard.stateSwap)
+        case .connecting: connecting.id("connecting").ddTransition(DDPhoneCard.stateSwap)
+        default: disconnected.id("disconnected").ddTransition(DDPhoneCard.stateSwap)
+        }
+    }
 
     private var connecting: some View {
         VStack(spacing: DD.Space.md) {
@@ -448,19 +487,6 @@ struct DDPhoneCard: View {
             Spacer(minLength: DD.Space.sm)
         }
     }
-
-    private var accessibilitySummary: String {
-        switch model.state {
-        case .connected:
-            var parts = [model.name, tr("Connected over {t}", ["t": model.transport.title])]
-            if let b = model.battery { parts.append(tr("Battery {n} percent", ["n": b])) }
-            if let np = model.nowPlaying { parts.append(tr("Now playing {t}", ["t": np.title])) }
-            return parts.joined(separator: ", ")
-        case .connecting: return model.name.isEmpty ? tr("Reconnecting…") : tr("Reconnecting to {name}…", ["name": model.name])
-        case .disconnected: return tr("No phone linked")
-        case .pairing: return tr("Pair your phone")
-        }
-    }
 }
 
 // MARK: - Backdrop (wallpaper / album art / quiet surface)
@@ -474,14 +500,17 @@ private struct PhoneBackdrop: View {
 
     var body: some View {
         ZStack {
-            if let wallpaper {
+            if wallpaper != nil || artwork != nil {
                 (tint ?? Color.black)
-                Image(nsImage: wallpaper).resizable().scaledToFill()
-                    .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-                    .blur(radius: dimmed && !reduceTransparency ? 22 : 0, opaque: true)
-                    .clipped()
-                    .transition(.opacity)
+                if let wallpaper {
+                    Image(nsImage: wallpaper).resizable().scaledToFill()
+                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                        .blur(radius: dimmed && !reduceTransparency ? 22 : 0, opaque: true)
+                        .clipped()
+                        .transition(.opacity)
+                }
                 // Album art while the player is open: a blurred wash, like the lock screen's now-playing backdrop.
+                // It stands on its own when the phone sent no wallpaper.
                 if let artwork, !reduceTransparency {
                     Image(nsImage: artwork).resizable().scaledToFill()
                         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
@@ -815,7 +844,7 @@ struct MiniPlayer: View {
                 .contentTransition(.symbolEffect(.replace))
                 .frame(width: glyph + 14, height: glyph + 14)
         }
-        .buttonStyle(TransportButtonStyle())
+        .buttonStyle(HoverPressStyle(kind: .transport))
         .disabled(onCommand == nil)
         .help(label)
         .accessibilityLabel(label)
@@ -829,29 +858,46 @@ private struct PlayerPlatter: ViewModifier {
     }
 }
 
-/// Plain glyph that dims while pressed and shows a faint circle on hover (Control Center transport buttons).
-private struct TransportButtonStyle: ButtonStyle {
+/// The two hover/press looks of the card's round controls. `.transport`: plain glyph that dims while pressed and shows
+/// a faint circle on hover (Control Center transport buttons). `.module`: glyph on a material platter, accent when on.
+private struct HoverPressStyle: ButtonStyle {
+    enum Kind { case transport, module(isOn: Bool) }
+    var kind: Kind
     func makeBody(configuration: Configuration) -> some View {
-        TransportBody(label: configuration.label, pressed: configuration.isPressed)
+        HoverPressBody(kind: kind, label: configuration.label, pressed: configuration.isPressed)
     }
 }
 
-private struct TransportBody<L: View>: View {
+private struct HoverPressBody<L: View>: View {
+    let kind: HoverPressStyle.Kind
     let label: L
     let pressed: Bool
     @State private var hovering = false
     @Environment(\.isEnabled) private var enabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
-        label
-            .foregroundStyle(DD.fg)
-            .background(Circle().fill(hovering ? DD.hover : .clear))
-            .contentShape(Circle())
-            .scaleEffect(pressed && !reduceMotion ? 0.9 : 1)
-            .opacity(enabled ? (pressed ? 0.6 : 1) : 0.35)
-            .onHover { hovering = $0 && enabled }
-            .animation(Motion.press, value: pressed)
-            .animation(Motion.hover, value: hovering)
+        Group {
+            switch kind {
+            case .transport:
+                label
+                    .foregroundStyle(DD.fg)
+                    .background(Circle().fill(hovering ? DD.hover : .clear))
+                    .contentShape(Circle())
+                    .scaleEffect(pressed && !reduceMotion ? 0.9 : 1)
+                    .opacity(enabled ? (pressed ? 0.6 : 1) : 0.35)
+            case .module(let isOn):
+                label
+                    .foregroundStyle(isOn ? DD.accentInk : DD.fg)
+                    .ddPlatter(Circle(), isOn: isOn, hovering: hovering)
+                    .contentShape(Circle())
+                    .scaleEffect(pressed && !reduceMotion ? 0.92 : 1)
+                    .brightness(pressed ? -0.06 : 0)
+                    .opacity(enabled ? 1 : 0.4)
+            }
+        }
+        .onHover { hovering = $0 && enabled }
+        .animation(Motion.press, value: pressed)
+        .animation(Motion.hover, value: hovering)
     }
 }
 
@@ -969,39 +1015,11 @@ struct OnCardCircleButton: View {
                 .symbolEffect(.bounce, options: .nonRepeating, value: reduceMotion ? false : isOn)   // toggle feedback
                 .frame(width: size, height: size)
         }
-        .buttonStyle(CircleModuleStyle(isOn: isOn))
+        .buttonStyle(HoverPressStyle(kind: .module(isOn: isOn)))
         .ddAnimation(Motion.select, value: isOn)
         .help(label)
         .accessibilityLabel(label)
         .accessibilityAddTraits(isOn ? .isSelected : [])
-    }
-}
-
-private struct CircleModuleStyle: ButtonStyle {
-    var isOn: Bool
-    func makeBody(configuration: Configuration) -> some View {
-        CircleModuleBody(label: configuration.label, pressed: configuration.isPressed, isOn: isOn)
-    }
-}
-
-private struct CircleModuleBody<L: View>: View {
-    let label: L
-    let pressed: Bool
-    let isOn: Bool
-    @State private var hovering = false
-    @Environment(\.isEnabled) private var enabled
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    var body: some View {
-        label
-            .foregroundStyle(isOn ? DD.accentInk : DD.fg)
-            .ddPlatter(Circle(), isOn: isOn, hovering: hovering)
-            .contentShape(Circle())
-            .scaleEffect(pressed && !reduceMotion ? 0.92 : 1)
-            .brightness(pressed ? -0.06 : 0)
-            .opacity(enabled ? 1 : 0.4)
-            .onHover { hovering = $0 && enabled }
-            .animation(Motion.press, value: pressed)
-            .animation(Motion.hover, value: hovering)
     }
 }
 

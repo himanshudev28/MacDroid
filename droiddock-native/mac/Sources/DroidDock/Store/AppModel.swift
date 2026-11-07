@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 import SwiftUI
 
 /// Single source of truth for UI state. Consumes `Core.shared.events` in ONE task (order preserved).
@@ -259,21 +260,62 @@ final class AppModel {
         if let p = try? await Core.shared.getPairingInfo() { pairing = p }
     }
 
-    // MARK: Settings (optimistic-free: the core echoes `config`)
+    // MARK: Settings (optimistic: the new value shows at once; the core's echo confirms it)
 
     private let settingsLane = SerialLane()
+    /// Writes submitted but not yet answered. While any are in flight, configs from the core (older than our
+    /// local value) are held back so a toggle never snaps back before its own echo arrives.
+    @ObservationIgnored private var settingsInFlight = 0
+    @ObservationIgnored private var otpHandled = Set<String>()
+    @ObservationIgnored private var otpCache: [String: (sig: String, code: String?)] = [:]
+    @ObservationIgnored private var otpRecv: [Date] = []
+    @ObservationIgnored private var heldConfig: DroidConfig?
+
+    /// `config` with one key replaced, or nil if the value can't round-trip through JSON.
+    private func patched(_ c: DroidConfig, key: String, value: Any) -> DroidConfig? {
+        guard let data = try? JSONEncoder().encode(c),
+              var dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        // `raw` carries keys the typed fields don't model (notifTiers, notifAppSettings…): keep them.
+        if let rawData = try? JSONEncoder().encode(c.raw), let rawDict = (try? JSONSerialization.jsonObject(with: rawData)) as? [String: Any] {
+            for (k, v) in rawDict where dict[k] == nil { dict[k] = v }
+        }
+        dict[key] = value
+        guard JSONSerialization.isValidJSONObject(dict), let out = try? JSONSerialization.data(withJSONObject: dict) else { return nil }
+        return try? JSONDecoder().decode(DroidConfig.self, from: out)
+    }
+
+    /// A config from the core (event or reply): applied now, or held until our own writes have all been answered.
+    private func receiveConfig(_ c: DroidConfig) {
+        if settingsInFlight > 0 { heldConfig = c } else { set(\.config, c) }
+    }
+
     func setSetting(_ key: String, _ value: Any) {
+        let before = config
+        if let cur = config, let p = patched(cur, key: key, value: value) { set(\.config, p) }
+        settingsInFlight += 1
         // Serial: two quick toggles must apply (and echo their config) in the order they were made.
         nonisolated(unsafe) let v = value
         settingsLane.submit { [weak self] in
             guard let self else { return }
             do {
                 let c = try await Core.shared.setSetting(key, v)
-                await MainActor.run { self.config = c }
+                await MainActor.run { self.heldConfig = c; self.settingDone() }
             } catch {
-                await MainActor.run { self.toast(.bad, error.localizedDescription) }
+                // Roll the optimistic value back to what the core really has.
+                let real = try? await Core.shared.getConfig()
+                await MainActor.run {
+                    // Re-fetch failed too: put back what was there before the optimistic patch.
+                    if let real { self.heldConfig = real } else if self.heldConfig == nil, let before { self.heldConfig = before }
+                    self.settingDone()
+                    self.toast(.bad, error.localizedDescription)
+                }
             }
         }
+    }
+
+    private func settingDone() {
+        settingsInFlight = max(0, settingsInFlight - 1)
+        if settingsInFlight == 0, let h = heldConfig { heldConfig = nil; set(\.config, h) }
     }
 
     // MARK: Blocked unencrypted phone
@@ -407,9 +449,16 @@ final class AppModel {
     /// Writes one app's notification options through the core (which echoes the new config).
     func setAppNotif(_ pkg: String, _ s: AppNotifSettings) {
         Task { [weak self] in
-            do { let c = try await Core.shared.setNotifAppSettings(pkg: pkg, settings: s); self?.set(\.config, c) }
+            do { let c = try await Core.shared.setNotifAppSettings(pkg: pkg, settings: s); self?.receiveConfig(c) }
             catch { self?.toast(.bad, error.localizedDescription) }
         }
+    }
+
+    /// Everything the Mac remembers about the phone goes with it (command-bar recents, app list, notification app names).
+    func phoneForgotten() {
+        CommandBarController.shared.clearRecents()
+        ShellState.shared.forgetPhone()
+        KnownNotifApps.clear()
     }
 
     func clearUpdateInfo() {
@@ -480,9 +529,16 @@ final class AppModel {
 
     // MARK: Events
 
+    private static let eventLog = Logger(subsystem: "com.droiddock.mac", category: "events")
+
     private func decode<T: Decodable>(_ type: T.Type, _ ev: CoreEvent) -> T? {
         do { return try decoder.decode(T.self, from: ev.payload) }
-        catch { dlog("event \(ev.name): decode \(T.self) failed: \(error)"); return nil }
+        catch {
+            dlog("event \(ev.name): decode \(T.self) failed: \(error)")
+            // Release builds too: the event name and the expected type only, never the payload or the decoder's message.
+            Self.eventLog.error("undecodable event \(ev.name, privacy: .public) as \(String(describing: T.self), privacy: .public)")
+            return nil
+        }
     }
 
     /// `@Observable` setters fire on every write, equal or not: periodic events that rarely change go through here.
@@ -501,7 +557,12 @@ final class AppModel {
     }
 
     private func dropCallCards() {
-        if notifications.contains(where: { $0.type == "call" }) { setNotifications(notifications.filter { $0.type != "call" }) }
+        // The core posts the call banner under the fixed id "call", whatever the card's key is.
+        NotificationService.shared.remove(id: "call"); BannerCenter.shared.dismiss(id: "call")
+        let calls = notifications.filter { $0.type == "call" }
+        guard !calls.isEmpty else { return }
+        for c in calls { NotificationService.shared.remove(id: c.key); BannerCenter.shared.dismiss(id: c.key) }
+        setNotifications(notifications.filter { $0.type != "call" })
     }
 
     /// Apps set to "Off everywhere" leave the list (and their delivered banners) as soon as the setting lands.
@@ -526,6 +587,40 @@ final class AppModel {
         list.insert(n, at: 0)
         if list.count > 100 { list.removeLast(list.count - 100) }
         setNotifications(list)
+        autoCopyCode(n)
+    }
+
+    /// The verification code in a notification, computed once per key + text (rows ask on every render).
+    /// Nil for calls and for apps whose preview the user hid, so the list matches the masked banner.
+    func otpCode(for n: PhoneNotification) -> String? {
+        if n.type == "call" { return nil }
+        let sig = (n.title ?? "") + "\u{1}" + (n.text ?? "")
+        let code: String?
+        if let c = otpCache[n.key], c.sig == sig { code = c.code }
+        else {
+            code = OTPDetector.extract(title: n.title, text: n.text)
+            if otpCache.count > 300 { otpCache.removeAll() }
+            otpCache[n.key] = (sig, code)
+        }
+        guard let code else { return nil }
+        if let p = n.pkg, config?.appNotif(p).preview == false { return nil }
+        return code
+    }
+
+    /// Verification codes: copy the code of a LIVE notification, once per key + code. "Live" is judged by when the Mac
+    /// received it: a burst of notifications (the backlog replayed when the link comes up) is never auto-copied, and the
+    /// phone's own timestamp only has to be roughly right (10 min), so a slightly wrong phone clock does not block it.
+    private func autoCopyCode(_ n: PhoneNotification) {
+        let now = Date()
+        otpRecv.append(now)
+        otpRecv.removeAll { now.timeIntervalSince($0) > 3 }
+        guard OTPPrefs.autoCopy, otpRecv.count <= 3, OTPPrefs.isLive(n.time, window: 600), let code = otpCode(for: n) else { return }
+        let id = n.key + "|" + code
+        guard !otpHandled.contains(id) else { return }
+        otpHandled.insert(id)
+        if otpHandled.count > 200 { otpHandled.removeAll(); otpHandled.insert(id) }
+        SecretPasteboard.copySecret(code)
+        toast(.ok, tr("Verification code copied"))
     }
 
     private func handle(_ ev: CoreEvent) {
@@ -536,7 +631,7 @@ final class AppModel {
         #endif
         switch ev.name {
         case "config":
-            if let c = decode(DroidConfig.self, ev) { set(\.config, c) }
+            if let c = decode(DroidConfig.self, ev) { receiveConfig(c) }
         case "pairing-changed":
             // The Mac's LAN addresses changed: re-read them for the QR and address rows.
             Task { await refreshPairing() }
@@ -547,6 +642,9 @@ final class AppModel {
             if !s.connected {
                 if wasConnected { armReconnectGrace() }
                 set(\.media, nil); set(\.mediaArt, nil); set(\.activeCall, nil); set(\.deviceInfo, nil); set(\.linkQuality, nil)
+                // A phone that drops mid-ring must not leave its "Incoming call" card (or banner) behind.
+                dropCallCards()
+                VirtualDisplayBars.shared.phoneDisconnected(adbDeviceAttached: devices.contains { $0.state == "device" })
             } else if !wasConnected {
                 blockedPlain = nil
                 dlog("phone connected: \(s.phoneName ?? "?")")
@@ -585,6 +683,7 @@ final class AppModel {
             if s.state == "IDLE" {
                 set(\.activeCall, nil)
                 NotificationService.shared.remove(id: "call")   // the "Incoming call" banner must not outlive the call
+                BannerCenter.shared.dismiss(id: "call")
             }
         case "vd-window":
             if let w = decode(VDWindowInfo.self, ev) { VirtualDisplayBars.shared.add(w) }
@@ -603,7 +702,7 @@ final class AppModel {
             if p.done { transferProgress[p.transferId] = nil }
             else if transferProgress[p.transferId] != p { transferProgress[p.transferId] = p }
             if p.dir == "phone", p.done {
-                if let e = p.error { toast(.bad, "\(p.name): \(e)") }
+                if let e = p.error { toast(.bad, tr("{name}: {error}", ["name": p.name, "error": FileFormat.errorText(e)])) }
                 else { toast(.ok, tr("{name} saved to Downloads", ["name": p.name])) }
             }
         case "edit-sync":
@@ -673,7 +772,7 @@ final class AppModel {
             audio = nil; onAudioStopped?()
         case "audio-error":
             audioError = decode(ErrorPayload.self, ev)?.error
-            if let e = audioError { toast(.bad, "Phone audio: \(e)") }
+            if let e = audioError { toast(.bad, tr("Phone audio: {e}", ["e": e])) }
         case "update-available":
             updateInfo = decode(UpdateInfo.self, ev)
             resetUpdateInstall()

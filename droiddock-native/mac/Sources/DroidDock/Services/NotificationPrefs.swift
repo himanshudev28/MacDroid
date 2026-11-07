@@ -29,6 +29,7 @@ enum NotifPrefs {
 enum KnownNotifApps {
     static let key = "droiddock.notif.knownApps"
     static func all() -> [String: String] { UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:] }
+    static func clear() { UserDefaults.standard.removeObject(forKey: key) }
     static func record(pkg: String, name: String?) {
         var m = all()
         let label = (name?.isEmpty == false) ? name! : (m[pkg] ?? pkg)

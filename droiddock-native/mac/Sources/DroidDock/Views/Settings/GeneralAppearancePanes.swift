@@ -64,7 +64,10 @@ struct GeneralSettingsPane: View {
                 DescribedToggle(tr("Floating status widget"), detail: tr("A small always-on-top panel with battery and now-playing."),
                                 isOn: Binding(get: { widgetOn ?? c.widgetEnabled }, set: { on in
                     widgetOn = on
-                    Task { try? await Core.shared.widgetSet(show: on) }
+                    Task {
+                        do { try await Core.shared.widgetSet(show: on) }
+                        catch { widgetOn = nil; model.toast(.bad, error.localizedDescription) }   // back to what the core really has
+                    }
                 }))
             }
 

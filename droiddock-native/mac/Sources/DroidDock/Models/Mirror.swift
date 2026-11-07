@@ -37,8 +37,10 @@ struct UpdateInstallOutcome: Codable, Sendable, Equatable { var action: String; 
 
 /// `automation` event: `droiddock://` routes forwarded by the core.
 struct AutomationEvent: Codable, Sendable, Equatable {
-    var action: String         // mirror | mirror-adb | desktop | app | clipboard-push
+    var action: String         // mirror | mirror-adb | desktop | app | clipboard-push | commandbar
     var pkg: String?
+    /// State-changing URL routes: the Mac asks before acting (any web page can fire a `droiddock://` link).
+    var confirm: Bool?
 }
 
 /// `native-notification` (core -> Swift banner request).

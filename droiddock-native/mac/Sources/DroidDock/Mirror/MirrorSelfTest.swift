@@ -1,3 +1,4 @@
+#if DEBUG || DD_BENCH
 import AVFoundation
 import CoreMedia
 import Foundation
@@ -365,3 +366,4 @@ enum AllocCounter {
         return count.pointee
     }
 }
+#endif

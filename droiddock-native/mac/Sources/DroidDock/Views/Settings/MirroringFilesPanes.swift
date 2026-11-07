@@ -28,7 +28,10 @@ struct MirroringSettingsPane: View {
                 Picker(tr("Start with"), selection: startWith) {
                     Text("Wi-Fi").tag("wifi"); Text("ADB").tag("adb"); Text(tr("Desktop")).tag("desktop")
                 }
-                DescribedToggle(tr("Mirror inside the main window"), detail: tr("Off pops the phone out into its own window."), isOn: $mirrorInWindow)
+                DescribedToggle(tr("Mirror inside the main window"), detail: tr("Off pops the phone out into its own window."), isOn: Binding(get: { mirrorInWindow }, set: { on in
+                    mirrorInWindow = on
+                    MirrorSession.shared.setPlacement(inWindow: on)   // a stream already running moves now
+                }))
                 DescribedToggle(tr("Phone audio"), detail: tr("Play the phone's audio on this Mac while mirroring. Wi-Fi needs Android 10+; some apps block capture."),
                                 isOn: model.cfg(\.mirrorAudio, "mirrorAudio"))
             }
@@ -58,7 +61,7 @@ struct MirroringSettingsPane: View {
                 }
                 LabeledContent(tr("Defaults")) {
                     Button(tr("Reset")) {
-                        model.setSetting("mirrorBitrateMbps", 12); model.setSetting("mirrorFps", 60); model.setSetting("mirrorMaxSize", 0)
+                        model.setSetting("mirrorBitrateMbps", 12); model.setSetting("mirrorFps", 60); model.setSetting("mirrorMaxSize", 0); model.setSetting("mirrorCodec", "h264")
                         model.toast(.ok, tr("Mirror quality reset to defaults"))
                     }
                 }
@@ -128,7 +131,7 @@ private struct ProjectionGrantRow: View {
     private func act(_ f: @escaping () async throws -> ProjectionStatus) {
         busy = true
         Task {
-            do { status = try await f() } catch { model.toast(.bad, error.localizedDescription) }
+            do { status = try await f() } catch { model.toast(.bad, FileFormat.errorText(error.localizedDescription)) }
             busy = false
         }
     }
@@ -250,7 +253,7 @@ struct FilesSettingsPane: View {
                 LabeledContent {
                     Button(tr("Back-fill")) {
                         backfilling = true
-                        Task { do { try await Core.shared.photoSyncBackfill() } catch { model.toast(.bad, error.localizedDescription) }; backfilling = false }
+                        Task { do { try await Core.shared.photoSyncBackfill() } catch { model.toast(.bad, FileFormat.errorText(error.localizedDescription)) }; backfilling = false }
                     }.disabled(backfilling || !model.isConnected)
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {

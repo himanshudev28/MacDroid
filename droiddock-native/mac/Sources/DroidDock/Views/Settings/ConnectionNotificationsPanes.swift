@@ -134,7 +134,7 @@ struct ConnectionSettingsPane: View {
                     }
                 }
                 LabeledContent(tr("Forget wireless pairing")) {
-                    Button(tr("Forget"), role: .destructive) { Task { try? await Core.shared.adbUnpair(); model.toast(.info, tr("Wireless pairing removed")) } }
+                    Button(tr("Forget"), role: .destructive) { Task { try? await Core.shared.adbUnpair(); model.phoneForgotten(); model.toast(.info, tr("Wireless pairing removed")) } }
                 }
             }
         }

@@ -70,6 +70,19 @@ final class VirtualDisplayBars {
         if bars.isEmpty { timer?.invalidate(); timer = nil }
     }
 
+    /// Phone link gone: with no adb device left either, the scrcpy windows are dying, so drop every bar and the poll.
+    /// With an adb device still attached the windows may live on; only bars whose window is already gone are dropped.
+    func phoneDisconnected(adbDeviceAttached: Bool) {
+        if !adbDeviceAttached { for pid in Array(bars.keys) { remove(pid: pid) } }
+        else { pruneGone() }
+    }
+
+    /// Bars whose scrcpy process is dead (crash, killed) are removed, which also stops the poll. A window that is merely
+    /// off screen (minimised, another Space, hidden) keeps its bar, which is just hidden meanwhile.
+    private func pruneGone() {
+        for pid in Array(bars.keys) where kill(pid_t(pid), 0) != 0 && errno == ESRCH { remove(pid: pid) }
+    }
+
     private func reposition() {
         guard !bars.isEmpty else { return }
         let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
@@ -80,7 +93,10 @@ final class VirtualDisplayBars {
                 ($0[kCGWindowOwnerPID as String] as? Int) == bar.info.pid && ($0[kCGWindowLayer as String] as? Int) == 0
             }), let dict = list[idx][kCGWindowBounds as String] as? NSDictionary,
                   let r = CGRect(dictionaryRepresentation: dict), r.width > 80
-            else { if bar.panel.isVisible { bar.panel.orderOut(nil) }; continue }
+            else {
+                if bar.panel.isVisible { bar.panel.orderOut(nil) }
+                continue
+            }
             // CoreGraphics measures from the top of the primary screen, AppKit from its bottom.
             let windowBottom = primaryHeight - r.maxY
             let size = bar.panel.frame.size
@@ -97,6 +113,30 @@ final class VirtualDisplayBars {
                 bar.panel.order(.above, relativeTo: list[idx][kCGWindowNumber as String] as? Int ?? 0)
             }
         }
+        pruneGone()
+    }
+
+    /// One entry of a pop-up menu: a title, an optional check mark and what it does.
+    private struct MenuRow { var title: String; var pkg: String; var checked = false; var run: () -> Void }
+
+    /// Shows `rows` (or `emptyTitle` when there are none) under the bar's button at `dx` from the bar's right edge.
+    /// `fetchIconsOnMiss`: icons the Mac already has only, when false, so a menu never waits on the phone.
+    private func popUp(for bar: Bar, rows: [MenuRow], emptyTitle: String, dx: CGFloat, fetchIconsOnMiss: Bool) async {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        if rows.isEmpty {
+            let none = NSMenuItem(title: emptyTitle, action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            menu.addItem(none)
+        }
+        for r in rows {
+            let item = BlockMenuItem(title: r.title, r.run)
+            item.state = r.checked ? .on : .off
+            item.image = await Self.menuIcon(r.pkg, fetchOnMiss: fetchIconsOnMiss)
+            menu.addItem(item)
+        }
+        guard let view = bar.panel.contentView else { return }
+        menu.popUp(positioning: nil, at: NSPoint(x: view.bounds.maxX - dx, y: view.bounds.maxY + 4), in: view)
     }
 
     /// "Recent": the apps open on this display. Android sends its own Recents key to the phone's main
@@ -106,27 +146,14 @@ final class VirtualDisplayBars {
         let info = bar.info
         Task { @MainActor in
             let tasks = (try? await Core.shared.adbVdTasks(serial: info.serial, displayId: info.displayId)) ?? []
-            let menu = NSMenu()
-            menu.autoenablesItems = false
-            if tasks.isEmpty {
-                let none = NSMenuItem(title: tr("No apps open"), action: nil, keyEquivalent: "")
-                none.isEnabled = false
-                menu.addItem(none)
-            }
             var seen = Set<String>()
-            for t in tasks where seen.insert(t.package).inserted {
-                let name = ShellState.shared.appNames[t.package] ?? (t.package.split(separator: ".").last.map(String.init) ?? t.package)
-                let item = BlockMenuItem(title: name) {
+            let rows = tasks.filter { seen.insert($0.package).inserted }.map { t in
+                MenuRow(title: ShellState.shared.appNames[t.package] ?? (t.package.split(separator: ".").last.map(String.init) ?? t.package),
+                        pkg: t.package, checked: t.visible) {
                     Task { try? await Core.shared.adbVdSwitch(serial: info.serial, displayId: info.displayId, package: t.package) }
                 }
-                item.state = t.visible ? .on : .off
-                // Icons the Mac already has only: fetching one from the phone can take seconds, and the
-                // menu used to wait for every one of them before it appeared.
-                item.image = await Self.menuIcon(t.package)
-                menu.addItem(item)
             }
-            guard let view = bar.panel.contentView else { return }
-            menu.popUp(positioning: nil, at: NSPoint(x: view.bounds.maxX - 44, y: view.bounds.maxY + 4), in: view)
+            await popUp(for: bar, rows: rows, emptyTitle: tr("No apps open"), dx: 44, fetchIconsOnMiss: true)
         }
     }
 
@@ -140,35 +167,23 @@ final class VirtualDisplayBars {
             if names.isEmpty, let apps = try? await Core.shared.appsList() {
                 names = Dictionary(apps.map { ($0.pkg, $0.label) }, uniquingKeysWith: { a, _ in a })
             }
-            let menu = NSMenu()
-            menu.autoenablesItems = false
-            if names.isEmpty {
-                let none = NSMenuItem(title: tr("Connect your phone to list apps"), action: nil, keyEquivalent: "")
-                none.isEnabled = false
-                menu.addItem(none)
-            }
-            let sorted = names.sorted { $0.value.localizedStandardCompare($1.value) == .orderedAscending }
-            for (pkg, name) in sorted {
-                let item = BlockMenuItem(title: name) {
+            let rows = names.sorted { $0.value.localizedStandardCompare($1.value) == .orderedAscending }.map { pkg, name in
+                MenuRow(title: name, pkg: pkg) {
                     Task {
                         do { try await Core.shared.adbVdSwitch(serial: info.serial, displayId: info.displayId, package: pkg) }
                         catch { AppModel.shared.toast(.bad, error.localizedDescription) }
                     }
                 }
-                // Disk icons only: a first open must not queue a request per app on the phone.
-                item.image = await Self.menuIcon(pkg, fetchOnMiss: false)
-                menu.addItem(item)
             }
-            guard let view = bar.panel.contentView else { return }
-            menu.popUp(positioning: nil, at: NSPoint(x: view.bounds.maxX - 88, y: view.bounds.maxY + 4), in: view)
+            await popUp(for: bar, rows: rows, emptyTitle: tr("Connect your phone to list apps"), dx: 88, fetchIconsOnMiss: false)
         }
     }
 
     private static func menuIcon(_ pkg: String, fetchOnMiss: Bool = true) async -> NSImage? {
         guard let icon = await PhoneIconStore.shared.local(pkg, fetchOnMiss: fetchOnMiss) else { return nil }
-        let small = NSImage(size: NSSize(width: 18, height: 18))
-        small.lockFocus(); icon.draw(in: NSRect(x: 0, y: 0, width: 18, height: 18)); small.unlockFocus()
-        return small
+        return NSImage(size: NSSize(width: 18, height: 18), flipped: false) { r in
+            icon.draw(in: r); return true
+        }
     }
 }
 

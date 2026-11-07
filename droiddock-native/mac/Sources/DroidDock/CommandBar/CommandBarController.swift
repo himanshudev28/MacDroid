@@ -28,6 +28,8 @@ final class CommandBarController {
     private var index = CBIndex()
     private var indexSignature = ""
     private var loadedApps: [PhoneApp] = []
+    /// `ShellState.phoneEpoch` the cached apps/index belong to: a different phone drops them.
+    private var seenEpoch = 0
     private var loadingApps = false
     private var loadingContacts = false
     private var currentRows = -1
@@ -66,6 +68,7 @@ final class CommandBarController {
         state.armedID = nil
         state.openCount += 1
         isOpen = true
+        dropOtherPhoneData()
         recents = loadRecents()   // once per open, not per keystroke
         refreshIndexIfNeeded()
         recompute()
@@ -245,6 +248,18 @@ final class CommandBarController {
         return c
     }
 
+    /// After a phone switch (or forget), nothing of the previous phone's apps, index or recents may be offered.
+    private func dropOtherPhoneData() {
+        let e = ShellState.shared.phoneEpoch
+        guard e != seenEpoch else { return }
+        seenEpoch = e
+        loadedApps = []
+        loadingApps = false
+        indexSignature = ""
+        index = CBIndex()
+        clearRecents()
+    }
+
     private var phoneApps: [PhoneApp] {
         let names = ShellState.shared.appNames
         if !names.isEmpty { return names.map { PhoneApp(pkg: $0.key, label: $0.value) } }
@@ -284,9 +299,11 @@ final class CommandBarController {
         }
         if phoneApps.isEmpty, !loadingApps {
             loadingApps = true
+            let epoch = seenEpoch
             Task {
-                if let apps = try? await Core.shared.appsList() { loadedApps = apps }
-                loadingApps = false
+                // A reply that lands after a phone switch belongs to the old phone.
+                if let apps = try? await Core.shared.appsList(), epoch == seenEpoch { loadedApps = apps }
+                if epoch == seenEpoch { loadingApps = false }
                 dataArrived()
             }
         }

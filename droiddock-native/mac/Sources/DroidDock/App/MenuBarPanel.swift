@@ -104,6 +104,8 @@ struct MenuBarPanel: View {
                     Text(who).font(DD.Font.headline).foregroundStyle(DD.fg).lineLimit(1)
                     if ringing {
                         Text(tr("Incoming call")).font(DD.Font.callout).foregroundStyle(DD.dim)
+                    } else if call.state == "dialing" {
+                        Text(tr("Calling…")).font(DD.Font.callout).foregroundStyle(DD.dim)
                     } else {
                         TimelineView(.periodic(from: .now, by: UIActivity.shared.period(1))) { ctx in
                             let s = Int(ctx.date.timeIntervalSince(shell.callStart ?? ctx.date))

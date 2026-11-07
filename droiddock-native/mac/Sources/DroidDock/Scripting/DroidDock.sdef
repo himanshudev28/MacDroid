@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
+<dictionary title="DroidDock Terminology">
+  <suite name="DroidDock Suite" code="DDck" description="Control your linked Android phone from AppleScript, JavaScript for Automation, Shortcuts and Raycast.">
+
+    <command name="ring phone" code="DDckRing" description="Make the linked phone ring so you can find it. It stops by itself after a minute.">
+      <cocoa class="DDRingPhoneCommand"/>
+    </command>
+
+    <command name="send clipboard" code="DDckSClp" description="Send the Mac clipboard to the phone.">
+      <cocoa class="DDSendClipboardCommand"/>
+    </command>
+
+    <command name="send file" code="DDckSFil" description="Send files to the phone's Downloads folder.">
+      <cocoa class="DDSendFileCommand"/>
+      <direct-parameter description="POSIX paths of the files to send (for example {&quot;/Users/me/a.pdf&quot;})">
+        <type type="text" list="yes"/>
+      </direct-parameter>
+      <result type="integer" description="How many files were queued."/>
+    </command>
+
+    <command name="get battery" code="DDckGBat" description="Get the phone's battery: a list of {level in percent, charging}.">
+      <cocoa class="DDGetBatteryCommand"/>
+      <result description="{level, charging}; level is -1 when unknown.">
+        <type type="any" list="yes"/>
+      </result>
+    </command>
+
+    <command name="start mirroring" code="DDckMirr" description="Start mirroring the phone screen on the Mac.">
+      <cocoa class="DDStartMirroringCommand"/>
+    </command>
+
+    <command name="show command bar" code="DDckCBar" description="Open the DroidDock command bar.">
+      <cocoa class="DDShowCommandBarCommand"/>
+    </command>
+
+    <command name="send sms" code="DDckSSms" description="Send a text message from the phone.">
+      <cocoa class="DDSendSMSCommand"/>
+      <parameter name="to" code="DDto" type="text" description="The phone number to text.">
+        <cocoa key="recipient"/>
+      </parameter>
+      <parameter name="text" code="DDtx" type="text" description="The message body.">
+        <cocoa key="body"/>
+      </parameter>
+    </command>
+
+  </suite>
+</dictionary>

@@ -187,6 +187,10 @@ struct NotificationsScreen: View {
                 Button(tr("Open")) { NotificationClickActions.shared.open(key: n.key) }
                     .buttonStyle(SecondaryButtonStyle(compact: true))
             }
+            if !isCall, OTPPrefs.showCopyAction, let code = model.otpCode(for: n) {
+                Button { SecretPasteboard.copySecret(code) } label: { Label(tr("Copy code"), systemImage: "number") }
+                    .buttonStyle(SecondaryButtonStyle(compact: true)).help(tr("Copy the verification code"))
+            }
             if n.replyable == true {
                 Button { startReply(n) } label: { Label(tr("Reply"), systemImage: "arrowshape.turn.up.left") }
                     .buttonStyle(SecondaryButtonStyle(compact: true)).help(tr("Reply  ⏎"))
@@ -206,6 +210,7 @@ struct NotificationsScreen: View {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString([n.title, n.text].compactMap { $0 }.joined(separator: "\n"), forType: .string)
         }
+        if n.type != "call", OTPPrefs.showCopyAction, let code = model.otpCode(for: n) { Button(tr("Copy code")) { SecretPasteboard.copySecret(code) } }
         if n.type != "call", NotificationClickActions.shared.canOpenOnPhone(key: n.key) {
             Button(tr("Open on your phone")) { NotificationClickActions.shared.openOnPhone(key: n.key) }
         }

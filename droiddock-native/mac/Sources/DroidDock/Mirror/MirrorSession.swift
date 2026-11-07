@@ -85,7 +85,7 @@ final class MirrorSession {
         _ = nc
         let r = renderer
         decoder.onFrame = { pb in r.enqueue(pb) }
-        audio.onError = { msg in Task { @MainActor in AppModel.shared.toast(.bad, "Phone audio: \(msg)") } }
+        audio.onError = { msg in Task { @MainActor in AppModel.shared.toast(.bad, tr("Phone audio: {e}", ["e": msg])) } }
 
         let m = AppModel.shared
         m.onMirrorWindow = { [weak self] op in op == "open" ? self?.openRequested() : self?.closeRequested() }
@@ -333,6 +333,7 @@ final class MirrorSession {
     }
 }
 
+#if DEBUG || DD_BENCH
 extension MirrorSession {
     /// DD_SELFTEST=ui: pop-out with synthetic H.264 frames, no core. Prints the window number.
     func debugShowSynthetic() {
@@ -347,3 +348,4 @@ extension MirrorSession {
     func debugShowControlHint() { controlHint = true }
     var debugWindowNumber: Int { controller?.windowNumber ?? 0 }
 }
+#endif

@@ -11,6 +11,9 @@ struct NotificationsSettingsPane: View {
     @AppStorage(NotifPrefs.openOnClickKey) private var openOnClick = true
     @AppStorage(NotifPrefs.keepInCenterKey) private var keepInCenter = true
     @AppStorage(NotifPrefs.bannerSecondsKey) private var bannerSeconds = 5
+    @AppStorage(OTPPrefs.showCopyActionKey) private var otpShowCopy = OTPPrefs.showCopyActionDefault
+    @AppStorage(OTPPrefs.autoCopyKey) private var otpAutoCopy = OTPPrefs.autoCopyDefault
+    @AppStorage(OTPPrefs.clearSecondsKey) private var otpClearSeconds = OTPPrefs.clearSecondsDefault
     @State private var search = ""
 
     struct AppRow: Identifiable, Equatable { let pkg: String; let name: String; var id: String { pkg } }
@@ -93,6 +96,26 @@ struct NotificationsSettingsPane: View {
                 }
             }
 
+            DDSection(tr("Verification codes"), symbol: "number.square",
+                      footer: tr("Codes are copied as secrets, so clipboard history apps skip them and they are not sent to your phone. Auto-copy only applies to new notifications.")) {
+                DescribedToggle(tr("Show Copy code button"), detail: tr("Adds a button to notifications that contain a one-time code."),
+                                symbol: "doc.on.doc", tint: Color(nsColor: .systemBlue), isOn: $otpShowCopy)
+                DescribedToggle(tr("Copy codes automatically"), detail: tr("Puts the code on the clipboard as soon as the notification arrives."),
+                                symbol: "number", tint: Color(nsColor: .systemOrange), isOn: $otpAutoCopy)
+                LabeledContent {
+                    Picker("", selection: $otpClearSeconds) {
+                        Text(tr("30 seconds")).tag(30)
+                        Text(tr("1 minute")).tag(60)
+                        Text(tr("2 minutes")).tag(120)
+                        Text(tr("Never")).tag(0)
+                    }
+                    .labelsHidden().fixedSize()
+                } label: {
+                    RowLabel(title: tr("Clear copied code after"), detail: tr("Empties the clipboard again, unless you copied something else."),
+                             symbol: "timer", tint: Color(nsColor: .systemGray))
+                }
+            }
+
             DDSection(tr("Call alerts"), symbol: "phone.arrow.down.left",
                       footer: tr("Pop-up shows a floating panel with Answer and Decline. Banner uses a notification banner. Once a call is answered, its controls always appear.")) {
                 LabeledContent {
@@ -108,6 +131,7 @@ struct NotificationsSettingsPane: View {
                 }
                 DescribedToggle(tr("Ring for calls"), detail: tr("Play a ringtone on the Mac while your phone rings."),
                                 symbol: "bell.and.waves.left.and.right.fill", tint: Color(nsColor: .systemPink), isOn: $callRing)
+                    .disabled(callAlert == "off")
             }
 
             DDSection(tr("App notifications"), symbol: "square.grid.2x2",

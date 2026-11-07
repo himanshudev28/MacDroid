@@ -48,7 +48,7 @@ final class ShellState {
     private(set) var tint: Color?
     private(set) var qr: NSImage?
     private(set) var artwork: NSImage?
-    private(set) var recents: [String] = UserDefaults.standard.stringArray(forKey: recentsKey) ?? []
+    private(set) var recents: [String] = []
     private(set) var appNames: [String: String] = [:]
     private(set) var appIcons: [String: NSImage] = [:]
     private(set) var callStart: Date?
@@ -68,17 +68,24 @@ final class ShellState {
     @ObservationIgnored private var qrURL: String?
     @ObservationIgnored private var artSrc: String?
     @ObservationIgnored private var wasConnected = false
+    /// The phone whose data is on screen (last connected phone's name), and a counter that bumps when it changes.
+    /// Late replies and other caches (the command bar) compare against `phoneEpoch` to drop a previous phone's data.
+    @ObservationIgnored private var phoneName: String?
+    @ObservationIgnored private(set) var phoneEpoch = 0
+    private static let legacyRecentsMovedKey = "droiddock.recentApps.moved"
+    private static func recentsKeyFor(_ phone: String?) -> String { phone.map { recentsKey + "." + $0 } ?? recentsKey }
 
     func start() {
         guard !started else { return }
         started = true
+        recents = UserDefaults.standard.stringArray(forKey: Self.recentsKey) ?? []
         track()
     }
 
     private func track() {
         let m = AppModel.shared
         withObservationTracking {
-            _ = m.isConnected; _ = m.mediaArt; _ = m.activeCall?.state; _ = m.pairing?.url
+            _ = m.isConnected; _ = m.wifi.phoneName; _ = m.mediaArt; _ = m.activeCall?.state; _ = m.pairing?.url
         } onChange: { [weak self] in
             Task { @MainActor in self?.sync(); self?.track() }
         }
@@ -98,29 +105,67 @@ final class ShellState {
                 }
             } else { artwork = nil }
         }
-        let live = m.activeCall.map { ["active", "dialing"].contains($0.state) } ?? false
+        // The timer starts when the call is answered ("active"), not while an outgoing call is still dialing.
+        let live = m.activeCall?.state == "active"
         if live { if callStart == nil { callStart = Date() } } else { callStart = nil }
         if m.isConnected != wasConnected {
             wasConnected = m.isConnected
-            if m.isConnected { forcePairing = false; loadPhoneAssets() }
-            else { wallpaper = nil; tint = nil; ringing = false }
+            if m.isConnected { forcePairing = false; adoptPhone(m.wifi.phoneName); loadPhoneAssets() }
+            else { wallpaper = nil; tint = nil; ringing = false; appNames = [:]; appIcons = [:] }
+        } else if m.isConnected, let n = m.wifi.phoneName, n != phoneName {
+            // Switched straight to another phone, or the name arrived after the connect.
+            let changed = phoneName != nil
+            adoptPhone(n)
+            if changed { loadPhoneAssets() }
         }
     }
 
+    /// Makes `name` the phone on screen. A different phone than before drops everything that belonged to the old one.
+    private func adoptPhone(_ name: String?) {
+        guard let name, name != phoneName else { return }
+        let previous = phoneName
+        phoneName = name
+        if previous != nil {
+            phoneEpoch += 1
+            wallpaper = nil; tint = nil; appNames = [:]; appIcons = [:]
+            artSrc = nil; artwork = nil
+        }
+        // Recents are kept per phone. The one list from before this was per phone goes to the first phone seen.
+        let d = UserDefaults.standard
+        if let own = d.stringArray(forKey: Self.recentsKeyFor( name)) { recents = own }
+        else if previous == nil, !d.bool(forKey: Self.legacyRecentsMovedKey) {
+            d.set(true, forKey: Self.legacyRecentsMovedKey)
+            recents = d.stringArray(forKey: Self.recentsKey) ?? []
+            d.set(recents, forKey: Self.recentsKeyFor( name))
+        } else { recents = [] }
+    }
+
     private func loadPhoneAssets() {
+        let epoch = phoneEpoch
         Task {
             if let s = try? await Core.shared.wallpaperGet(), let img = await ImageCache.shared.image(fromDataURL: s, maxPixel: 900) {
-                guard wasConnected else { return }
+                // A late reply for the previous phone (or after a disconnect) must not land on this one.
+                guard wasConnected, epoch == phoneEpoch else { return }
                 wallpaper = img
                 tint = img.ddAverageColor()
             }
         }
         Task {
-            if let apps = try? await Core.shared.appsList() {
+            if let apps = try? await Core.shared.appsList(), epoch == phoneEpoch, wasConnected {
                 appNames = Dictionary(apps.map { ($0.pkg, $0.label) }, uniquingKeysWith: { a, _ in a })
             }
         }
         for pkg in recents { loadIcon(pkg) }
+    }
+
+    /// The phone was forgotten (Devices / Settings): nothing about its apps or recents should linger.
+    func forgetPhone() {
+        let d = UserDefaults.standard
+        d.removeObject(forKey: Self.recentsKey)
+        d.removeObject(forKey: Self.recentsKeyFor(phoneName))
+        recents = []; appNames = [:]; appIcons = [:]
+        phoneName = nil
+        phoneEpoch += 1
     }
 
     /// Main window closed to the menu bar: drop everything only the window needs (reloaded on reopen).
@@ -135,18 +180,19 @@ final class ShellState {
 
     private func loadIcon(_ pkg: String) {
         guard appIcons[pkg] == nil else { return }
-        Task { if let img = await PhoneIconStore.shared.load(pkg) { appIcons[pkg] = img } }
+        let epoch = phoneEpoch
+        Task { if let img = await PhoneIconStore.shared.load(pkg), epoch == phoneEpoch { appIcons[pkg] = img } }
     }
 
     // Recents (Mac-side list of apps launched from here, as in the old app).
     func recordRecent(_ pkg: String) {
         recents = ([pkg] + recents.filter { $0 != pkg }).prefix(8).map { $0 }
-        UserDefaults.standard.set(recents, forKey: Self.recentsKey)
+        UserDefaults.standard.set(recents, forKey: Self.recentsKeyFor( phoneName))
         loadIcon(pkg)
     }
     func removeRecent(_ pkg: String) {
         recents.removeAll { $0 == pkg }
-        UserDefaults.standard.set(recents, forKey: Self.recentsKey)
+        UserDefaults.standard.set(recents, forKey: Self.recentsKeyFor( phoneName))
     }
     func recentApps() -> [DDRecentApp] {
         recents.prefix(5).map { pkg in
@@ -196,7 +242,7 @@ enum ShellActions {
             var sent = 0
             for u in files {
                 do { try await Core.shared.fsPush(localPath: u.path, dest: "/sdcard/Download"); sent += 1 }
-                catch { model.toast(.bad, "\(u.lastPathComponent): \(error.localizedDescription)") }
+                catch { model.toast(.bad, tr("{name}: {error}", ["name": u.lastPathComponent, "error": FileFormat.errorText(error.localizedDescription)])) }
             }
             if sent == 1 { model.toast(.ok, tr("Sent {name} to Downloads", ["name": files[0].lastPathComponent])) }
             else if sent > 1 { model.toast(.ok, tn("Sent {n} file to Downloads", "Sent {n} files to Downloads", sent)) }
@@ -289,10 +335,19 @@ enum ShellRouter {
         #endif
     }
 
-    static func handle(_ a: AutomationEvent) {
+    static func handle(_ a: AutomationEvent, confirmed: Bool = false) {
+        // State-changing routes (the core sets `confirm`) ask first, without blocking event handling.
+        if a.confirm == true, !confirmed {
+            Task { @MainActor in
+                if await URLRouteGuard.confirm(action: a.action, pkg: a.pkg) { handle(a, confirmed: true) }
+            }
+            return
+        }
         let model = AppModel.shared
         let serial = model.devices.first { $0.state == "device" }?.serial
         switch a.action {
+        case "commandbar":
+            CommandBarController.shared.show()
         case "open":
             WindowControl.showMain()
         case "mirror":

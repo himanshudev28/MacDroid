@@ -46,9 +46,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         #if DEBUG || DD_BENCH
+        if OTPDetectorSelfTest.runIfRequested() { return }   // DD_SELFTEST_OTP=1
         if CommandBarSelfTest.runIfRequested() { return }   // DD_SELFTEST_CMDBAR=1
-        #endif
         if DDSelfTest.runIfRequested() { return }   // DD_SELFTEST=mirror|audio|all (WP4)
+        #endif
         AppModel.shared.start()
         #if DEBUG
         // Test hook: quit through the app's own terminate path after N seconds.

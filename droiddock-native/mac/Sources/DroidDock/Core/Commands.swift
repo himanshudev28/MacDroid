@@ -12,6 +12,8 @@ extension Core {
         try await invoke("set_setting", ["key": key, "value": value])
     }
     func getPairingInfo() async throws -> PairingInfo { try await invoke("get_pairing_info") }
+    /// New pairing token (and a new QR): the paired phone is disconnected and must scan again. Needs a core with `pairing_reset`.
+    func pairingReset() async throws { try await invoke("pairing_reset") }
     func wifiStatus() async throws -> WifiStatus { try await invoke("wifi_status") }
     func pauseSet(until: Double?) async throws -> DroidConfig { try await invoke("pause_set", ["until": until.map { Int64($0.rounded()) } as Any]) }
     func widgetSet(show: Bool) async throws { try await invoke("widget_set", ["show": show]) }

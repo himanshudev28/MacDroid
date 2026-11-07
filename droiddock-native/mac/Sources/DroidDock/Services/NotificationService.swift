@@ -9,6 +9,9 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, @un
     static let shared = NotificationService()
     static let replyCategory = "dd.reply"
     static let plainCategory = "dd.plain"
+    static let otpReplyCategory = "dd.otp.reply"
+    static let otpPlainCategory = "dd.otp.plain"
+    static let copyAction = "dd.copy.action"
     static let replyAction = "dd.reply.action"
     static let openAction = "dd.open.action"
 
@@ -32,7 +35,10 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, @un
             identifier: Self.replyAction, title: tr("Reply"), options: [],
             textInputButtonTitle: tr("Send"), textInputPlaceholder: tr("Reply…"))
         let open = UNNotificationAction(identifier: Self.openAction, title: tr("Open"), options: [])
+        let copy = UNNotificationAction(identifier: Self.copyAction, title: tr("Copy code"), options: [])
         center.setNotificationCategories([
+            UNNotificationCategory(identifier: Self.otpReplyCategory, actions: [copy, open, reply], intentIdentifiers: [], options: []),
+            UNNotificationCategory(identifier: Self.otpPlainCategory, actions: [copy, open], intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: Self.replyCategory, actions: [open, reply], intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: Self.plainCategory, actions: [open], intentIdentifiers: [], options: []),
         ])
@@ -141,6 +147,10 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, @un
         if quiet { c.interruptionLevel = .passive } else if n.sound ?? false { c.sound = .default }
         c.categoryIdentifier = n.replyKey != nil ? Self.replyCategory : Self.plainCategory
         if let k = n.replyKey { c.userInfo = ["replyKey": k] }
+        if n.id != "call", OTPPrefs.showCopyAction, let code = OTPDetector.extract(title: n.title, text: n.body) {
+            c.categoryIdentifier = n.replyKey != nil ? Self.otpReplyCategory : Self.otpPlainCategory
+            c.userInfo["otp"] = code
+        }
         Task {
             if let f = await self.iconFile(forKey: n.id) {
                 let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("dd-icon-\(UUID().uuidString).png")
@@ -210,6 +220,10 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, @un
            let key = r.notification.request.content.userInfo["replyKey"] as? String {
             do { try await Core.shared.notifReply(key: key, text: r.userText) }
             catch { dlog("notif_reply failed: \(error)") }
+        } else if response.actionIdentifier == Self.copyAction {
+            if let code = response.notification.request.content.userInfo["otp"] as? String {
+                await MainActor.run { SecretPasteboard.copySecret(code) }
+            }
         } else if response.actionIdentifier == Self.openAction {
             let key = response.notification.request.identifier
             await MainActor.run {
