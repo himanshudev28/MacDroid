@@ -20,6 +20,17 @@ Electron and then a Tauri client; both are kept in the repo for reference.)*
 
 **[See it in action → himanshudev28.github.io/DroidDockWebsite/](https://himanshudev28.github.io/DroidDockWebsite/)**
 
+[![Download for Mac (.dmg)](https://img.shields.io/badge/Download%20for%20Mac-.dmg-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/himanshudev28/MacDroid/releases/latest/download/DroidDock.dmg)
+[![Download for Android (.apk)](https://img.shields.io/badge/Download%20for%20Android-.apk-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/himanshudev28/MacDroid/releases/latest/download/DroidDock-Android.apk)
+
+<sub>Latest release · Apple Silicon, macOS 14+ · Android 8+ · [all releases & notes](https://github.com/himanshudev28/MacDroid/releases)</sub>
+
+<br>
+
+<img src="docs/shots/demo.gif" alt="A 37-second tour of DroidDock on the Mac: the Home dashboard, notifications, the phone's files, apps, clipboard sync, screen mirroring, Now Playing, messages and calls, the menu bar panel, four window layouts, and the Android app's four styles" width="100%" />
+
+<sub>A quick tour: Home · Notifications · Files · Apps · Clipboard · Mirror · Now Playing · Messages & Calls · menu bar panel · Android app</sub>
+
 </div>
 
 ---
@@ -193,7 +204,9 @@ Pair once — they auto-reconnect whenever both apps are open on the same networ
 
 Grab the prebuilt apps from the [**Releases**](../../releases) page:
 
-1. **Mac** — download `DroidDock-<version>.dmg` (Apple Silicon, macOS 14 or later), open
+1. **Mac** — download [**`DroidDock.dmg`**](https://github.com/himanshudev28/MacDroid/releases/latest/download/DroidDock.dmg)
+   (always the latest version; the release page also lists it as `DroidDock-<version>.dmg`).
+   It needs an Apple Silicon Mac on macOS 14 or later. Open
    it and drag **DroidDock.app** to Applications. The first launch needs one extra step:
    - **macOS 15 Sequoia or later:** double-click the app, click **Done** on the warning,
      then open **System Settings → Privacy & Security**, scroll down to *"DroidDock was
@@ -207,7 +220,8 @@ Grab the prebuilt apps from the [**Releases**](../../releases) page:
    > ```
    > xattr -dr com.apple.quarantine /Applications/DroidDock.app
    > ```
-2. **Android** — download `DroidDock-Android.apk` and sideload it (allow "install unknown apps").
+2. **Android** — download [**`DroidDock-Android.apk`**](https://github.com/himanshudev28/MacDroid/releases/latest/download/DroidDock-Android.apk)
+   and sideload it (allow "install unknown apps").
 3. Open the Mac app → **Pair Device** → scan the QR with the phone app. Done.
 
 > ⬆️ **Coming from the Tauri app?** Its built-in updater can't install the native app,

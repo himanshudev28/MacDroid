@@ -30,3 +30,19 @@ for n in mac-dashboard mac-notifications mac-mirror mac-apps \
   curl -sfL "$SHOTS/$n@2x.webp" -o "docs/shots/$n.webp"
 done
 ```
+
+## Demo GIF
+
+`demo.gif` (960×540, 12 fps, ~37 s, ~6.7 MB) is the top of the README. It is
+cut from the 3.0 tour video, `videos/droiddock-native-demo/renders/DroidDock-3.0-demo.mp4`
+(made with demo data, not a real phone): the feature part, 5.5 s → 60.5 s,
+played at 1.5× speed. Keep it under ~10 MB or GitHub may not show it.
+
+```sh
+SRC=videos/droiddock-native-demo/renders/DroidDock-3.0-demo.mp4
+ffmpeg -ss 5.5 -to 60.5 -i "$SRC" -an -filter_complex \
+  "[0:v]setpts=PTS/1.5,fps=12,scale=960:-1:flags=lanczos,split[a][b];\
+   [a]palettegen=max_colors=128:stats_mode=diff[p];\
+   [b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle" \
+  docs/shots/demo.gif
+```
