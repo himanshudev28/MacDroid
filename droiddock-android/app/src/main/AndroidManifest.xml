@@ -189,6 +189,12 @@
             android:exported="false"
             android:foregroundServiceType="connectedDevice|dataSync" />
 
+        <!-- Retry that restarts BridgeService after the system refused its foreground start (see BridgeRearm). -->
+        <service
+            android:name=".BridgeRearmJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
         <!-- screen mirroring over the app link (MediaProjection → H.264 → WebSocket) -->
         <service
             android:name=".MirrorService"
@@ -238,6 +244,10 @@
             </intent-filter>
         </receiver>
 
+        <!-- Exported because the system delivers PHONE_STATE from outside the app. No android:permission
+             on purpose (it could silently stop real broadcasts on some OEMs). Protected instead in
+             CallReceiver.onReceive: the claimed state must match TelephonyManager's real call state,
+             so a forged intent from another app is ignored. -->
         <receiver android:name=".CallReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.PHONE_STATE" />

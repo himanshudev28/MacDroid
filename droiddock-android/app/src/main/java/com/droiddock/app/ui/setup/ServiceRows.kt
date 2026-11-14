@@ -79,7 +79,7 @@ internal fun ScreenControlRows(serviceOn: Boolean, adminOn: Boolean) {
         subtitle = if (a11yOn) t("Running. Powers auto clipboard and screen control.")
         else t("Off. Auto clipboard and Mac screen control both need this"),
         granted = null,
-        action = if (a11yOn) "Turn off" else "Enable",
+        action = if (a11yOn) t("Turn off") else t("Enable"),
     ) {
         if (a11yOn) {
             AccessibilityControl.disableSelf()
@@ -93,6 +93,8 @@ internal fun ScreenControlRows(serviceOn: Boolean, adminOn: Boolean) {
             }
         }
     }
+    // Sideloaded installs on Android 13+ get a greyed-out accessibility switch until "Allow restricted settings".
+    RestrictedSettingsHint(switchOff = !a11yOn, modifier = Modifier.padding(horizontal = DockTheme.spacing.l))
     DockDivider()
     ServiceRow(
         icon = Icons.Outlined.Lock,
@@ -101,7 +103,7 @@ internal fun ScreenControlRows(serviceOn: Boolean, adminOn: Boolean) {
         subtitle = if (adminOn) t("Mac's Lock button works with Screen Control off")
         else t("Optional. Lets the Mac lock this screen when Screen Control is off"),
         granted = adminOn,
-        action = "Grant",
+        action = t("Grant"),
     ) {
         runCatching { adminPrompt.launch(LockAdmin.enableIntent(ctx)) }
             .onFailure {

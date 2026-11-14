@@ -98,9 +98,9 @@ enum AppLayout: String, CaseIterable, Identifiable, Sendable {
     var summary: String {
         switch self {
         case .phoneTabs: tr("Your phone on the left, five tabs along the top.")
-        case .classic: tr("A sidebar with every screen. The phone sits in a side panel.")
-        case .grouped: tr("A phone card above a sidebar grouped into Inbox, Files and Phone.")
-        case .minimal: tr("The phone card with a few icon tabs. Everything else is under More.")
+        case .classic: tr("A Finder-style sidebar with your phone at the top. Its card opens in a side panel.")
+        case .grouped: tr("A compact phone header, live tiles for your inbox, and folding groups.")
+        case .minimal: tr("No sidebar. Your phone sits in the toolbar and a floating dock takes you anywhere.")
         }
     }
 }

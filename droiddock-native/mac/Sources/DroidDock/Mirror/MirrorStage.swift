@@ -4,6 +4,8 @@ import SwiftUI
 /// (`inWindow: false`) and by `MirrorScreen` / `CameraScreen` (`inWindow: true`).
 struct MirrorStage: View {
     let inWindow: Bool
+    /// The pop-out's chrome (hover reveal). `nil` in the main window, where the controls are always shown.
+    var chrome: MirrorChrome? = nil
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovering = false
@@ -16,9 +18,8 @@ struct MirrorStage: View {
     }
 
     /// The picture with its connecting / failed states on top (never the controls).
-    private var screen: some View {
+    private func screen(radius r: CGFloat) -> some View {
         let live = s.phase == .live
-        let r = inWindow ? radius : MirrorFrame.radius
         return ZStack {
             // A plain filled shape (no clip mask over the live layer); the video layer rounds its own corners.
             RoundedRectangle(cornerRadius: r, style: .continuous).fill(.black)
@@ -30,20 +31,24 @@ struct MirrorStage: View {
         }
     }
 
-    /// Pop-out window: the phone screen sits inside a dark frame. Window buttons and the phone name use the top
-    /// strip, the controls the bottom strip, so nothing covers the picture.
+    /// Pop-out window: the window is the phone. A thin bezel, the window buttons and the name in a slim top strip (quiet
+    /// until the pointer is over the window), the controls in a floating capsule panel under the window. Nothing covers the
+    /// picture, so Android's edge swipes (top and bottom) stay on the phone.
     private var framed: some View {
-        VStack(spacing: 0) {
+        let shown = chrome?.revealed ?? true
+        return VStack(spacing: 0) {
             ZStack {
                 if let note = s.note {
                     Text(note).font(DD.Font.label).foregroundStyle(DD.OnCard.primary)
-                        .ddTransition(.opacity)
+                        .ddTransition(.ddRise)
                 } else if s.controlHint {
                     Text(tr("Phone control is off")).font(DD.Font.label).foregroundStyle(DD.warn)
-                        .ddTransition(.opacity)
+                        .ddTransition(.ddRise)
                 } else {
                     Text(s.isCamera ? tr("Phone camera") : (model.phoneName ?? tr("Phone screen")))
-                        .font(DD.Font.label).foregroundStyle(DD.OnCard.secondary)
+                        .font(DD.Font.label)
+                        .foregroundStyle(shown ? DD.OnCard.secondary : DD.OnCard.tertiary)
+                        .ddTransition(.opacity)
                 }
             }
             .lineLimit(1).truncationMode(.tail)
@@ -51,19 +56,31 @@ struct MirrorStage: View {
             .frame(maxWidth: .infinity)
             .frame(height: MirrorFrame.top)
             .allowsHitTesting(false)
-            screen
-                .padding(.horizontal, MirrorFrame.side)
-            MirrorControlBar(inWindow: false)
-                .frame(maxWidth: .infinity)
-                .frame(height: MirrorFrame.bottom)
+            GeometryReader { g in
+                screen(radius: MirrorFrame.radius(forWidth: g.size.width))
+            }
+            .padding(.horizontal, MirrorFrame.side)
+            .padding(.bottom, MirrorFrame.bottom)
         }
         .background(MirrorFrame.background)
-        .animation(Motion.resolved(Motion.toast, reduceMotion: reduceMotion), value: s.note)
-        .animation(Motion.resolved(Motion.toast, reduceMotion: reduceMotion), value: s.controlHint)
+        .ddAnimation(Motion.content, value: shown)
+        .ddAnimation(Motion.toast, value: s.note)
+        .ddAnimation(Motion.toast, value: s.controlHint)
+        .onContinuousHover { phase in
+            switch phase {
+            case .active: chrome?.pointerMovedInWindow()
+            case .ended: chrome?.pointerLeftWindow()
+            }
+        }
         .ignoresSafeArea()
         .environment(\.colorScheme, .dark)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(s.isCamera ? tr("Phone camera") : tr("Phone screen"))
+        // The capsule lives in another panel and hides when idle: the same commands as VoiceOver actions on the window.
+        .accessibilityAction(named: Text(tr("Stop"))) { s.stop() }
+        .accessibilityAction(named: Text(tr("Save a still to Pictures/DroidDock"))) { s.screenshot() }
+        .accessibilityAction(named: Text(s.audioMuted ? tr("Unmute phone audio") : tr("Mute phone audio"))) { s.toggleMute() }
+        .accessibilityAction(named: Text(s.onTop ? tr("Unpin (on top)") : tr("Keep on top"))) { s.onTop.toggle() }
     }
 
     /// Width / height of the phone picture; a plain phone shape until the first size is known.
@@ -87,13 +104,13 @@ struct MirrorStage: View {
             }
             .lineLimit(2).multilineTextAlignment(.center)
             .frame(maxWidth: .infinity, minHeight: 20)
-            screen
+            screen(radius: radius)
                 .aspectRatio(pictureAspect, contentMode: .fit)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             MirrorControlBar(inWindow: true)
         }
-        .animation(Motion.resolved(Motion.toast, reduceMotion: reduceMotion), value: s.note)
-        .animation(Motion.resolved(Motion.toast, reduceMotion: reduceMotion), value: s.controlHint)
+        .ddAnimation(Motion.toast, value: s.note)
+        .ddAnimation(Motion.toast, value: s.controlHint)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(s.isCamera ? tr("Phone camera") : tr("Phone screen"))
     }
@@ -124,7 +141,10 @@ struct MirrorStage: View {
 /// Floating pill. Buttons never take keyboard focus; the picture view keeps it for typing.
 struct MirrorControlBar: View {
     let inWindow: Bool
+    /// The pop-out's chrome: the hint popover holds it open while showing.
+    var chrome: MirrorChrome? = nil
     @Environment(AppModel.self) private var model
+    @Environment(\.ddReduceTransparency) private var reduceTransparency
     private var s: MirrorSession { MirrorSession.shared }
 
     var body: some View {
@@ -165,11 +185,24 @@ struct MirrorControlBar: View {
             btn("xmark", live || s.phase == .connecting ? tr("Stop") : tr("Close"), danger: true) { s.stop() }
         }
         .padding(.horizontal, DD.Space.xs).padding(.vertical, DD.Space.xs)
-        .background(Capsule().fill(.ultraThinMaterial).environment(\.colorScheme, .dark))
-        .background(Capsule().fill(.black.opacity(0.35)))
+        .background { capsuleFill }
         .overlay(Capsule().strokeBorder(DD.OnCard.stroke))
         .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
         .environment(\.colorScheme, .dark)
+        .ddAnimation(Motion.select, value: live)
+        .onChange(of: showHint) { _, open in chrome?.hold(open) }
+    }
+
+    /// HUD glass over whatever is behind the capsule; a solid dark fill under Reduce Transparency.
+    @ViewBuilder private var capsuleFill: some View {
+        if reduceTransparency {
+            Capsule().fill(Color(white: 0.14))
+        } else {
+            ZStack {
+                Capsule().fill(.black.opacity(0.35))
+                Capsule().fill(.ultraThinMaterial).environment(\.colorScheme, .dark)
+            }
+        }
     }
 
     @State private var showHint = false
@@ -208,12 +241,17 @@ private struct BarButton: View {
             Image(systemName: symbol)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(danger && hover ? DD.bad : DD.OnCard.primary)
+                .contentTransition(.symbolEffect(.replace))
                 .frame(width: 28, height: 28)
                 .background(Circle().fill(on ? DD.OnCard.fillActive : (hover ? DD.OnCard.fillHover : .clear)))
                 .contentShape(Circle())
         }
-        .buttonStyle(.plain).focusable(false)
+        .buttonStyle(PressableButtonStyle())
+        .focusable(false)
         .onHover { hover = $0 }
+        .ddAnimation(Motion.hover, value: hover)
+        .ddAnimation(Motion.select, value: on)
+        .ddAnimation(Motion.select, value: symbol)
         .help(label)
         .accessibilityLabel(label)
     }

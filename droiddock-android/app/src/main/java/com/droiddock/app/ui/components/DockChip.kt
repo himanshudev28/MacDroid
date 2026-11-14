@@ -1,5 +1,6 @@
 package com.droiddock.app.ui.components
 
+import androidx.compose.ui.graphics.graphicsLayer
 import com.droiddock.app.ui.theme.glass.glassControl
 import com.droiddock.app.ui.theme.glass.frostActive
 import androidx.compose.animation.animateColorAsState
@@ -56,15 +57,19 @@ fun DockChip(
     val d = DockTheme.colors
     val mono = DockTheme.style == UiStyle.MINIMAL_MONO
     val shape = DockTheme.shapes.chip
+    // BLOCKS: a selected chip is a solid primary block. INSTRUMENT: ink switches instantly (mechanical).
+    val blocks = DockTheme.signature == com.droiddock.app.ui.theme.DockSignature.BLOCKS
     val bg by animateColorAsState(
         when {
             selected && mono -> s.onSurface
+            selected && blocks -> s.primary
             selected -> s.secondaryContainer
             else -> Color.Transparent
-        }, DockTheme.motion.fade(), label = "chip-bg",
+        }, if (mono) androidx.compose.animation.core.snap() else DockTheme.motion.fade(), label = "chip-bg",
     )
     val fg = when {
         selected && mono -> s.background
+        selected && blocks -> s.onPrimary
         selected -> s.onSecondaryContainer
         else -> s.onSurfaceVariant
     }
@@ -72,6 +77,8 @@ fun DockChip(
     Row(
         modifier
             .heightIn(min = 36.dp)
+            // Press first, so the whole chip reacts, not just its label.
+            .clip(shape).dockClickable { haptics.select(); onClick() }
             .then(
                 if (frostActive()) Modifier.glassControl(
                     shape,
@@ -81,14 +88,24 @@ fun DockChip(
                 else Modifier.clip(shape).background(bg)
                     .then(if (!selected) Modifier.border(1.dp, if (mono) d.hairline else s.outlineVariant, shape) else Modifier)
             )
-            .dockClickable { haptics.select(); onClick() }
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        val lead = if (selected && icon == null && !mono) Icons.Rounded.Check else icon
-        if (lead != null) {
-            Icon(lead, null, tint = fg, modifier = Modifier.size(18.dp))
+        if (icon != null) {
+            Icon(icon, null, tint = fg, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
+        } else if (!mono) {
+            // The check enters / leaves in the signature's own transition (rise, pop, slide-up).
+            androidx.compose.animation.AnimatedVisibility(
+                visible = selected,
+                enter = com.droiddock.app.ui.theme.dockEnterTransition(),
+                exit = com.droiddock.app.ui.theme.dockExitTransition(),
+            ) {
+                Row {
+                    Icon(Icons.Rounded.Check, null, tint = fg, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                }
+            }
         }
         Text(
             if (DockTheme.type.upperCaseLabels) label.uppercase() else label,
@@ -167,12 +184,37 @@ fun DockSegmented(
         val segW = maxWidth / options.size
         // Index as a float on a chrome spring (quick, never bounces), turned into
         // pixels in the layout lambda: sliding never recomposes.
-        val pos = animateFloatAsState(index.toFloat(), DockTheme.motion.chrome(), label = "seg")
+        // Per signature: BLOCKS slides on its pop spring (a small overshoot), INSTRUMENT steps in four clicks, SHELF
+        // glides; DEPTH's leading edge runs ahead of a softer trailing spring, so the thumb stretches like a droplet.
+        val motion = DockTheme.motion
+        val sig = DockTheme.signature
+        val steps = androidx.compose.animation.core.Easing { t -> kotlin.math.floor(t * 4f) / 4f }
+        val spec: androidx.compose.animation.core.AnimationSpec<Float> = when {
+            !motion.enabled -> androidx.compose.animation.core.snap()
+            sig == com.droiddock.app.ui.theme.DockSignature.INSTRUMENT -> androidx.compose.animation.core.tween(140, easing = steps)
+            sig == com.droiddock.app.ui.theme.DockSignature.BLOCKS -> motion.pop()
+            sig == com.droiddock.app.ui.theme.DockSignature.SHELF -> motion.smooth()
+            else -> motion.chrome()
+        }
+        val pos = animateFloatAsState(index.toFloat(), spec, label = "seg")
+        val trail = animateFloatAsState(
+            index.toFloat(),
+            if (motion.enabled && sig == com.droiddock.app.ui.theme.DockSignature.DEPTH) androidx.compose.animation.core.spring(0.8f, motion.spatialStiffness * 0.8f)
+            else spec,
+            label = "seg-trail",
+        )
         Box(
             Modifier
                 .offset { IntOffset((segW.toPx() * pos.value).roundToInt(), 0) }
                 .width(segW)
                 .fillMaxHeight()
+                .graphicsLayer {
+                    // Stretch toward where it came from while the trailing edge catches up (DEPTH only; 0 elsewhere).
+                    val lag = trail.value - pos.value
+                    scaleX = 1f + kotlin.math.abs(lag).coerceAtMost(1f) * 0.55f
+                    scaleY = 1f - kotlin.math.abs(lag).coerceAtMost(1f) * 0.12f
+                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(if (lag < 0f) 1f else 0f, 0.5f)
+                }
                 .then(
                     if (frostActive()) Modifier.glassControl(track, s.primary.copy(alpha = if (d.isDark) 0.34f else 0.22f))
                     else Modifier.clip(track).background(if (mono) s.onSurface else s.surface)

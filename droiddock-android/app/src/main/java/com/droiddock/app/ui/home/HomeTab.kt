@@ -2,7 +2,7 @@ package com.droiddock.app.ui.home
 
 import com.droiddock.app.ui.theme.glass.glassControl
 import com.droiddock.app.ui.theme.glass.frostActive
-import com.droiddock.app.ui.components.AnimatedCounter
+import com.droiddock.app.ui.theme.dockEnter
 import com.droiddock.app.ui.theme.dockItemAnimation
 import com.droiddock.app.ui.theme.dockStagger
 import com.droiddock.app.ui.theme.rememberDockEntrance
@@ -153,25 +153,8 @@ internal fun HomeTab(
             ) }
         }
 
-        if (macInfo != null) {
-            item(key = "stats", contentType = "stats") {
-                Row(Modifier.fillMaxWidth().then(dockItemAnimation()).dockStagger(entrance, 2), horizontalArrangement = Arrangement.spacedBy(sp.m)) {
-                    val info = macInfo
-                    StatTile(
-                        text = if (!info.hasBattery || info.battery == null) "AC" else null,
-                        number = info.battery,
-                        suffix = "%",
-                        label = if (info.charging) t("Mac battery · charging") else t("Mac battery"),
-                        modifier = Modifier.weight(1f),
-                    )
-                    StatTile(
-                        number = devices.size,
-                        label = t("Paired Macs"),
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-        }
+        // No stat tiles: the Mac's battery is already the hero's numeral and the paired Macs are listed under
+        // "Your Macs"; repeating either side by side only added noise.
 
         // Only while the Mac says it will accept input, same gate as the Control tab.
         if (connected && canControlMac) {
@@ -245,7 +228,8 @@ internal fun ConnectionHeroCard(
         connected && transport == com.droiddock.app.link.Transport.BLE -> t("Connected · Bluetooth")
         connected && secure == true -> t("Connected · Encrypted")
         connected && secure == false -> t("Connected · Not encrypted")
-        connected -> if (event.isNullOrBlank()) t("Connected · Wi-Fi") else "Connected · $event"
+        // Never the raw `lastEvent` here: it carries internal steps ("reply → app", "message failed: …") in English.
+        connected -> t("Connected · Wi-Fi")
         paired    -> if (knownName != null) t("Searching for this Mac…") else t("Waiting for Mac to come online")
         else      -> t("Pair with your Mac to get started")
     }
@@ -267,7 +251,9 @@ internal fun ConnectionHeroCard(
         else -> { primaryLabel = t("Quick Connect"); primaryIcon = Icons.Rounded.Cable; onPrimary = onQuickConnect }
     }
 
+    // DockHero draws the tether itself (from `state`); this feeds it a rate-limited pulse per real event.
     DockHero(
+        tetherPulseKey = rememberTetherPulse(linked = state == HeroState.CONNECTED),
         title = title,
         status = status,
         state = state,
@@ -305,27 +291,31 @@ private fun QuickActions(
     onGoToFiles: () -> Unit,
     onGoToConnect: () -> Unit,
 ) {
+    // Each action seats in turn (dockEnter staggers 35 ms apart; nothing moves with animations off).
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Top) {
+        var i = 0
         if (paired) {
             DockCircleToggle(
                 icon = Icons.Rounded.WifiTethering, label = t("Sync"),
                 checked = !isPaused,
                 onToggle = { on -> if (on) onResume() else onPause() },
+                modifier = Modifier.dockEnter(i++),
             )
         }
-        QuickAction(Icons.Rounded.UploadFile, t("Send File"), onGoToFiles)
-        QuickAction(Icons.Rounded.QrCodeScanner, t("Pair Mac"), onGoToConnect)
+        QuickAction(Icons.Rounded.UploadFile, t("Send File"), Modifier.dockEnter(i++), onGoToFiles)
+        // Unpaired, the hero's one action already is "Pair with Mac"; a second pair button beside it is noise.
+        if (paired) QuickAction(Icons.Rounded.QrCodeScanner, t("Pair Mac"), Modifier.dockEnter(i++), onGoToConnect)
         if (showMacControls) {
-            QuickAction(Icons.Rounded.Lock, t("Lock Mac")) { ConnectionManager.sendRemote("lock") }
+            QuickAction(Icons.Rounded.Lock, t("Lock Mac"), Modifier.dockEnter(i)) { ConnectionManager.sendRemote("lock") }
         }
     }
 }
 
 @Composable
-private fun QuickAction(icon: ImageVector, label: String, onClick: () -> Unit) {
+private fun QuickAction(icon: ImageVector, label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val s = MaterialTheme.colorScheme
     Column(
-        Modifier.padding(horizontal = DockTheme.spacing.xs),
+        modifier.padding(horizontal = DockTheme.spacing.xs),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(DockTheme.spacing.s),
     ) {
@@ -349,24 +339,6 @@ private fun QuickAction(icon: ImageVector, label: String, onClick: () -> Unit) {
             style = if (DockTheme.type.upperCaseLabels) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium,
             color = s.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
             modifier = Modifier.clearAndSetSemantics { },
-        )
-    }
-}
-
-@Composable
-private fun StatTile(label: String, modifier: Modifier = Modifier, number: Int? = null, text: String? = null, suffix: String? = null) {
-    val s = MaterialTheme.colorScheme
-    DockCard(modifier) {
-        if (text != null || number == null) {
-            Text(text ?: "", style = DockTheme.type.numeral, color = s.onSurface, maxLines = 1)
-        } else {
-            AnimatedCounter(number, style = DockTheme.type.numeral, color = s.onSurface, suffix = suffix)
-        }
-        Spacer(Modifier.height(DockTheme.spacing.xs))
-        Text(
-            if (DockTheme.type.upperCaseLabels) label.uppercase() else label,
-            style = MaterialTheme.typography.labelMedium, color = s.onSurfaceVariant,
-            maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -416,7 +388,7 @@ internal fun DevicesCard(
         DockCard(contentPadding = 0.dp) {
             DockListItem(
                 headline = activeName,
-                supporting = if (connected) "Connected · ${active.ips.firstOrNull().orEmpty()}:${active.port}"
+                supporting = if (connected) t("Connected · {address}", "address" to "${active.ips.firstOrNull().orEmpty()}:${active.port}")
                              else lastSeenLabel(active.lastSeenAt),
                 icon = Icons.Rounded.Laptop,
                 trailing = {
@@ -454,14 +426,14 @@ internal fun DevicesCard(
     }
 }
 
-/** "Last seen 4m ago", including "just now" for anything under a minute. */
+/** "Last seen 4m ago", including "just now" for anything under a minute. Whole phrases, so each language can order them. */
 internal fun lastSeenLabel(ts: Long): String {
-    if (ts <= 0L) return "Not connected yet"
+    if (ts <= 0L) return t("Not connected yet")
     val diff = System.currentTimeMillis() - ts
-    return "Last seen " + when {
-        diff < 60_000L     -> "just now"
-        diff < 3_600_000L  -> "${diff / 60_000L}m ago"
-        diff < 86_400_000L -> "${diff / 3_600_000L}h ago"
-        else               -> "${diff / 86_400_000L}d ago"
+    return when {
+        diff < 60_000L     -> t("Last seen just now")
+        diff < 3_600_000L  -> t("Last seen {n}m ago", "n" to diff / 60_000L)
+        diff < 86_400_000L -> t("Last seen {n}h ago", "n" to diff / 3_600_000L)
+        else               -> t("Last seen {n}d ago", "n" to diff / 86_400_000L)
     }
 }

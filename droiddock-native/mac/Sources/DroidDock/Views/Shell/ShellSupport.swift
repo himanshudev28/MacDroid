@@ -59,8 +59,10 @@ final class ShellState {
             // "Pair a phone" must show the QR in every layout: bring the phone card back if it is hidden or collapsed.
             guard forcePairing, !oldValue else { return }
             let l = ShellChrome.currentLayout
+            // Minimal: the Dashboard shows the QR (it has no card beside it); opening the popover too showed it twice.
+            if l == .minimal { return }
             ShellChrome.shared.setPhoneHidden(l, false)
-            if !ShellChrome.phoneIsSidebar(l) { ShellChrome.shared.setCollapsed(l, false) }
+            if ShellChrome.hasRail(l) { ShellChrome.shared.setCollapsed(l, false) }
         }
     }
 
@@ -187,12 +189,13 @@ final class ShellState {
     // Recents (Mac-side list of apps launched from here, as in the old app).
     func recordRecent(_ pkg: String) {
         recents = ([pkg] + recents.filter { $0 != pkg }).prefix(8).map { $0 }
-        UserDefaults.standard.set(recents, forKey: Self.recentsKeyFor( phoneName))
+        // No phone adopted (e.g. right after Forget phone): keep it in memory only, never under the shared legacy key.
+        if phoneName != nil { UserDefaults.standard.set(recents, forKey: Self.recentsKeyFor(phoneName)) }
         loadIcon(pkg)
     }
     func removeRecent(_ pkg: String) {
         recents.removeAll { $0 == pkg }
-        UserDefaults.standard.set(recents, forKey: Self.recentsKeyFor( phoneName))
+        if phoneName != nil { UserDefaults.standard.set(recents, forKey: Self.recentsKeyFor(phoneName)) }
     }
     func recentApps() -> [DDRecentApp] {
         recents.prefix(5).map { pkg in
@@ -281,17 +284,19 @@ enum ShellActions {
 
     static func togglePause() {
         let until: Double? = model.isPaused ? nil : (Date().timeIntervalSince1970 + 3600) * 1000
-        Task { _ = try? await Core.shared.pauseSet(until: until) }
+        Task { do { try await Core.shared.pauseSet(until: until) } catch { model.toast(.bad, error.localizedDescription) } }
     }
 
     static func media(_ c: DDMediaCommand) {
         Task {
-            switch c {
-            case .previous: try? await Core.shared.mediaCmd("prev")
-            case .next: try? await Core.shared.mediaCmd("next")
-            case .playPause: try? await Core.shared.mediaCmd(model.media?.playing == true ? "pause" : "play")
-            case .seek(let s): try? await Core.shared.mediaCmd("seek", value: (s * 1000).rounded())
-            }
+            do {
+                switch c {
+                case .previous: try await Core.shared.mediaCmd("prev")
+                case .next: try await Core.shared.mediaCmd("next")
+                case .playPause: try await Core.shared.mediaCmd(model.media?.playing == true ? "pause" : "play")
+                case .seek(let s): try await Core.shared.mediaCmd("seek", value: (s * 1000).rounded())
+                }
+            } catch { model.toast(.bad, error.localizedDescription) }
         }
     }
 
@@ -351,8 +356,10 @@ enum ShellRouter {
         case "open":
             WindowControl.showMain()
         case "mirror":
+            // Navigate only (core/src/automation.rs): any web page can fire `droiddock://mirror`, it carries no `confirm`,
+            // and the Wi-Fi capture needs a consent tap on the phone. Starting it here made a link pop a capture request
+            // with no visible cause; the Mirror tab explains it and has the Start button.
             model.selection = .mirror
-            Task { await MirrorSession.shared.start(source: "screen") }
         case "mirror-adb":
             guard let serial else { model.toast(.info, tr("Connect the phone over ADB to mirror this way")); return }
             Task { do { try await Core.shared.adbMirror(serial: serial) } catch { model.toast(.bad, error.localizedDescription) } }
@@ -443,10 +450,14 @@ struct PhonePanelToggleItem: ToolbarContent {
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
-            Toggle(isOn: Binding(get: { !chrome.isPhoneHidden(layout) }, set: { chrome.setPhoneHidden(layout, !$0) })) {
+            // Shows the *effective* state: when the window is too narrow the panel auto-hides, and a toggle still showing
+            // "on" made the first click do nothing. While it can't fit, the toggle is disabled instead.
+            let fits = chrome.phoneFits(layout)
+            Toggle(isOn: Binding(get: { !chrome.effectivePhoneHidden(layout) }, set: { chrome.setPhoneHidden(layout, !$0) })) {
                 Image(systemName: "iphone")
             }
             .toggleStyle(.button)
+            .disabled(!fits)
             .help("\(tr("Phone panel"))  ⌥⌘S")
             .accessibilityLabel(tr("Phone panel"))
         }

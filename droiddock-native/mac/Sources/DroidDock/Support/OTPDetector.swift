@@ -260,7 +260,7 @@ enum OTPDetector {
 extension PhoneNotification {
     /// The verification code in this notification, if it looks like one.
     var otp: String? {
-        if type == "call" { return nil }
+        if type == "call" || redacted == true { return nil }
         return OTPDetector.extract(title: title, text: text)
     }
 }

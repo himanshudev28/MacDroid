@@ -33,6 +33,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.drawWithContent
 
 /**
  * Motion tokens. Springs for anything spatial (interruptible, keeps velocity),
@@ -138,21 +139,20 @@ val LocalDockMotion = staticCompositionLocalOf {
 }
 
 /**
- * THE press feedback for every interactive Dock component.
+ * THE press feedback for every interactive Dock component, in the current "Docking" signature.
  *
- * - Pressed state starts on press-down (high-stiffness spring, ~40 ms to 90%),
- *   never waits for release.
- * - Scale = [DockMotion.pressScale]: 0.97 Calm/Standard, 0.94 Bouncy. Bouncy
- *   also stretches Y to 0.985x (ColorOS squish) and releases with its own
- *   under-damped spring, so it rebounds past 1. Calm/Standard release without
- *   overshoot (iOS).
- * - `graphicsLayer` only, value read in the draw phase: a press never recomposes
- *   the content. The Animatable keeps its velocity if the press is re-entered.
- * - [onPressDown] fires on the press event for haptics that must be felt with
- *   the motion start (long-press, keys). Toggles keep their haptic on the
- *   commit so a scroll that steals the touch never buzzes.
+ * - DEPTH (Liquid Glass): shrinks to the personality's scale; with [tilt] it also leans up to 4° toward the finger,
+ *   like a lens pressed at that point (cards and tiles only, never list rows; off under battery saver).
+ * - BLOCKS (Material You): squashes to 0.94 and releases with a small overshoot.
+ * - INSTRUMENT (Minimal Mono): no scale; an ink flash over the element's own pixels (mechanical, instant).
+ * - SHELF (Reach): sinks 2 dp and to 0.98, like pressing into a shelf.
+ * - Bouncy personality adds the ColorOS-style Y stretch to the scaling signatures.
  *
- * @param scale override the personality's scale (e.g. 0.95 for large cards).
+ * Pressed state starts on press-down (high-stiffness spring), never waits for release. Draw phase only (graphicsLayer /
+ * drawWithContent): a press never recomposes the content. [onPressDown] fires on the press event for haptics.
+ *
+ * @param scale override the scale (e.g. 0.95 for large cards). Ignored by INSTRUMENT.
+ * @param tilt lean toward the finger (DEPTH only). Pass true on cards and tiles, never on list rows.
  */
 @Composable
 fun Modifier.dockPress(
@@ -160,35 +160,71 @@ fun Modifier.dockPress(
     enabled: Boolean = true,
     scale: Float? = null,
     onPressDown: (() -> Unit)? = null,
+    tilt: Boolean = false,
 ): Modifier {
     val motion = LocalDockMotion.current
     if (!motion.enabled || !enabled) return this
+    val sig = LocalDockStyle.current.signature
     val progress = remember { Animatable(0f) }
+    val at = remember { floatArrayOf(0.5f, 0.5f, 0f, 0f) }   // press x, y (px), then size w, h captured at draw
     val down = rememberUpdatedState(onPressDown)
-    LaunchedEffect(interaction, motion) {
+    LaunchedEffect(interaction, motion, sig) {
         interaction.interactions.collect { i ->
             when (i) {
                 is PressInteraction.Press -> {
+                    at[0] = i.pressPosition.x; at[1] = i.pressPosition.y
                     down.value?.invoke()
-                    launch { progress.animateTo(1f, spring(1f, 3000f)) }
+                    launch { progress.animateTo(1f, spring(1f, if (sig == DockSignature.INSTRUMENT) 6000f else 3000f)) }
                 }
                 is PressInteraction.Release, is PressInteraction.Cancel -> launch {
                     progress.animateTo(
                         0f,
-                        if (motion.stretchy) spring(motion.spatialDamping, motion.spatialStiffness)
-                        else spring(0.92f, 600f),
+                        when {
+                            motion.stretchy && sig != DockSignature.INSTRUMENT -> spring(motion.spatialDamping, motion.spatialStiffness)
+                            sig == DockSignature.BLOCKS || sig == DockSignature.INSTRUMENT -> motion.signatureRelease(sig)
+                            else -> spring(0.92f, 600f)
+                        },
                     )
                 }
             }
         }
     }
-    val target = scale ?: motion.pressScale
+    if (sig == DockSignature.INSTRUMENT) {
+        val ink = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
+        // Offscreen + SrcAtop: the flash tints only the element's own pixels, so it never squares off rounded corners.
+        // The offscreen layer exists only while a press is visible; idle clickables (long lists) stay on the cheap path.
+        return this
+            .graphicsLayer {
+                compositingStrategy = if (progress.value > 0.01f) androidx.compose.ui.graphics.CompositingStrategy.Offscreen
+                else androidx.compose.ui.graphics.CompositingStrategy.Auto
+            }
+            .drawWithContent {
+                drawContent()
+                val p = progress.value
+                if (p > 0.01f) drawRect(ink.copy(alpha = 0.14f * p), blendMode = androidx.compose.ui.graphics.BlendMode.SrcAtop)
+            }
+    }
+    val target = when (sig) {
+        DockSignature.BLOCKS -> minOf(scale ?: motion.pressScale, 0.94f)
+        DockSignature.SHELF -> scale ?: maxOf(motion.pressScale, 0.98f)
+        else -> scale ?: motion.pressScale
+    }
     val stretchy = motion.stretchy
+    val leans = tilt && sig == DockSignature.DEPTH && motion.ambient
     return this.graphicsLayer {
         val p = progress.value
         scaleX = 1f - (1f - target) * p
         scaleY = if (stretchy) 1f - (1f - target * 0.985f) * p else scaleX
         transformOrigin = TransformOrigin.Center
+        if (sig == DockSignature.SHELF) translationY = 2.dp.toPx() * p
+        if (leans && size.width > 0f && size.height > 0f) {
+            val fx = (at[0] / size.width).coerceIn(0f, 1f) - 0.5f
+            val fy = (at[1] / size.height).coerceIn(0f, 1f) - 0.5f
+            // Lean the pressed point away from the viewer: max 4° each axis.
+            rotationY = -fx * 8f * p
+            rotationX = fy * 8f * p
+            cameraDistance = 16f * density
+        }
     }
 }
 
@@ -198,22 +234,29 @@ fun Modifier.pressSquish(interaction: InteractionSource, enabled: Boolean = true
     dockPress(interaction, enabled)
 
 /**
- * Fade + small rise on first composition (empty states, first-load sections).
- * [index] staggers by 35 ms, capped at 6 items. Draw-phase only.
+ * Entrance on first composition (empty states, first-load sections), in the current signature: DEPTH rises out of
+ * depth, BLOCKS pops from 0.9, INSTRUMENT wipes start → end, SHELF slides up from below. [index] staggers by 35 ms,
+ * capped at 6 items. Draw-phase only. Animations off: no-op.
  */
 @Composable
 fun Modifier.dockEnter(index: Int = 0, riseDp: Float = 8f): Modifier {
     val motion = LocalDockMotion.current
     if (!motion.enabled) return this
+    val sig = LocalDockStyle.current.signature
     val p = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
         kotlinx.coroutines.delay(minOf(index, 6) * 35L)
-        p.animateTo(1f, tween(motion.pageMs, easing = motion.easing))
+        p.animateTo(1f, signatureEntranceSpec(motion, sig))
     }
-    return this.graphicsLayer {
-        alpha = p.value
-        translationY = (1f - p.value) * riseDp.dp.toPx()
-    }
+    return dockSignatureLayer(sig, { p.value }, distanceDp = riseDp * 2f)
+}
+
+/** Entrance curve per signature: mechanical for INSTRUMENT, a pop for BLOCKS, the page tween otherwise. */
+internal fun signatureEntranceSpec(motion: DockMotion, sig: DockSignature): AnimationSpec<Float> = when (sig) {
+    DockSignature.INSTRUMENT -> tween(140, easing = androidx.compose.animation.core.LinearEasing)
+    DockSignature.BLOCKS -> motion.pop()
+    DockSignature.SHELF -> spring(1f, motion.spatialStiffness * 0.7f)
+    DockSignature.DEPTH -> tween(motion.pageMs, easing = motion.easing)
 }
 
 /**
@@ -263,8 +306,8 @@ fun rememberDockEntrance(key: String): DockEntrance = remember {
 }
 
 /**
- * Staggered entrance for a screen's opening sections: fade, a 16 dp rise and
- * a 0.97 → 1 scale, 55 ms apart (capped at 6). Only items composed within
+ * Staggered entrance for a screen's opening sections, in the current signature (see [dockEnter]),
+ * 55 ms apart (30 ms for INSTRUMENT), capped at 6. Only items composed within
  * 400 ms of [entrance] animate, so scrolling never replays it. Draw-phase only.
  */
 @Composable
@@ -273,16 +316,16 @@ fun Modifier.dockStagger(entrance: DockEntrance, index: Int): Modifier {
     if (!motion.enabled) return this
     val fresh = remember { android.os.SystemClock.uptimeMillis() - entrance.startedAt < 400 }
     if (!fresh) return this
+    val sig = LocalDockStyle.current.signature
     val p = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(60L + minOf(index, 6) * 55L)
-        p.animateTo(1f, spring(0.9f, motion.spatialStiffness * 0.6f))
+        // INSTRUMENT ticks through quickly (a scan); the others cascade.
+        val step = if (sig == DockSignature.INSTRUMENT) 30L else 55L
+        kotlinx.coroutines.delay(60L + minOf(index, 6) * step)
+        p.animateTo(
+            1f,
+            if (sig == DockSignature.DEPTH) spring(0.9f, motion.spatialStiffness * 0.6f) else signatureEntranceSpec(motion, sig),
+        )
     }
-    return this.graphicsLayer {
-        val v = p.value
-        alpha = v.coerceIn(0f, 1f)
-        translationY = (1f - v) * 16.dp.toPx()
-        val sc = 0.97f + 0.03f * v
-        scaleX = sc; scaleY = sc
-    }
+    return dockSignatureLayer(sig, { p.value })
 }

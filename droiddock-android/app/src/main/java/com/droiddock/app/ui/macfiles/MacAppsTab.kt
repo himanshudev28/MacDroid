@@ -31,6 +31,22 @@ import com.droiddock.app.ConnectionManager
 import com.droiddock.app.t
 import com.droiddock.app.ui.components.DockCard
 import com.droiddock.app.ui.components.DockEmptyState
+import com.droiddock.app.ui.components.DockNumeral
+import com.droiddock.app.ui.components.TetherState
+import com.droiddock.app.ui.files.LinkStatePanel
+import com.droiddock.app.ui.files.PhoneMacTether
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+import com.droiddock.app.ui.theme.dockReveal
+import com.droiddock.app.ui.theme.rememberDockEntrance
+import kotlinx.coroutines.delay
 import com.droiddock.app.ui.components.DockIconButton
 import com.droiddock.app.ui.components.DockListItem
 import com.droiddock.app.ui.components.DockSkeleton
@@ -66,9 +82,13 @@ internal fun MacAppsTab(connected: Boolean) {
     var apps by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
+    // The app just launched, for a moment: its row shows a seated check.
+    var launchedPkg by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(launchedPkg) { if (launchedPkg != null) { delay(1400); launchedPkg = null } }
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
     val sp = DockTheme.spacing
+    val entrance = rememberDockEntrance("macapps")
 
     suspend fun load() {
         error = null
@@ -84,7 +104,7 @@ internal fun MacAppsTab(connected: Boolean) {
             }
             .onFailure {
                 apps = emptyList()
-                error = it.message ?: "Couldn't read the Mac's apps"
+                error = it.message ?: t("Couldn't read the Mac's apps")
             }
     }
 
@@ -103,8 +123,8 @@ internal fun MacAppsTab(connected: Boolean) {
     }
 
     if (!connected) {
-        DockEmptyState(
-            icon = Icons.Rounded.LinkOff,
+        LinkStatePanel(
+            state = TetherState.OFFLINE,
             title = t("Not connected to your Mac."),
             modifier = Modifier.fillMaxSize().padding(horizontal = sp.gutter),
         )
@@ -131,27 +151,50 @@ internal fun MacAppsTab(connected: Boolean) {
         val err = error
         val list = apps
         when {
-            list == null -> DockCard(contentPadding = sp.m) { DockSkeleton(rows = 6) }
-            err != null -> DockEmptyState(Icons.Rounded.LinkOff, err)
+            list == null -> Column {
+                PhoneMacTether(TetherState.CONNECTING, Modifier.fillMaxWidth().padding(vertical = sp.s))
+                DockCard(contentPadding = sp.m) { DockSkeleton(rows = 6) }
+            }
+            err != null -> LinkStatePanel(
+                TetherState.OFFLINE, err,
+                actionLabel = t("Try again"), onAction = { scope.launch { load() } },
+            )
             shown.isEmpty() -> DockEmptyState(
                 icon = Icons.Rounded.SearchOff,
-                title = if (query.isBlank()) t("No apps found.") else "Nothing matching \"$query\".",
+                title = if (query.isBlank()) t("No apps found.") else t("Nothing matching “{q}”.", "q" to query),
             )
-            else -> LazyColumn(
-                Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = LocalDockContentPadding.current.calculateBottomPadding() + sp.xl),
-                verticalArrangement = Arrangement.spacedBy(sp.m),
-            ) {
-                groupedRows(shown, keyOf = { it.first }) { (pkg, label) ->
+            else -> Column(verticalArrangement = Arrangement.spacedBy(sp.s)) {
+                // How many apps the Mac offers (or how many match): rolls as you type.
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = sp.xs),
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(sp.s),
+                ) {
+                    DockNumeral(
+                        shown.size, unit = t("Apps"),
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = LocalDockContentPadding.current.calculateBottomPadding() + sp.xl),
+                    verticalArrangement = Arrangement.spacedBy(sp.m),
+                ) {
+                groupedRows(shown, keyOf = { it.first }, entrance = entrance) { (pkg, label) ->
                     DockListItem(
                         headline = label,
                         supporting = pkg,
                         icon = Icons.Rounded.LaptopMac,
                         iconTone = Tone.SECONDARY,
+                        trailing = if (launchedPkg == pkg) {
+                            { Icon(Icons.Rounded.CheckCircle, null, tint = DockTheme.colors.success, modifier = Modifier.dockReveal(true)) }
+                        } else null,
                         onClick = {
                             scope.launch {
                                 runCatching { ConnectionManager.macAppLaunch(pkg) }
                                     .onSuccess {
+                                        launchedPkg = pkg
                                         Toast.makeText(ctx, t("Opening {label} on your Mac", "label" to label), Toast.LENGTH_SHORT).show()
                                     }
                                     .onFailure {
@@ -160,6 +203,7 @@ internal fun MacAppsTab(connected: Boolean) {
                             }
                         },
                     )
+                }
                 }
             }
         }

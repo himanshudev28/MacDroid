@@ -63,15 +63,33 @@ fun Modifier.dockGlow(shape: Shape, strength: Float = 1f, visible: Boolean = tru
 }
 
 /**
- * The page behind content. Liquid Glass gets soft static colour fields (glass
- * over a flat colour reads as a flat blob, per the research); every other
- * style a flat page colour.
+ * The page behind content. Liquid Glass (DEPTH) gets soft colour fields that drift very slowly (an aurora; glass over a
+ * flat colour reads as a flat blob); every other style a flat page colour.
+ *
+ * The drift is ambient decoration, so it is cheap and gated: it runs only while [rememberAmbientActive] (foreground,
+ * animations on, not battery saver / thermal) and updates about 15 times a second (the fields move a few dp per second,
+ * so steps are invisible). That caps the full-screen redraw (and the Backdrop re-capture behind the glass) at 15 fps
+ * instead of the display rate. Otherwise the fields are static.
  */
 @Composable
 fun Modifier.dockPageBackground(): Modifier {
     val c = LocalDockColors.current
     if (c.backdropA.alpha == 0f) return this.drawBehind { drawRect(c.page) }
+    val ambient = rememberAmbientActive()
+    val t = androidx.compose.runtime.remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    androidx.compose.runtime.LaunchedEffect(ambient) {
+        if (!ambient) return@LaunchedEffect
+        val start = android.os.SystemClock.uptimeMillis() - (t.floatValue * 1000f).toLong()
+        while (true) {
+            kotlinx.coroutines.delay(66)
+            t.floatValue = (android.os.SystemClock.uptimeMillis() - start) / 1000f
+        }
+    }
     return this.drawBehind {
+        // Slow Lissajous drift, at most ~6% of the width; one full cycle is minutes long.
+        val k = t.floatValue
+        fun dx(f: Float, ph: Float): Float = (kotlin.math.sin((k * f + ph).toDouble()) * 0.06).toFloat()
+        fun dy(f: Float, ph: Float): Float = (kotlin.math.cos((k * f * 0.8f + ph).toDouble()) * 0.04).toFloat()
         drawRect(c.page)
         val w = size.width
         val h = size.height
@@ -79,9 +97,9 @@ fun Modifier.dockPageBackground(): Modifier {
             Brush.radialGradient(listOf(color, color.copy(alpha = 0f)), center = Offset(cx, cy), radius = r),
             radius = r, center = Offset(cx, cy),
         )
-        blob(c.backdropA, w * 0.05f, h * 0.08f, w * 1.15f)
-        blob(c.backdropB, w * 1.0f, h * 0.36f, w * 1.00f)
-        blob(c.backdropC, w * 0.10f, h * 0.70f, w * 1.00f)
-        blob(c.backdropB, w * 0.95f, h * 0.98f, w * 0.90f)
+        blob(c.backdropA, w * (0.05f + dx(0.031f, 0f)), h * (0.08f + dy(0.027f, 1f)), w * 1.15f)
+        blob(c.backdropB, w * (1.0f + dx(0.023f, 2f)), h * (0.36f + dy(0.035f, 0.5f)), w * 1.00f)
+        blob(c.backdropC, w * (0.10f + dx(0.029f, 4f)), h * (0.70f + dy(0.021f, 3f)), w * 1.00f)
+        blob(c.backdropB, w * (0.95f + dx(0.019f, 5f)), h * (0.98f + dy(0.025f, 2f)), w * 0.90f)
     }
 }

@@ -593,7 +593,7 @@ final class AppModel {
     /// The verification code in a notification, computed once per key + text (rows ask on every render).
     /// Nil for calls and for apps whose preview the user hid, so the list matches the masked banner.
     func otpCode(for n: PhoneNotification) -> String? {
-        if n.type == "call" { return nil }
+        if n.type == "call" || n.isHiddenByAndroid { return nil }
         let sig = (n.title ?? "") + "\u{1}" + (n.text ?? "")
         let code: String?
         if let c = otpCache[n.key], c.sig == sig { code = c.code }
@@ -638,6 +638,7 @@ final class AppModel {
         case "wifi-status":
             guard let s = decode(WifiStatus.self, ev) else { return }
             let wasConnected = wifi.connected
+            if s != wifi { DiagLog.shared.add("link: \(s.connected ? "connected" : "disconnected") transport=\(s.transport ?? "-") security=\(s.security ?? "-")") }
             set(\.wifi, s)
             if !s.connected {
                 if wasConnected { armReconnectGrace() }
@@ -654,6 +655,7 @@ final class AppModel {
         case "wifi-event":
             let wifiEvent = decode(WifiEvent.self, ev)
             set(\.lastWifiEvent, wifiEvent)
+            if let e = wifiEvent { DiagLog.shared.add("event[\(e.kind)]: \(e.key ?? "(untemplated)")") }
             if let e = wifiEvent, e.action == "allow-plain", let id = e.deviceId {
                 blockedPlainEvent(deviceId: id, name: e.params?["name"] ?? tr("phone"))
             }
@@ -671,7 +673,9 @@ final class AppModel {
             struct K: Decodable { let key: String }
             if let k = decode(K.self, ev) {
                 // Phone-side dismissal: keep the Mac's copy when dismissal sync is off for that app.
-                if !syncsDismissals(pkg: notifications.first { $0.key == k.key }?.pkg) { return }
+                // A live card (ride, download, timer) always leaves with its notification: a stale bar is wrong.
+                let gone = notifications.first { $0.key == k.key }
+                if gone?.isLive != true, !syncsDismissals(pkg: gone?.pkg) { return }
                 setNotifications(notifications.filter { $0.key != k.key })
                 NotificationService.shared.remove(id: k.key)
             }

@@ -412,10 +412,11 @@ pub async fn transfer_open(app: AppHandle, key: u64) -> Result<(), String> {
     open_saved(&app, key, false).await
 }
 
-/// File types that run code when opened. Received files carry no quarantine
-/// flag, so `open` on one of these would run it with no Gatekeeper prompt —
-/// and Quick Share accepts files from anyone nearby. Open refuses them; Show
-/// in Finder still works. Kept in step with `RUNNABLE` in TransfersView.tsx.
+/// File types that run code when opened. Received files now carry a
+/// `com.apple.quarantine` flag (`transfer::mark_quarantined`), so Gatekeeper
+/// would prompt, but the flag is best effort (it can fail to set, and some
+/// types are not checked) and Quick Share accepts files from anyone nearby.
+/// Open still refuses these types; Show in Finder works. Kept in step with `RUNNABLE` in TransfersView.tsx.
 const RUNNABLE: &[&str] = &[
     "app", "command", "terminal", "tool", "sh", "zsh", "bash", "csh", "py", "rb", "pl",
     "pkg", "mpkg", "dmg", "jar", "scpt", "scptd", "applescript", "workflow", "action",

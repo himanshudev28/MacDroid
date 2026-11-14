@@ -38,6 +38,9 @@ import com.droiddock.app.ui.setup.ToggleRow
 import com.droiddock.app.ui.theme.Appearance
 import com.droiddock.app.ui.theme.AppearanceStore
 import com.droiddock.app.ui.theme.DockTheme
+import com.droiddock.app.ui.theme.DockEntrance
+import com.droiddock.app.ui.theme.dockStagger
+import com.droiddock.app.ui.theme.rememberDockEntrance
 
 /**
  * Settings: DockScaffold (large collapsing header in Reach, normal top bar
@@ -136,8 +139,10 @@ internal fun SettingsContent(
         ),
     )
 
+    val entrance = rememberDockEntrance("settings")
+    var order = 0
     DockScaffold(title = t("Settings")) {
-        section("appearance", t("Appearance")) {
+        section(entrance, order++, "appearance", t("Appearance")) {
             AppearanceRows(appearance, onAppearance)
             DockDivider()
             LanguageRow()
@@ -151,7 +156,7 @@ internal fun SettingsContent(
                 checked = crashNotify, onChecked = onCrashNotify,
             )
         }
-        section("connection", t("Connection")) {
+        section(entrance, order++, "connection", t("Connection")) {
             ServiceRow(
                 icon = Icons.Outlined.WifiTethering,
                 title = t("Pair or change Mac"),
@@ -167,16 +172,16 @@ internal fun SettingsContent(
             )
             BluetoothFallbackRows()
         }
-        section("phone", t("This phone")) { DeviceIdentityRows() }
-        section("permissions", t("Permissions")) {
+        section(entrance, order++, "phone", t("This phone")) { DeviceIdentityRows() }
+        section(entrance, order++, "permissions", t("Permissions")) {
             PermissionChecklist(perms)
             DockDivider()
             AutoClipRow(a11yOn = clipA11y, auto = clipAuto, onEnable = onEnableClip, onToggle = onToggleClipAuto)
             DockDivider()
             ScreenControlRows(serviceOn = clipA11y, adminOn = deviceAdmin)
         }
-        section("tiles", t("Quick Settings tiles")) { TileRows() }
-        section("help", t("Help")) {
+        section(entrance, order++, "tiles", t("Quick Settings tiles")) { TileRows() }
+        section(entrance, order++, "help", t("Help")) {
             ServiceRow(
                 icon = Icons.Outlined.LibraryBooks,
                 title = t("Feature Guide"),
@@ -184,7 +189,7 @@ internal fun SettingsContent(
                 granted = null, action = "Open",
             ) { onOpenGuide() }
         }
-        section("updates", t("Updates")) {
+        section(entrance, order++, "updates", t("Updates")) {
             UpdateRow(knownUpdate)
             DockDivider()
             AutoUpdateRow()
@@ -194,14 +199,17 @@ internal fun SettingsContent(
                 "DroidDock · ${BuildConfig.VERSION_NAME}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = DockTheme.spacing.xs),
+                modifier = Modifier.padding(start = DockTheme.spacing.xs).dockStagger(entrance, 7),
             )
         }
     }
 }
 
-private fun LazyListScope.section(key: String, title: String, content: @Composable () -> Unit) {
+private fun LazyListScope.section(
+    entrance: DockEntrance, index: Int, key: String, title: String, content: @Composable () -> Unit,
+) {
     item(key = key, contentType = "section") {
-        DockSection(title, dockItemAnimation()) { content() }
+        // Sections dock in one after another on first open; later scrolls and edits stay still.
+        DockSection(title, dockItemAnimation().dockStagger(entrance, index)) { content() }
     }
 }

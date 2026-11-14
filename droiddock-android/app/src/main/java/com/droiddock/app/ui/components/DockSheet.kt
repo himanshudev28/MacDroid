@@ -125,9 +125,17 @@ fun DockSheet(
     var settleJob by remember { mutableStateOf<Job?>(null) }
     val pastThreshold = remember { booleanArrayOf(false) }
 
+    // Per signature: INSTRUMENT snaps up crisply (critically damped, stiff); BLOCKS overshoots a touch (its pop);
+    // SHELF glides with no bounce; DEPTH keeps the personality's sheet spring.
+    val sheetSig = DockTheme.signature
     val openSpec: AnimationSpec<Float> = if (!motion.enabled) snap() else spring(
-        dampingRatio = when { motion.stretchy -> 0.7f; motion.spatialDamping >= 1f -> 1f; else -> 0.85f },
-        stiffness = motion.spatialStiffness, visibilityThreshold = 0.5f,
+        dampingRatio = when {
+            sheetSig == com.droiddock.app.ui.theme.DockSignature.INSTRUMENT || sheetSig == com.droiddock.app.ui.theme.DockSignature.SHELF -> 1f
+            sheetSig == com.droiddock.app.ui.theme.DockSignature.BLOCKS -> minOf(motion.spatialDamping, 0.72f)
+            motion.stretchy -> 0.7f; motion.spatialDamping >= 1f -> 1f; else -> 0.85f
+        },
+        stiffness = if (sheetSig == com.droiddock.app.ui.theme.DockSignature.INSTRUMENT) motion.spatialStiffness * 2.2f else motion.spatialStiffness,
+        visibilityThreshold = 0.5f,
     )
     val closeSpec: AnimationSpec<Float> =
         if (!motion.enabled) snap() else spring(1f, motion.spatialStiffness * 1.6f, 0.5f)

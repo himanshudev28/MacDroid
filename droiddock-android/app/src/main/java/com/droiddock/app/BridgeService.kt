@@ -67,7 +67,11 @@ class BridgeService : Service() {
         super.onCreate()
         createChannel()
         foregrounded = startInForeground(buildNotification("Waiting for Mac…"))
-        if (foregrounded) watchState()
+        if (foregrounded) {
+            running = true
+            BridgeRearm.onServiceStarted(applicationContext)
+            watchState()
+        }
         // No stopSelf() here: it does not stop the pending onStartCommand, which would run
         // ensureLoop on a service that never went foreground. onStartCommand decides instead.
     }
@@ -97,10 +101,14 @@ class BridgeService : Service() {
             foregrounded = startInForeground(buildNotification("Waiting for Mac…"))
             if (!foregrounded) {
                 // The system refused the foreground start (background-start restriction, FGS quota).
-                // Bow out without touching the link; the next app launch starts us from the foreground.
+                // Bow out without touching the link. The next app launch starts us from the foreground,
+                // and a backed-off, capped JobScheduler retry (BridgeRearm) tries again meanwhile.
+                BridgeRearm.schedule(applicationContext)
                 stopSelf()
                 return START_NOT_STICKY
             }
+            running = true
+            BridgeRearm.onServiceStarted(applicationContext)
             watchState()
         }
         ConnectionManager.ensureLoop(applicationContext)
@@ -129,6 +137,7 @@ class BridgeService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        running = false
         if (observing) runCatching { contentResolver.unregisterContentObserver(smsObserver) }
         if (observingPhotos) runCatching { contentResolver.unregisterContentObserver(photosObserver) }
         handler.removeCallbacks(notifySms)
@@ -177,10 +186,12 @@ class BridgeService : Service() {
      * with no handler on half the versions that can time out.
      */
     override fun onTimeout(startId: Int) {
+        BridgeRearm.schedule(applicationContext)
         stopSelf()
     }
 
     override fun onTimeout(startId: Int, fgsType: Int) {
+        BridgeRearm.schedule(applicationContext)
         stopSelf()
     }
 
@@ -214,6 +225,9 @@ class BridgeService : Service() {
     companion object {
         private const val CHANNEL = "bridge"
         private const val NOTIF_ID = 1
+
+        /** True while an instance holds the foreground (set/cleared by the service itself). */
+        @Volatile var running = false
 
         fun start(ctx: Context) {
             val i = Intent(ctx, BridgeService::class.java)

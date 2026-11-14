@@ -16,8 +16,15 @@ struct MenuBarPanel: View {
 
     private var isPaired: Bool { model.isConnected || model.config?.deviceName?.isEmpty == false }
     private var visible: [PhoneNotification] {
-        model.notifications.filter { model.activeCall == nil || $0.type != "call" }
+        model.notifications.filter { (model.activeCall == nil || $0.type != "call") && !isShownLive($0) }
     }
+    /// Ongoing progress / timer notifications, newest first, only while the phone is linked (a stale bar would lie).
+    private var live: [PhoneNotification] {
+        guard model.isConnected else { return [] }
+        return Array(model.notifications.filter(\.isLive).prefix(Self.maxLive))
+    }
+    /// Live notifications never fall into the plain list: offline their cards are simply hidden (they would be stale).
+    private func isShownLive(_ n: PhoneNotification) -> Bool { n.isLive }
 
     var body: some View {
         VStack(spacing: DD.Space.sm) {
@@ -26,6 +33,7 @@ struct MenuBarPanel: View {
                 if model.isConnected { actionsModule }
                 if let call = model.activeCall { callModule(call) }
                 if model.isConnected, let np = shell.nowPlaying(model) { PanelNowPlaying(track: np) }
+                if !live.isEmpty { liveModule }
                 if !visible.isEmpty { notificationsModule }
             } else {
                 pairingModule
@@ -35,6 +43,7 @@ struct MenuBarPanel: View {
         .padding(DD.Space.md)
         .frame(width: DD.Size.menuBarWidth)
         .ddAnimation(Motion.content, value: visible.count)
+        .ddAnimation(Motion.content, value: live.map(\.key))
         .ddAnimation(Motion.content, value: model.activeCall?.state)
         .ddAnimation(Motion.content, value: model.isConnected)
     }
@@ -140,6 +149,20 @@ struct MenuBarPanel: View {
 
     private func callAction(_ a: String, on: Bool? = nil) {
         Task { do { _ = try await Core.shared.callAction(a, on: on) } catch { model.toast(.bad, error.localizedDescription) } }
+    }
+
+    // MARK: Live progress
+
+    private static let maxLive = 3
+
+    /// Rides, deliveries, downloads and timers: one compact row each, updated as the phone reports.
+    private var liveModule: some View {
+        PanelModule {
+            VStack(alignment: .leading, spacing: DD.Space.md) {
+                ForEach(live) { LiveRow(n: $0) }
+            }
+        }
+        .ddTransition(.ddRow)
     }
 
     // MARK: Notifications
@@ -374,7 +397,10 @@ private struct NotificationCard: View {
                 if let title = n.title, !title.isEmpty {
                     Text(title).font(DD.Font.body.weight(.semibold)).foregroundStyle(DD.fg).lineLimit(1)
                 }
-                if let text = n.text, !text.isEmpty {
+                if n.isHiddenByAndroid {
+                    Label(tr("Content hidden by Android"), systemImage: "eye.slash")
+                        .font(DD.Font.callout).foregroundStyle(DD.dim).lineLimit(1)
+                } else if let text = n.text, !text.isEmpty {
                     Text(text).font(DD.Font.callout).foregroundStyle(DD.dim).lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 }
                 let canOpen = n.type != "call" && NotificationClickActions.shared.canOpenOnPhone(key: n.key)
@@ -427,6 +453,56 @@ private struct NotificationCard: View {
         withAnimation(Motion.exit) { gone = true; dx = dx == 0 ? -40 : dx * 2 }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) { onDismiss() }
     }
+}
+
+// MARK: - Live row
+
+/// An ongoing progress or timer notification, compact: icon, title, status line, and a bar or a clock.
+private struct LiveRow: View {
+    var n: PhoneNotification
+
+    private var title: String {
+        if let t = n.title, !t.isEmpty { return t }
+        return n.app ?? tr("Notification")
+    }
+    private var detail: String? {
+        [n.text, n.subText].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ").nilIfEmpty
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: DD.Space.sm + 2) {
+            PhoneAppIcon(pkg: n.pkg, name: n.app ?? n.title ?? "?", size: 28)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: DD.Space.sm) {
+                    Text(title).font(DD.Font.body.weight(.semibold)).foregroundStyle(DD.fg).lineLimit(1)
+                    Spacer(minLength: 0)
+                    if n.isChronometer { clock }
+                    else if let f = n.progressFraction {
+                        Text("\(Int((f * 100).rounded()))%").font(DD.Font.label).monospacedDigit().foregroundStyle(DD.dim)
+                    }
+                }
+                if n.hasProgress {
+                    if let f = n.progressFraction { ProgressView(value: f).progressViewStyle(.linear).controlSize(.small) }
+                    else { ProgressView().progressViewStyle(.linear).controlSize(.small) }
+                }
+                if let d = detail {
+                    Text(d).font(DD.Font.label).foregroundStyle(DD.dim).lineLimit(1)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var clock: some View {
+        TimelineView(.periodic(from: .now, by: UIActivity.shared.period(1))) { ctx in
+            Text(PhoneNotification.clock(n.chronoSeconds(at: ctx.date)))
+                .font(DD.Font.callout.weight(.medium)).monospacedDigit().foregroundStyle(DD.linkText)
+        }
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }
 
 // MARK: - Now playing

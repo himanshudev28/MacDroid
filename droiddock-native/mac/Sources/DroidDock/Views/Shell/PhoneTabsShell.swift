@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Default layout. Sidebar = the live phone card; detail = five toolbar tabs, each with an optional sub-picker.
-/// Home, Contacts, Devices, Now playing and Settings live in a slim footer under the card (and the Go menu).
+/// Default layout. Sidebar = the live phone card; detail = five toolbar tabs, each with an optional sub-picker. The tabs
+/// are live: Inbox counts, Files shows a progress ring while transfers run, Screen a green dot while streaming.
+/// Home, Contacts, Devices, Now playing and Settings sit in a small segmented track under the card (and the Go menu).
 /// The split view itself is `MainShell`'s; this layout supplies its columns (`PhoneTabsSidebar`, `PhoneTabsDetail`).
 enum PhoneTabsShell {
     enum Tab: String, CaseIterable, Identifiable, Hashable {
@@ -41,36 +42,77 @@ enum PhoneTabsShell {
 }
 
 struct PhoneTabsSidebar: View {
-    @Environment(AppModel.self) private var model
     var body: some View {
         CardColumn { PhoneCard() }
-            .safeAreaInset(edge: .bottom, spacing: 0) { footer }
+            .safeAreaInset(edge: .bottom, spacing: 0) { PhoneTabsExtrasBar() }
             .environment(\.layoutDirection, L10n.shared.isRTL ? .rightToLeft : .leftToRight)
             .navigationSplitViewColumnWidth(min: LayoutMetrics.phoneMin, ideal: LayoutMetrics.phoneIdeal, max: LayoutMetrics.phoneMax)
     }
+}
 
-    private var footer: some View {
-        HStack(spacing: DD.Space.xs) {
-            ForEach(PhoneTabsShell.extras) { d in
-                IconButton(systemImage: d.symbol, label: d.helpText, size: DD.Size.iconButton, isOn: model.selection == d) {
-                    withDDPointerAnimation(Motion.screen) { model.selection = d }
+/// The screens that aren't tabs (Home, Contacts, Devices, Now playing, Settings), as a small segmented track under the
+/// card. It shares the tab bar's knob language: exactly one knob is on screen, either in the toolbar tabs or here, and it
+/// glides between neighbours on a click (keys switch instantly). No "Hide phone" row: the phone IS the sidebar, so the
+/// toolbar's sidebar toggle already does that (user feedback: two controls for one action). ⌥⌘S / View menu still work.
+private struct PhoneTabsExtrasBar: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.colorScheme) private var scheme
+    @Namespace private var ns
+    @State private var hovered: Destination?
+
+    private static let track: CGFloat = 9, inset: CGFloat = 3
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(PhoneTabsShell.extras) { d in item(d) }
+        }
+        .padding(Self.inset)
+        .background(RoundedRectangle(cornerRadius: Self.track, style: .continuous).fill(DD.panel2))
+        .padding(.horizontal, LayoutMetrics.cardInset).padding(.top, DD.Space.xs).padding(.bottom, DD.Space.sm)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func item(_ d: Destination) -> some View {
+        let on = model.selection == d
+        let knob = RoundedRectangle(cornerRadius: Self.track - Self.inset, style: .continuous)
+        return Button { withDDPointerAnimation(Motion.screen) { model.selection = d } } label: {
+            Image(systemName: d.symbol)
+                .font(.system(size: 14, weight: .regular))
+                .symbolRenderingMode(.hierarchical)
+                .symbolVariant(on ? .fill : .none)
+                .contentTransition(.symbolEffect(.replace))
+                .foregroundStyle(on ? Color.accentColor : (hovered == d ? DD.fg : DD.dim))
+                .frame(maxWidth: .infinity).frame(height: 28)
+                .background {
+                    if on {
+                        knob.fill(Color(nsColor: .controlColor))
+                            .shadow(color: .black.opacity(scheme == .dark ? 0.25 : 0.12), radius: 0.5, y: 0.5)
+                            .matchedGeometryEffect(id: "extrasKnob", in: ns)
+                    } else if hovered == d {
+                        knob.fill(DD.hover)
+                    }
                 }
-                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableButtonStyle())
+        .onHover { h in
+            withDDAnimation(Motion.hover) {
+                if h { hovered = d } else if hovered == d { hovered = nil }
             }
         }
-        .padding(.horizontal, LayoutMetrics.cardInset).padding(.vertical, DD.Space.sm)
-        // No "Hide phone" row here: the phone IS the sidebar, so the toolbar's sidebar toggle already
-        // does exactly that (user feedback: two controls for one action). ⌥⌘S / View menu still work.
+        .help(d.helpText)
+        .accessibilityLabel(d.title)
+        .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
     }
 }
 
 struct PhoneTabsDetail: View {
     @Environment(AppModel.self) private var model
     @State private var chrome = ShellChrome.shared
+    @State private var mirror = MirrorSession.shared
     private var lastSub: [PhoneTabsShell.Tab: Destination] { chrome.lastSub }
     typealias Tab = PhoneTabsShell.Tab
     private var tab: Tab? { Tab.containing(model.selection) }
-
 
     private var tabBinding: Binding<Tab?> {
         Binding(get: { tab },
@@ -80,12 +122,29 @@ struct PhoneTabsDetail: View {
     private var tabs: [DDTab<Tab?>] {
         Tab.allCases.map { t in
             DDTab(id: Optional(t), title: t.title, systemImage: t.symbol, badge: t == .inbox ? model.notifications.count : 0,
-                  shortcut: t.items[0].shortcutKey.map { "⌘\($0)" })
+                  shortcut: t.items[0].shortcutKey.map { "⌘\($0)" }, accessory: accessory(t))
         }
+    }
+
+    /// Live marks on the tabs. Gated on cheap stored state so an idle tab carries no accessory (and no gap); the mark
+    /// itself reads the fast-changing values (progress), so ticks don't rebuild the toolbar.
+    private func accessory(_ t: Tab) -> AnyView? {
+        switch t {
+        case .files where model.activeTransferCount > 0: AnyView(TransferProgressRing(diameter: 11))
+        case .screen where mirror.isLive: AnyView(MirrorLiveDot())
+        default: nil
+        }
+    }
+
+    /// Width the live accessories add to the labelled tab bar (see the `iconOnly` threshold).
+    private var accessoryReserve: CGFloat {
+        CGFloat((model.activeTransferCount > 0 ? 1 : 0) + (mirror.isLive ? 1 : 0)) * 22
     }
 
     @State private var detailWidth: CGFloat = 700   // small until measured: icons can't overflow into the `»` menu, labels can
     private var textDirection: LayoutDirection { L10n.shared.isRTL ? .rightToLeft : .leftToRight }
+    /// The extras live in the sidebar footer; the toolbar's More menu only stands in for it while the phone is hidden.
+    private var phoneHidden: Bool { chrome.effectivePhoneHidden(.phoneTabs) }
 
     var body: some View {
         content
@@ -93,11 +152,16 @@ struct PhoneTabsDetail: View {
             .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { detailWidth = $0 }
             .hidesWindowTitle(model.selection.title)
             .toolbar {
-                ToolbarItem(placement: .primaryAction) { ShellMoreMenu(destinations: PhoneTabsShell.extras) }
+                if phoneHidden {
+                    ToolbarItem(placement: .primaryAction) { ShellMoreMenu(destinations: PhoneTabsShell.extras) }
+                }
                 ToolbarItem(placement: .principal) {
                     // Labelled tabs need ~360 pt plus the screen's own toolbar items (search, actions); below that the system
                     // pushes everything into the `»` overflow menu, so drop to icons (titles stay in the tooltips).
-                    SegmentedTabBar(tabs: tabs, selection: tabBinding, iconOnly: detailWidth < 820, numberShortcuts: false).fixedSize()
+                    // Each live accessory (ring, dot) widens its segment by about 20 pt: reserve it, so starting a transfer or a
+                    // stream in a borderline window drops to icons instead of pushing the tabs into `»`.
+                    SegmentedTabBar(tabs: tabs, selection: tabBinding, iconOnly: detailWidth < 820 + accessoryReserve,
+                                    numberShortcuts: false).fixedSize()
                 }
             }
             .onChange(of: model.selection, initial: true) { _, new in
@@ -105,13 +169,19 @@ struct PhoneTabsDetail: View {
             }
     }
 
+    /// Each tab's host keeps its own identity, so a click cross-fades with a 4 pt settle (Motion.screen via the binding);
+    /// a key press swaps instantly (withDDPointerAnimation drops the animation).
     @ViewBuilder private var content: some View {
-        switch tab {
-        case .inbox: InboxHost()
-        case .files: FilesHost()
-        case .screen: ScreenHost()
-        default: ScreenView(destination: model.selection)
+        Group {
+            switch tab {
+            case .inbox: InboxHost()
+            case .files: FilesHost()
+            case .screen: ScreenHost()
+            default: ScreenView(destination: model.selection)
+            }
         }
+        .id(tab)
+        .ddTransition(.ddScreen)
     }
 }
 

@@ -1,5 +1,13 @@
 package com.droiddock.app.ui.settings
 
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.animation.togetherWith
+import androidx.compose.ui.unit.sp
+import com.droiddock.app.ui.theme.dockEnter
+import com.droiddock.app.ui.components.dockCornerTicks
+import com.droiddock.app.ui.components.TetherState
+import com.droiddock.app.ui.components.DockTether
+import com.droiddock.app.ui.components.DockNumeral
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,6 +67,14 @@ private fun UiStyle.short() = when (this) {
     UiStyle.REACH -> "Reach"
 }
 
+/** One line on what makes the style its own (shown under the picker). English keys; translated in the catalogs. */
+private fun UiStyle.pitch() = when (this) {
+    UiStyle.LIQUID_GLASS -> "Floating glass over a slowly drifting aurora."
+    UiStyle.MATERIAL_YOU -> "Bold colour blocks that pop when you touch them."
+    UiStyle.MINIMAL_MONO -> "Ink on paper: hairlines, dot-matrix numbers, crisp wipes."
+    UiStyle.REACH -> "Everything stacks up from the bottom, within thumb reach."
+}
+
 private fun UiStyle.label() = when (this) {
     UiStyle.LIQUID_GLASS -> "Liquid Glass"
     UiStyle.MATERIAL_YOU -> "Material You"
@@ -78,10 +94,21 @@ internal fun AppearanceRows(appearance: Appearance, onChange: ((Appearance) -> A
     // Visual style: four live thumbnails, each drawn in its own style's tokens.
     Column(Modifier.fillMaxWidth().padding(horizontal = sp.cardPadding, vertical = sp.m)) {
         Text(t("Visual style"), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
-        Text(
-            t(appearance.style.label()),
-            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        // The pitch changes with the selection: cross-fade in the current signature.
+        val pitchMotion = DockTheme.motion
+        androidx.compose.animation.AnimatedContent(
+            targetState = appearance.style,
+            transitionSpec = {
+                androidx.compose.animation.fadeIn(pitchMotion.fade()) togetherWith
+                    androidx.compose.animation.fadeOut(pitchMotion.exit())
+            },
+            label = "style-pitch",
+        ) { st ->
+            Text(
+                t(st.label()) + " · " + t(st.pitch()),
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         Row(
             Modifier.fillMaxWidth().padding(top = sp.m),
             horizontalArrangement = Arrangement.spacedBy(sp.s),
@@ -259,33 +286,45 @@ private fun StyleThumb(
         ) {
             val c = DockTheme.colors
             val s = MaterialTheme.colorScheme
+            val sh = DockTheme.shapes
+            // The miniature hero: a solid primary slab in BLOCKS, the content card elsewhere.
+            val blocks = DockTheme.signature == com.droiddock.app.ui.theme.DockSignature.BLOCKS
+            val heroBg = if (blocks) s.primary else c.card
+            val onHero = if (blocks) s.onPrimary else s.onSurface
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(84.dp)
+                    .height(92.dp)
                     .clip(shape)
                     .dockPageBackground()
                     .border(if (selected) 2.dp else 1.dp, ring, shape)
-                    .padding(8.dp),
+                    .padding(7.dp),
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Box(Modifier.width(22.dp).height(5.dp).clip(CircleShape).background(s.onSurface))
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(24.dp)
-                            .clip(RoundedCornerShape(7.dp))
-                            .background(c.card)
-                            .padding(5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Box(Modifier.size(12.dp).clip(CircleShape).background(s.primary))
-                        Box(Modifier.weight(1f).height(4.dp).clip(CircleShape).background(s.onSurfaceVariant.copy(alpha = 0.5f)))
+                // Selecting a style replays its own entrance (rise / pop / wipe / slide-up) on its thumbnail.
+                androidx.compose.runtime.key(selected) {
+                    Column(Modifier.dockEnter(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Box(Modifier.width(22.dp).height(4.dp).clip(sh.chip).background(s.onSurface))
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(30.dp)
+                                .clip(sh.hero)
+                                .background(heroBg)
+                                .then(if (c.hairline.alpha > 0f && !blocks) Modifier.border(1.dp, c.hairline, sh.hero) else Modifier)
+                                .dockCornerTicks()
+                                .padding(horizontal = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(Modifier.size(13.dp).clip(sh.deviceBadge).background(if (blocks) s.onPrimary else s.primary))
+                            Spacer(Modifier.weight(1f))
+                            DockNumeral(
+                                87, color = onHero,
+                                style = DockTheme.type.numeral.copy(fontSize = 13.sp, lineHeight = 14.sp),
+                            )
+                        }
+                        DockTether(TetherState.LINKED, height = 8.dp)
+                        Box(Modifier.width(34.dp).height(9.dp).clip(sh.control).background(s.primary))
                     }
-                    Box(
-                        Modifier.width(34.dp).height(10.dp).clip(CircleShape).background(s.primary),
-                    )
                 }
             }
         }

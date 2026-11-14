@@ -7,7 +7,6 @@ struct SegmentedHost: View {
     /// The trailing "Offline" pill. Off for screens that show their own disconnected empty state.
     var showsOfflinePill = true
     @Environment(AppModel.self) private var model
-    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,12 +23,13 @@ struct SegmentedHost: View {
                 if !model.isConnected && showsOfflinePill {
                     StatusPill(text: tr("Offline"), kind: .bad, systemImage: "wifi.slash")
                         .padding(.trailing, DD.Space.content)
-                        .transition(.opacity)
+                        .ddTransition(.ddRise)
                 }
             }
-            .frame(height: 36)
+            .frame(height: 40)
             .ddAnimation(Motion.content, value: model.isConnected)
-            Rectangle().fill(DD.line).frame(height: 1 / max(displayScale, 1))
+            // No drawn hairline under the strip: the picker floats on the content like Music's and Photos' switchers, and
+            // macOS 26 draws its own scroll-edge effect where a line would be (playbook §11).
             ScreenView(destination: selection)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }

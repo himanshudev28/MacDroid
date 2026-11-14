@@ -76,7 +76,9 @@ fun Modifier.connectionRipple(state: HeroState, connectedColor: Color, searchCol
             withContext(NonCancellable) { burst.snapTo(1f); pop.snapTo(1f) }
         }
     }
-    val searching = state == HeroState.CONNECTING && motion.enabled && motion.ambient
+    // Foreground only: rememberAmbientActive() adds the RESUMED check to animations-on and not battery saver.
+    val ambientOn = com.droiddock.app.ui.theme.rememberAmbientActive()
+    val searching = state == HeroState.CONNECTING && ambientOn
     val radar = if (searching) {
         rememberInfiniteTransition(label = "radar").animateFloat(
             0f, 1f, infiniteRepeatable(tween(2400, easing = LinearEasing), RepeatMode.Restart), label = "radar-p",

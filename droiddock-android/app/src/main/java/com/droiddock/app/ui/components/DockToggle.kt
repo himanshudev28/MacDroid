@@ -1,5 +1,6 @@
 package com.droiddock.app.ui.components
 
+import androidx.compose.ui.draw.drawBehind
 import com.droiddock.app.ui.theme.glass.glassControl
 import com.droiddock.app.ui.theme.glass.frostActive
 import androidx.compose.animation.AnimatedContent
@@ -78,8 +79,22 @@ fun DockSwitch(
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
 
-    val pos = animateFloatAsState(if (checked) 1f else 0f, motion.pop(), label = "sw-pos")
-    val grow = animateFloatAsState(if (pressed && enabled) 1f else 0f, motion.pop(), label = "sw-grow")
+    val sig = DockTheme.signature
+    // Per signature: INSTRUMENT clicks across in two mechanical steps; SHELF glides with no overshoot; the others pop.
+    val twoSteps = androidx.compose.animation.core.Easing { t -> kotlin.math.floor(t * 2f) / 2f }
+    val posSpec: androidx.compose.animation.core.AnimationSpec<Float> = when {
+        !motion.enabled -> androidx.compose.animation.core.snap()
+        sig == com.droiddock.app.ui.theme.DockSignature.INSTRUMENT -> androidx.compose.animation.core.tween(90, easing = twoSteps)
+        sig == com.droiddock.app.ui.theme.DockSignature.SHELF -> motion.smooth()
+        else -> motion.pop()
+    }
+    val pos = animateFloatAsState(if (checked) 1f else 0f, posSpec, label = "sw-pos")
+    val grow = animateFloatAsState(
+        if (pressed && enabled && sig != com.droiddock.app.ui.theme.DockSignature.INSTRUMENT) 1f else 0f, motion.pop(), label = "sw-grow",
+    )
+    val trackShape = if (mono) DockTheme.shapes.control else CircleShape
+    val depth = sig == com.droiddock.app.ui.theme.DockSignature.DEPTH
+    val blocks = sig == com.droiddock.app.ui.theme.DockSignature.BLOCKS
 
     val trackOn = if (mono) s.onSurface else s.primary
     val trackOff = if (mono) s.background else s.surfaceContainerHighest
@@ -107,7 +122,7 @@ fun DockSwitch(
                     CircleShape,
                     if (checked) s.primary.copy(alpha = 0.88f) else s.onSurface.copy(alpha = if (d.isDark) 0.14f else 0.10f),
                 )
-                else Modifier.clip(CircleShape).background(track).border(2.dp, border, CircleShape)
+                else Modifier.clip(trackShape).background(track).border(if (mono) 1.dp else 2.dp, border, trackShape)
             ),
     ) {
         Box(
@@ -120,17 +135,24 @@ fun DockSwitch(
                     val g = grow.value
                     // Centre travels 16 dp -> 36 dp inside the 52 dp track.
                     translationX = 20.dp.toPx() * p
-                    val base = 0.67f + 0.33f * p
-                    scaleY = base * (1f + 0.17f * g)
-                    scaleX = base * (1f + (if (stretchy) 0.42f else 0.17f) * g)
+                    // INSTRUMENT: a full-size square block in both positions (no grow-on-check).
+                    val base = if (mono) 0.8f else 0.67f + 0.33f * p
+                    // DEPTH: the thumb stretches like a droplet while it travels (peaks mid-way, gone at rest).
+                    val travel = if (depth) kotlin.math.sin(Math.PI * p.coerceIn(0f, 1f)).toFloat() * 0.32f else 0f
+                    scaleY = base * (1f + 0.17f * g) * (1f - travel * 0.25f)
+                    scaleX = base * (1f + (if (stretchy) 0.42f else 0.17f) * g) * (1f + travel)
                 }
-                .background(thumb, CircleShape),
+                .background(thumb, if (mono) DockTheme.shapes.control else CircleShape),
             contentAlignment = Alignment.Center,
         ) {
             if (!mono) {
                 Icon(
                     Icons.Rounded.Check, null, tint = trackOn,
-                    modifier = Modifier.size(SwitchDefaults.IconSize).graphicsLayer { alpha = pos.value },
+                    modifier = Modifier.size(SwitchDefaults.IconSize).graphicsLayer {
+                        alpha = pos.value.coerceIn(0f, 1f)
+                        // BLOCKS: the check spins in with the thumb's pop.
+                        if (blocks) rotationZ = (1f - pos.value) * -90f
+                    },
                 )
             }
         }
@@ -158,10 +180,19 @@ fun DockCircleToggle(
     val mono = DockTheme.style == UiStyle.MINIMAL_MONO
     val shape = if (mono) DockTheme.shapes.control else CircleShape
     val bg by animateColorAsState(
-        if (checked) (if (mono) s.onSurface else s.primary) else d.raised, motion.fade(), label = "ct-bg",
+        if (checked) (if (mono) s.onSurface else s.primary) else d.raised,
+        if (mono) androidx.compose.animation.core.snap() else motion.fade(), label = "ct-bg",
+    )
+    // INSTRUMENT: the ink fills the key from the bottom like a gauge (140 ms, linear), instead of a colour fade.
+    val level by animateFloatAsState(
+        if (checked) 1f else 0f,
+        if (motion.enabled) androidx.compose.animation.core.tween(140, easing = androidx.compose.animation.core.LinearEasing)
+        else androidx.compose.animation.core.snap(),
+        label = "ct-level",
     )
     val fg by animateColorAsState(
-        if (checked) (if (mono) s.background else s.onPrimary) else s.onSurface, motion.fade(), label = "ct-fg",
+        if (checked) (if (mono) s.background else s.onPrimary) else s.onSurface,
+        if (mono) androidx.compose.animation.core.tween(140) else motion.fade(), label = "ct-fg",
     )
     val haptics = DockTheme.haptics
     val interaction = remember { MutableInteractionSource() }
@@ -181,8 +212,10 @@ fun DockCircleToggle(
                     if (frostActive()) Modifier.glassControl(
                         shape, if (checked) s.primary.copy(alpha = 0.90f) else d.raised.copy(alpha = 0.62f),
                     )
+                    else if (mono) Modifier.clip(shape).background(d.raised)
+                        .drawBehind { drawRect(s.onSurface, topLeft = androidx.compose.ui.geometry.Offset(0f, this.size.height * (1f - level))) }
+                        .border(1.dp, d.hairline, shape)
                     else Modifier.clip(shape).background(bg)
-                        .then(if (mono && !checked) Modifier.border(1.dp, d.hairline, shape) else Modifier)
                 )
                 .indication(interaction, ripple()),
             contentAlignment = Alignment.Center,

@@ -1,6 +1,10 @@
 package com.droiddock.app.ui.mirror
 
-import androidx.compose.foundation.layout.Box
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -52,11 +56,26 @@ internal fun ControlScreen(
             )
         }
         val bleOnly = com.droiddock.app.ui.components.rememberBleOnly()
-        Box(Modifier.weight(1f)) {
-            when {
-                mode == "remote" -> MacRemoteTab(connected = connected)
-                bleOnly -> com.droiddock.app.ui.components.NeedsWifiState()
-                mode == "macapps" -> MacAppsTab(connected = connected)
+        val motion = DockTheme.motion
+        val pane = when {
+            mode == "remote" -> "remote"
+            bleOnly -> "wifi"
+            mode == "macapps" -> "macapps"
+            else -> "mirror"
+        }
+        // Panes dock in with a fade + short rise from the segment's side; snaps under Remove animations.
+        AnimatedContent(
+            targetState = pane,
+            modifier = Modifier.weight(1f),
+            transitionSpec = {
+                (fadeIn(motion.fade()) + slideInVertically(motion.spatial()) { it / 24 }) togetherWith fadeOut(motion.exit())
+            },
+            label = "control-pane",
+        ) { p ->
+            when (p) {
+                "remote" -> MacRemoteTab(connected = connected)
+                "wifi" -> com.droiddock.app.ui.components.NeedsWifiState()
+                "macapps" -> MacAppsTab(connected = connected)
                 else -> mirror()
             }
         }

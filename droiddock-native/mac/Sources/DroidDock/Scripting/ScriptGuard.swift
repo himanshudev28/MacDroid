@@ -4,8 +4,17 @@ import AppKit
 enum ScriptVerb {
     case ring, sendClipboard, sendFile(names: [String]), sendSMS(to: String), mirror
 
-    /// File sends are never covered by "Always Allow": the path is arbitrary (`~/.ssh/id_rsa`).
-    var alwaysAsks: Bool { if case .sendFile = self { return true }; return false }
+    /// Key in the per-action allow list; nil = never coverable by "Always Allow". File sends (the path is arbitrary,
+    /// `~/.ssh/id_rsa`) and texts (a script could text any number) always ask.
+    var allowKey: String? {
+        switch self {
+        case .ring: return ScriptGuard.ringKey
+        case .sendClipboard: return ScriptGuard.clipboardKey
+        case .mirror: return ScriptGuard.mirrorKey
+        case .sendFile, .sendSMS: return nil
+        }
+    }
+    var alwaysAsks: Bool { allowKey == nil }
 
     var prompt: (title: String, detail: String) {
         switch self {
@@ -22,25 +31,47 @@ enum ScriptVerb {
     }
 }
 
-/// Confirmation for scripted actions. Once the user picks "Always Allow" (`scriptingAllowSend`), it stops asking,
-/// except for file sends. Never blocks the main run loop (see `ConfirmPanel`).
+/// Confirmation for scripted actions. "Always Allow" on a prompt allows only that action (`scriptingAllowed`, a comma
+/// separated list of keys); file sends and texts always ask. Never blocks the main run loop (see `ConfirmPanel`).
 @MainActor
 enum ScriptGuard {
-    static var allowAlways: Bool {
-        get { UserDefaults.standard.bool(forKey: OTPPrefs.scriptingAllowSendKey) }
-        set { UserDefaults.standard.set(newValue, forKey: OTPPrefs.scriptingAllowSendKey) }
+    static let ringKey = "ring", clipboardKey = "clipboard", mirrorKey = "mirror"
+
+    static func parse(_ s: String) -> Set<String> {
+        Set(s.split(separator: ",").map { String($0) }.filter { [ringKey, clipboardKey, mirrorKey].contains($0) })
+    }
+
+    /// One-off: the old single "allow everything" flag becomes ring + clipboard + mirror (never SMS), then is no longer read.
+    static func migrateLegacy() {
+        let d = UserDefaults.standard
+        guard d.object(forKey: OTPPrefs.scriptingAllowSendKey) != nil else { return }
+        if d.bool(forKey: OTPPrefs.scriptingAllowSendKey) {
+            d.set(allowed.union([ringKey, clipboardKey, mirrorKey]).sorted().joined(separator: ","), forKey: OTPPrefs.scriptingAllowedKey)
+        }
+        d.removeObject(forKey: OTPPrefs.scriptingAllowSendKey)
+    }
+
+    static var allowed: Set<String> {
+        parse(UserDefaults.standard.string(forKey: OTPPrefs.scriptingAllowedKey) ?? "")
+    }
+
+    static func setAllowed(_ key: String, _ on: Bool) {
+        var a = allowed
+        if on { a.insert(key) } else { a.remove(key) }
+        UserDefaults.standard.set(a.sorted().joined(separator: ","), forKey: OTPPrefs.scriptingAllowedKey)
     }
 
     static func authorize(_ verb: ScriptVerb) async -> Bool {
-        if allowAlways, !verb.alwaysAsks { return true }
+        migrateLegacy()
+        if let k = verb.allowKey, allowed.contains(k) { return true }
         let p = verb.prompt
         let detail = p.detail + "\n\n" + tr("You can change this in Settings.")
-        if verb.alwaysAsks {
+        guard let k = verb.allowKey else {
             return await ConfirmPanel.ask(title: p.title, detail: detail, buttons: [tr("Allow"), tr("Don't Allow")]) == 0
         }
         switch await ConfirmPanel.ask(title: p.title, detail: detail, buttons: [tr("Allow Once"), tr("Always Allow"), tr("Don't Allow")]) {
         case 0: return true
-        case 1: allowAlways = true; return true
+        case 1: setAllowed(k, true); return true
         default: return false
         }
     }

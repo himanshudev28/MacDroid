@@ -5,7 +5,7 @@ import SwiftUI
 struct PrivacySettingsPane: View {
     @Environment(AppModel.self) private var model
     @AppStorage(PairingLock.defaultsKey) private var lockQR = false
-    @AppStorage(OTPPrefs.scriptingAllowSendKey) private var scriptingAllowSend = false
+    @AppStorage(OTPPrefs.scriptingAllowedKey) private var scriptingAllowed = ""
     @State private var axTrusted = true
     @State private var spacesBound = false
     @State private var spacesFixFailed = false
@@ -64,14 +64,19 @@ struct PrivacySettingsPane: View {
 
             DDSection(tr("Privacy")) {
                 DescribedToggle(tr("Lock the pairing code"), detail: tr("Ask for Touch ID or your password before the pairing QR is shown."), isOn: $lockQR)
-                DescribedToggle(tr("Let scripts send without asking"), detail: tr("AppleScript, Shortcuts and Raycast can ring your phone, start mirroring, and send the clipboard and texts without a confirmation. Sending files always asks. When off, each one asks first."),
-                                symbol: "terminal", tint: Color(nsColor: .systemOrange), isOn: $scriptingAllowSend)
                 LabeledContent {
                     Button(tr("Reset pairing…"), role: .destructive) { confirmReset = true }
                 } label: {
                     RowLabel(title: tr("Reset pairing"), detail: tr("Makes a new pairing code. Use it if the code was shared or a phone should lose access."),
                              symbol: "arrow.triangle.2.circlepath", tint: Color(nsColor: .systemOrange))
                 }
+            }
+
+            DDSection(tr("Scripts"), footer: tr("AppleScript, Shortcuts and Raycast ask before they act. Sending files and text messages always ask.")) {
+                let allowedActions = ScriptGuard.parse(scriptingAllowed)
+                scriptToggle(tr("Ring phone"), symbol: "bell", key: ScriptGuard.ringKey, allowed: allowedActions)
+                scriptToggle(tr("Send clipboard"), symbol: "doc.on.clipboard", key: ScriptGuard.clipboardKey, allowed: allowedActions)
+                scriptToggle(tr("Start mirroring"), symbol: "rectangle.on.rectangle", key: ScriptGuard.mirrorKey, allowed: allowedActions)
             }
 
             DDSection(tr("Crash reports"), footer: tr("Saved on this Mac only, in ~/Library/Logs/DroidDock. Nothing is ever sent anywhere.")) {
@@ -96,13 +101,19 @@ struct PrivacySettingsPane: View {
                 axTrusted = (try? await Core.shared.accessibilityTrusted()) ?? true
             }
         }
-        .onAppear { reportCount = CrashReporter.reportFiles().count }
+        .onAppear { ScriptGuard.migrateLegacy(); reportCount = CrashReporter.reportFiles().count }
         .alert(tr("Reset pairing?"), isPresented: $confirmReset) {
             Button(tr("Reset pairing"), role: .destructive) { resetPairing() }
             Button(tr("Cancel"), role: .cancel) {}
         } message: {
             Text(tr("Your phone will be disconnected and must scan the new QR code to pair again."))
         }
+    }
+
+    private func scriptToggle(_ title: String, symbol: String, key: String, allowed: Set<String>) -> some View {
+        DescribedToggle(title, detail: allowed.contains(key) ? tr("Scripts can do this without asking.") : tr("Scripts ask first."),
+                        symbol: symbol, tint: Color(nsColor: .systemOrange),
+                        isOn: Binding(get: { allowed.contains(key) }, set: { ScriptGuard.setAllowed(key, $0) }))
     }
 
     private func resetPairing() {
@@ -147,6 +158,7 @@ struct ShortcutsSettingsPane: View {
 // MARK: - Health
 
 struct HealthSettingsPane: View {
+    @Environment(AppModel.self) private var model
     @State private var showSheet = false
     var body: some View {
         SettingsForm {
@@ -160,6 +172,14 @@ struct HealthSettingsPane: View {
                             Text(tr("Checks the Mac and the linked phone.")).font(DD.Font.caption).foregroundStyle(DD.dim)
                         }
                     } icon: { Image(systemName: "stethoscope").foregroundStyle(DD.dim) }
+                }
+                LabeledContent {
+                    Button(tr("Copy Diagnostics")) { Task { await LinkHealth.copyReport(model: model, items: []) } }
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(tr("Support report"))
+                        Text(tr("Copies versions, link state and recent events. No pairing code, notifications or numbers.")).font(DD.Font.caption).foregroundStyle(DD.dim)
+                    }
                 }
             }
         }
@@ -188,6 +208,13 @@ struct AboutSettingsPane: View {
             DDSection(tr("Technical")) {
                 LabeledContent(tr("Link port")) { Text(verbatim: String(model.config?.port ?? 0)).font(DD.Font.mono).foregroundStyle(DD.dim) }
                 LabeledContent(tr("Discovery port")) { Text(verbatim: "\((model.config?.port ?? 0) + 1) UDP").font(DD.Font.mono).foregroundStyle(DD.dim) }
+            }
+            DDSection(tr("Support")) {
+                LabeledContent {
+                    Button(tr("Copy Diagnostics")) { Task { await LinkHealth.copyReport(model: model, items: []) } }
+                } label: {
+                    Text(tr("Diagnostics report"))
+                }
             }
             DDSection(tr("Links"), footer: tr("DroidDock uses scrcpy (Apache 2.0) and Android platform tools for ADB features. Quick Share is an independent implementation of the open protocol. Licenses are in the app bundle.")) {
                 Link(destination: URL(string: "https://github.com/himanshudev28/MacDroid")!) {

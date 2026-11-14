@@ -108,14 +108,13 @@ fun DockNowPlaying(
         Row(verticalAlignment = Alignment.CenterVertically) {
             DockIconBadge(Icons.Rounded.MusicNote, tone = Tone.TERTIARY, size = 48.dp)
             Spacer(Modifier.width(DockTheme.spacing.m))
-            // Track change: the old line fades out while the new one rises 8 dp and fades in.
+            // Track change: the new line arrives in the signature's own entrance (rise / pop / wipe / slide-up).
+            val trackIn = com.droiddock.app.ui.theme.dockEnterTransition()
+            val trackOut = com.droiddock.app.ui.theme.dockExitTransition()
             AnimatedContent(
                 targetState = title to subtitle,
                 modifier = Modifier.weight(1f),
-                transitionSpec = {
-                    (fadeIn(motion.fade()) + slideInVertically(motion.smooth()) { it / 3 }) togetherWith
-                        fadeOut(motion.exit())
-                },
+                transitionSpec = { trackIn togetherWith trackOut },
                 contentAlignment = Alignment.CenterStart,
                 label = "np-track",
             ) { (t, sub) ->
@@ -141,17 +140,28 @@ fun DockNowPlaying(
                 Modifier
                     .size(64.dp)
                     .clip(playShape)
-                    .background(s.primary)
+                    // Press first, so the whole key reacts, not just its glyph.
                     .dockClickable(onClick = onPlayPause)
+                    .background(s.primary)
                     .semantics { contentDescription = if (playing) pauseLabel else playLabel },
                 contentAlignment = Alignment.Center,
             ) {
                 // Play <-> pause morph: scale + fade pop (a vector morph would need a custom AVD).
+                // INSTRUMENT swaps the glyph instantly (a hard key); SHELF slides it up; the others pop.
+                val sig = DockTheme.signature
                 AnimatedContent(
                     targetState = playing,
                     transitionSpec = {
-                        (fadeIn(motion.fade()) + scaleIn(motion.pop(), initialScale = 0.6f)) togetherWith
-                            (fadeOut(motion.exit()) + scaleOut(motion.exit(), targetScale = 0.6f))
+                        when (sig) {
+                            com.droiddock.app.ui.theme.DockSignature.INSTRUMENT ->
+                                androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+                            com.droiddock.app.ui.theme.DockSignature.SHELF ->
+                                (fadeIn(motion.fade()) + slideInVertically(motion.smooth()) { it / 2 }) togetherWith
+                                    (fadeOut(motion.exit()) + androidx.compose.animation.slideOutVertically(motion.exit()) { -it / 2 })
+                            else ->
+                                (fadeIn(motion.fade()) + scaleIn(motion.pop(), initialScale = 0.6f)) togetherWith
+                                    (fadeOut(motion.exit()) + scaleOut(motion.exit(), targetScale = 0.6f))
+                        }
                     },
                     label = "np-playpause",
                 ) { on ->
@@ -177,7 +187,8 @@ private fun LightTrail(progress: Float?, playing: Boolean) {
     val shown = animateFloatAsState(progress?.coerceIn(0f, 1f) ?: 0f, motion.smooth(), label = "np-progress")
     val trailAlpha = animateFloatAsState(if (playing) 1f else 0.45f, if (motion.enabled) tween(250) else snap(), label = "np-trail")
     // The fake drift is the only loop here: only while playing, animations on, not on battery saver.
-    val drift = if (progress == null && playing && motion.enabled && motion.ambient) {
+    val ambientOn = com.droiddock.app.ui.theme.rememberAmbientActive()
+    val drift = if (progress == null && playing && ambientOn) {
         rememberInfiniteTransition(label = "trail").animateFloat(
             0.05f, 0.95f, infiniteRepeatable(tween(6000, easing = LinearEasing), RepeatMode.Reverse), label = "t",
         )

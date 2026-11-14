@@ -85,7 +85,8 @@ struct NotificationsScreen: View {
             }
         }
         .listStyle(.inset)
-        .scrollContentBackground(.hidden)
+        // Native inset-list background (like Mail): hiding it left the pinned section headers painting an opaque
+        // controlBackground band over the window colour in light mode.
         .opacity(model.isConnected ? 1 : 0.6)
         .disabled(!model.isConnected)
         .ddAnimation(Motion.expand, value: stacked)
@@ -167,14 +168,13 @@ struct NotificationsScreen: View {
     }
 
     private func subtitle(_ n: PhoneNotification, showApp: Bool) -> String? {
-        let text = n.text ?? ""
+        let text = n.isHiddenByAndroid ? tr("Content hidden by Android") : (n.text ?? "")
         if showApp, let app = n.app, !app.isEmpty { return text.isEmpty ? app : "\(app) · \(text)" }
         return text.isEmpty ? nil : text
     }
 
     private func progress(_ n: PhoneNotification) -> Double? {
-        guard let max = n.progressMax, max > 0 else { return nil }
-        return Swift.min(1, Swift.max(0, (n.progress ?? 0) / max))
+        n.progressFraction
     }
 
     @ViewBuilder

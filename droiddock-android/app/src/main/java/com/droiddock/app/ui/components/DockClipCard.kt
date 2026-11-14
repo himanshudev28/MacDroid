@@ -1,5 +1,6 @@
 package com.droiddock.app.ui.components
 
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
@@ -69,12 +70,22 @@ fun DockClipCard(
             }
         }
         Spacer(Modifier.height(DockTheme.spacing.m))
-        Text(
-            latest ?: emptyText,
-            style = if (latest != null) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium,
-            color = if (latest != null) s.onSurface else s.onSurfaceVariant,
-            maxLines = 3, overflow = TextOverflow.Ellipsis,
-        )
+        // A new clip arrives in the signature's own entrance; the old one leaves faster.
+        val clipIn = com.droiddock.app.ui.theme.dockEnterTransition()
+        val clipOut = com.droiddock.app.ui.theme.dockExitTransition()
+        androidx.compose.animation.AnimatedContent(
+            targetState = latest,
+            transitionSpec = { clipIn togetherWith clipOut },
+            contentAlignment = Alignment.TopStart,
+            label = "clip-latest",
+        ) { text ->
+            Text(
+                text ?: emptyText,
+                style = if (text != null) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium,
+                color = if (text != null) s.onSurface else s.onSurfaceVariant,
+                maxLines = 3, overflow = TextOverflow.Ellipsis,
+            )
+        }
         Spacer(Modifier.height(DockTheme.spacing.l))
         Row(horizontalArrangement = Arrangement.spacedBy(DockTheme.spacing.s), verticalAlignment = Alignment.CenterVertically) {
             DockButton(

@@ -71,7 +71,14 @@ import com.droiddock.app.t
 import com.droiddock.app.ui.common.formatTimeAgo
 import com.droiddock.app.ui.components.DockCard
 import com.droiddock.app.ui.components.DockClipCard
-import com.droiddock.app.ui.components.DockEmptyState
+import com.droiddock.app.ui.components.TetherState
+import com.droiddock.app.ui.files.LinkStatePanel
+import com.droiddock.app.ui.files.PhoneMacTether
+import com.droiddock.app.ui.theme.DockEntrance
+import com.droiddock.app.ui.theme.dockStagger
+import com.droiddock.app.ui.theme.rememberDockEntrance
+import com.droiddock.app.ui.theme.dockReveal
+import androidx.compose.foundation.lazy.itemsIndexed
 import com.droiddock.app.ui.components.DockIconButton
 import com.droiddock.app.ui.components.DockListItem
 import com.droiddock.app.ui.components.DockScaffold
@@ -96,6 +103,8 @@ internal fun ClipboardTab(
     val sp = DockTheme.spacing
     val s = MaterialTheme.colorScheme
     var draft by remember { mutableStateOf("") }
+    val entrance = rememberDockEntrance("clipboard")
+    var sendCount by remember { mutableStateOf(0) }
     val notConnected = t("Not connected to Mac")
 
     // The compose bar sits under the list, so the list itself reserves no room for the
@@ -131,33 +140,43 @@ internal fun ClipboardTab(
                 }
                 if (history.isEmpty()) {
                     item(key = "empty") {
-                        DockEmptyState(
-                            Icons.Rounded.ContentPaste,
+                        LinkStatePanel(
+                            state = if (connected) TetherState.LINKED else TetherState.OFFLINE,
+                            modifier = dockItemAnimation(),
                             title = if (keepHistory) t("Nothing shared yet") else t("History is off"),
+                            body = if (connected) t("Copy on either device") else notConnected,
                         )
                     }
                 } else {
-                    items(history, key = { "${it.at}-${it.fromMac}-${it.text.hashCode()}" }) { entry -> ClipRow(entry, dockItemAnimation()) }
+                    // Two identical clips in the same millisecond would share a key and crash the lazy list.
+                    val keys = clipKeys(history)
+                    itemsIndexed(history, key = { i, _ -> keys[i] }) { i, entry -> ClipRow(entry, dockItemAnimation(), index = i, entrance = entrance) }
                 }
             }
         }
 
-        // Compose box: bottom of the screen, above the nav and the keyboard.
-        Row(
+        // Compose box: bottom of the screen, above the nav and the keyboard. The tether above it is the link:
+        // a message sent from here travels along it to the Mac.
+        Column(
             Modifier
                 .fillMaxWidth()
                 .windowInsetsPadding(
                     WindowInsets.ime.union(WindowInsets(bottom = shellBottom)).only(WindowInsetsSides.Bottom),
                 )
                 .padding(start = sp.gutter, end = sp.gutter, top = sp.s, bottom = sp.s),
-            verticalAlignment = Alignment.CenterVertically,
         ) {
+        PhoneMacTether(
+            state = if (connected) TetherState.LINKED else TetherState.OFFLINE,
+            modifier = Modifier.fillMaxWidth().padding(bottom = sp.s),
+            pulseKey = sendCount, height = 20.dp,
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = draft,
                 onValueChange = { draft = it },
                 placeholder = { Text(t("Type a message…")) },
                 modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(26.dp),
+                shape = DockTheme.shapes.field,
                 colors = dockFieldColors(),
                 maxLines = 3,
             )
@@ -167,11 +186,22 @@ internal fun ClipboardTab(
                 label = t("Send"),
                 onSend = {
                     val ok = ConnectionManager.sendClipboardText(draft.trim())
-                    if (ok) draft = "" else Toast.makeText(ctx, notConnected, Toast.LENGTH_SHORT).show()
+                    if (ok) { draft = ""; sendCount++ } else Toast.makeText(ctx, notConnected, Toast.LENGTH_SHORT).show()
                     ok
                 },
             )
         }
+        }
+    }
+}
+
+/** Stable, unique lazy keys: the base key plus an occurrence counter for exact duplicates. */
+internal fun clipKeys(history: List<ConnectionManager.ClipEntry>): List<String> {
+    val seen = HashMap<String, Int>()
+    return history.map {
+        val base = "${it.at}-${it.fromMac}-${it.text.hashCode()}"
+        val n = seen.merge(base, 1, Int::plus)!!
+        if (n == 1) base else "$base#$n"
     }
 }
 
@@ -221,27 +251,44 @@ private fun SendButton(enabled: Boolean, label: String, onSend: () -> Boolean) {
 }
 
 @Composable
-internal fun ClipRow(entry: ConnectionManager.ClipEntry, modifier: Modifier = Modifier) {
+internal fun ClipRow(entry: ConnectionManager.ClipEntry, modifier: Modifier = Modifier, index: Int = 0, entrance: DockEntrance? = null) {
     val ctx = LocalContext.current
     val s = MaterialTheme.colorScheme
     val copied = t("Copied")
-    DockCard(modifier) {
+    val motion = DockTheme.motion
+    var justCopied by remember { mutableStateOf(false) }
+    LaunchedEffect(justCopied) { if (justCopied) { kotlinx.coroutines.delay(1200); justCopied = false } }
+    DockCard(if (entrance != null) modifier.dockStagger(entrance, index) else modifier) {
+        // Which way it travelled: the tether runs from the sender to the receiver.
+        PhoneMacTether(
+            state = TetherState.LINKED,
+            modifier = Modifier.fillMaxWidth(),
+            reverse = entry.fromMac, height = 20.dp,
+        )
         Row(verticalAlignment = Alignment.CenterVertically) {
-            androidx.compose.material3.Icon(
-                if (entry.fromMac) Icons.Rounded.Laptop else Icons.Rounded.PhoneAndroid, null,
-                tint = s.primary, modifier = Modifier.size(16.dp),
-            )
-            Spacer(Modifier.width(DockTheme.spacing.s))
             Text(
                 if (entry.fromMac) t("From Mac") else t("Sent to Mac"),
-                style = MaterialTheme.typography.labelMedium, color = s.onSurfaceVariant,
+                style = MaterialTheme.typography.labelMedium, color = s.primary,
                 modifier = Modifier.weight(1f),
             )
             Text(formatTimeAgo(entry.at), style = MaterialTheme.typography.labelMedium, color = s.onSurfaceVariant)
-            DockIconButton(Icons.Rounded.ContentCopy, t("Copy"), {
-                copyToPhone(ctx, entry.text)
-                Toast.makeText(ctx, copied, Toast.LENGTH_SHORT).show()
-            }, filled = false, size = 48.dp, tint = s.onSurfaceVariant)
+            AnimatedContent(
+                targetState = justCopied,
+                transitionSpec = {
+                    (scaleIn(motion.pop(), initialScale = 0.5f) + fadeIn(motion.fade())) togetherWith
+                        (scaleOut(motion.exit(), targetScale = 0.5f) + fadeOut(motion.exit()))
+                },
+                label = "copy-icon",
+            ) { done ->
+                DockIconButton(
+                    if (done) Icons.Rounded.Check else Icons.Rounded.ContentCopy, t("Copy"), {
+                        copyToPhone(ctx, entry.text)
+                        justCopied = true
+                        Toast.makeText(ctx, copied, Toast.LENGTH_SHORT).show()
+                    }, filled = false, size = 48.dp,
+                    tint = if (done) DockTheme.colors.success else s.onSurfaceVariant,
+                )
+            }
         }
         Text(entry.text, style = MaterialTheme.typography.bodyLarge, color = s.onSurface,
             maxLines = 6, overflow = TextOverflow.Ellipsis)

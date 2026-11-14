@@ -12,9 +12,13 @@ object FileRepo {
 
     private fun denied() = SecurityException("Grant All-files access in the DroidDock app")
 
+    /** Canonical path inside shared storage, else the same SecurityException the other denials use. */
+    private fun guard(path: String): File =
+        StoragePaths.resolve(path) ?: throw SecurityException("Path is outside shared storage")
+
     fun list(path: String): JSONArray {
         if (!hasAllFiles()) throw denied()
-        val dir = File(path.ifBlank { "/sdcard" })
+        val dir = guard(path.ifBlank { "/sdcard" })
         val arr = JSONArray()
         val files = dir.listFiles() ?: throw denied()
         files
@@ -33,7 +37,7 @@ object FileRepo {
 
     fun openForRead(path: String): File {
         if (!hasAllFiles()) throw denied()
-        val f = File(path)
+        val f = guard(path)
         if (!f.exists() || !f.isFile) throw java.io.FileNotFoundException(path)
         return f
     }
@@ -41,22 +45,32 @@ object FileRepo {
     /** Delete a file or directory (recursive). Throws if the path can't be removed. */
     fun delete(path: String) {
         if (!hasAllFiles()) throw denied()
-        val f = File(path)
+        val f = guard(path)
+        if (StoragePaths.isRoot(f)) throw SecurityException("Cannot delete a storage root")
         if (!f.exists()) throw java.io.FileNotFoundException(path)
-        val gone = if (f.isDirectory) f.deleteRecursively() else f.delete()
+        val gone = if (f.isDirectory) deleteTree(f) else f.delete()
         if (!gone) throw java.io.IOException("Could not delete ${f.name}")
+    }
+
+    /** Recursive delete that unlinks symlinks instead of following them out of the tree. */
+    private fun deleteTree(f: File): Boolean {
+        if (f.isDirectory && !java.nio.file.Files.isSymbolicLink(f.toPath())) {
+            f.listFiles()?.forEach { if (!deleteTree(it)) return false }
+        }
+        return f.delete()
     }
 
     /** Rename a file/folder within its current directory. Returns the new absolute path. */
     fun rename(path: String, newName: String): String {
         if (!hasAllFiles()) throw denied()
-        val src = File(path)
+        val src = guard(path)
+        if (StoragePaths.isRoot(src)) throw SecurityException("Cannot rename a storage root")
         if (!src.exists()) throw java.io.FileNotFoundException(path)
         // Reject path separators so a rename can never move the file elsewhere.
         val clean = newName.trim()
         if (clean.isEmpty() || clean.contains('/') || clean == "." || clean == "..")
             throw IllegalArgumentException("Invalid name")
-        val dest = File(src.parentFile, clean)
+        val dest = File(src.parentFile, clean) // src is canonical, so its parent is inside storage too
         if (dest.exists()) throw java.io.IOException("\"$clean\" already exists")
         if (!src.renameTo(dest)) throw java.io.IOException("Could not rename ${src.name}")
         return dest.absolutePath
@@ -79,7 +93,7 @@ object FileRepo {
         val clean = name.trim()
         if (clean.isEmpty() || clean.contains('/') || clean == "." || clean == "..")
             throw IllegalArgumentException("Invalid name")
-        val dir = File(parent)
+        val dir = guard(parent)
         if (!dir.isDirectory) throw java.io.FileNotFoundException(parent)
         val dest = File(dir, clean)
         if (dest.exists()) throw java.io.IOException("\"$clean\" already exists")

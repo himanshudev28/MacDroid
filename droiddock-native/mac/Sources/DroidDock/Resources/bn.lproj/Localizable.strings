@@ -7,13 +7,14 @@
 "30 seconds" = "৩০ সেকেন্ড";
 "60 feels smooth; 30 halves the bandwidth and is fine for reading." = "৬০ মসৃণ মনে হয়; ৩০ ব্যান্ডউইথ অর্ধেক করে দেয় আর পড়ার জন্য যথেষ্ট।";
 "8 hours" = "৮ ঘণ্টা";
+"A Finder-style sidebar with your phone at the top. Its card opens in a side panel." = "Finder-এর মতো সাইডবার, উপরে আপনার ফোন। এর কার্ড পাশের প্যানেলে খোলে।";
+"A compact phone header, live tiles for your inbox, and folding groups." = "ছোট ফোন হেডার, ইনবক্সের লাইভ টাইল, আর ভাঁজ করা যায় এমন গ্রুপ।";
 "A link or script asked DroidDock to copy your Mac clipboard to your phone." = "একটি লিংক বা স্ক্রিপ্ট DroidDock-কে আপনার Mac-এর ক্লিপবোর্ড ফোনে কপি করতে বলেছে।";
 "A link or script asked DroidDock to do something with your phone." = "একটি লিংক বা স্ক্রিপ্ট DroidDock-কে আপনার ফোনে কিছু করতে বলেছে।";
 "A link or script asked DroidDock to open {app}." = "একটি লিংক বা স্ক্রিপ্ট DroidDock-কে {app} খুলতে বলেছে।";
 "A link or script asked DroidDock to show your phone screen on this Mac." = "একটি লিংক বা স্ক্রিপ্ট DroidDock-কে এই Mac-এ আপনার ফোনের স্ক্রিন দেখাতে বলেছে।";
 "A link or script asked DroidDock to start desktop mode on your phone." = "একটি লিংক বা স্ক্রিপ্ট DroidDock-কে আপনার ফোনে ডেস্কটপ মোড চালু করতে বলেছে।";
 "A number and a message are required" = "একটি নম্বর ও একটি বার্তা প্রয়োজন";
-"A phone card above a sidebar grouped into Inbox, Files and Phone." = "ইনবক্স, ফাইল ও ফোনে ভাগ করা সাইডবারের উপরে ফোন কার্ড।";
 "A script is asking DroidDock to make your phone ring." = "একটি স্ক্রিপ্ট DroidDock-কে আপনার ফোনে রিং দিতে বলছে।";
 "A script wants to send a text from your phone to {number}." = "একটি স্ক্রিপ্ট আপনার ফোন থেকে {number}-এ টেক্সট পাঠাতে চায়।";
 "A script wants to send {n} file to your phone's Downloads folder." = "একটি স্ক্রিপ্ট আপনার ফোনের ডাউনলোড ফোল্ডারে {n}টি ফাইল পাঠাতে চায়।";
@@ -21,7 +22,6 @@
 "A second, virtual Android display. The phone stays usable. Android 11+ and scrcpy 3.0 or newer." = "দ্বিতীয়, ভার্চুয়াল Android ডিসপ্লে। ফোন ব্যবহারযোগ্য থাকে। Android 11+ এবং scrcpy 3.0 বা নতুন প্রয়োজন।";
 "A separate phone screen with its own home screen and apps, in a Mac window. Your phone's own screen is never shown or touched, and apps opened there close with the window." = "Mac উইন্ডোতে একটি আলাদা ফোন স্ক্রিন, যার নিজস্ব হোম স্ক্রিন ও অ্যাপ আছে। আপনার ফোনের আসল স্ক্রিন কখনো দেখানো বা ছোঁয়া হয় না, আর সেখানে খোলা অ্যাপ উইন্ডোর সাথে বন্ধ হয়ে যায়।";
 "A separate phone screen with its own home screen and apps. Your phone's own screen is never shown or touched, and apps opened there close with the window." = "নিজস্ব হোম স্ক্রিন ও অ্যাপসহ আলাদা ফোন স্ক্রিন। আপনার ফোনের নিজস্ব স্ক্রিন কখনও দেখানো বা স্পর্শ করা হয় না, এবং সেখানে খোলা অ্যাপ উইন্ডোর সঙ্গে বন্ধ হয়ে যায়।";
-"A sidebar with every screen. The phone sits in a side panel." = "সব স্ক্রিনসহ একটি সাইডবার। ফোন সাইড প্যানেলে থাকে।";
 "A small always-on-top panel with battery and now-playing that you can park anywhere. Not a macOS Widget — those need a Swift extension a Tauri app can't ship — but it's the same glanceable readout." = "ব্যাটারি আর এখন কী বাজছে দেখানো ছোট একটি প্যানেল, যা সবসময় উপরে ভেসে থাকে এবং আপনি যেখানে খুশি রাখতে পারেন। এটি macOS-এর Widget নয় — তার জন্য Swift এক্সটেনশন লাগে, যা কোনও Tauri অ্যাপ সঙ্গে দিতে পারে না — তবে এক নজরে দেখে নেওয়ার সুবিধা একই।";
 "A small always-on-top panel with battery and now-playing." = "ব্যাটারি ও এখন যা চলছে তা দেখানো একটি ছোট, সবসময় উপরে থাকা প্যানেল।";
 "A virtual display on the phone. “Window layout” decides whether Android serves desktop, tablet or phone layouts." = "ফোনে একটি ভার্চুয়াল ডিসপ্লে। “উইন্ডো লেআউট” ঠিক করে Android ডেস্কটপ, ট্যাবলেট না ফোন লেআউট দেখাবে।";
@@ -102,6 +102,7 @@
 "App" = "অ্যাপ";
 "App notifications" = "অ্যাপ বিজ্ঞপ্তি";
 "Appearance" = "চেহারা";
+"AppleScript, Shortcuts and Raycast ask before they act. Sending files and text messages always ask." = "AppleScript, Shortcuts ও Raycast কাজ করার আগে জিজ্ঞেস করে। ফাইল ও টেক্সট মেসেজ পাঠাতে সবসময় জিজ্ঞেস করে।";
 "AppleScript, Shortcuts and Raycast can ring your phone, send the clipboard, files and texts without a confirmation. When off, each one asks first." = "AppleScript, Shortcuts ও Raycast নিশ্চিতকরণ ছাড়াই আপনার ফোনে রিং দিতে এবং ক্লিপবোর্ড, ফাইল ও টেক্সট পাঠাতে পারে। বন্ধ থাকলে প্রতিটি আগে জিজ্ঞাসা করে।";
 "AppleScript, Shortcuts and Raycast can ring your phone, start mirroring, and send the clipboard and texts without a confirmation. Sending files always asks. When off, each one asks first." = "AppleScript, Shortcuts ও Raycast নিশ্চিতকরণ ছাড়াই আপনার ফোনে রিং দিতে, মিররিং শুরু করতে এবং ক্লিপবোর্ড ও টেক্সট পাঠাতে পারে। ফাইল পাঠানোর সময় সবসময় জিজ্ঞাসা করা হয়। বন্ধ থাকলে প্রতিটি আগে জিজ্ঞাসা করে।";
 "Applies to Wi-Fi and ADB. Lower the bit rate if the mirror stutters on a busy network." = "Wi-Fi ও ADB-তে প্রযোজ্য। ব্যস্ত নেটওয়ার্কে মিরর আটকে গেলে বিট রেট কমান।";
@@ -149,11 +150,13 @@
 "Blocked an unencrypted connection from {name}, which normally connects securely. Update DroidDock on the phone." = "{name} থেকে একটি এনক্রিপ্টেড নয় এমন সংযোগ ব্লক করা হয়েছে, যা সাধারণত নিরাপদে সংযুক্ত হয়। ফোনে DroidDock আপডেট করুন।";
 "Blocked an unencrypted connection from {name}. If this is your phone, use Reset pairing in Settings and pair it again." = "{name} থেকে একটি এনক্রিপ্ট না করা সংযোগ আটকানো হয়েছে। এটি আপনার ফোন হলে, সেটিংসে ‘পেয়ারিং রিসেট করুন’ ব্যবহার করে আবার পেয়ার করুন।";
 "Bluetooth" = "ব্লুটুথ";
+"Bluetooth access is off for DroidDock" = "DroidDock-এর জন্য Bluetooth অ্যাক্সেস বন্ধ";
 "Bluetooth connected" = "ব্লুটুথ সংযুক্ত";
 "Bluetooth fallback" = "ব্লুটুথ ফলব্যাক";
 "Bluetooth is blocked for DroidDock" = "DroidDock-এর জন্য ব্লুটুথ ব্লক করা আছে";
 "Bluetooth is forced" = "ব্লুটুথ জোর করে ব্যবহার করা হচ্ছে";
 "Bluetooth is off" = "ব্লুটুথ বন্ধ আছে";
+"Bluetooth is turned off on this Mac" = "এই Mac-এ Bluetooth বন্ধ";
 "Bluetooth isn't available on this Mac" = "এই Mac-এ ব্লুটুথ উপলব্ধ নয়";
 "Both devices need the same Wi-Fi network." = "দুই ডিভাইসই একই Wi-Fi নেটওয়ার্কে থাকতে হবে।";
 "Bring to Front" = "সামনে আনুন";
@@ -260,6 +263,7 @@
 "Connect via QR" = "QR দিয়ে কানেক্ট করুন";
 "Connect your phone first" = "আগে আপনার ফোন সংযুক্ত করুন";
 "Connect your phone to list apps" = "অ্যাপের তালিকা দেখতে ফোন সংযুক্ত করুন";
+"Connected over Bluetooth only" = "শুধু Bluetooth-এ সংযুক্ত";
 "Connected over {t}" = "{t}-এর মাধ্যমে সংযুক্ত";
 "Connected to {name}" = "{name}-এর সাথে সংযুক্ত";
 "Connecting over Bluetooth…" = "ব্লুটুথে সংযোগ হচ্ছে…";
@@ -276,12 +280,17 @@
 "Contacts need the Wi-Fi link. Pair your phone from the Dashboard, then come back." = "পরিচিতির জন্য Wi-Fi লিঙ্ক দরকার। ড্যাশবোর্ড থেকে ফোন পেয়ার করে আবার এখানে আসুন।";
 "Contacts saved on your phone appear here for quick dialling." = "আপনার ফোনে সেভ করা পরিচিতিগুলো দ্রুত ডায়াল করার জন্য এখানে দেখা যায়।";
 "Contacts saved on your phone appear here." = "আপনার ফোনে সেভ করা পরিচিতিগুলো এখানে দেখা যায়।";
+"Content hidden by Android" = "Android বিষয়বস্তু লুকিয়ে রেখেছে";
 "Continue" = "চালিয়ে যান";
 "Control Center" = "কন্ট্রোল সেন্টার";
+"Conversations" = "কথোপকথন";
 "Copied" = "কপি হয়েছে";
+"Copies a plain-text report with no pairing code, notification text or phone numbers." = "পেয়ারিং কোড, বিজ্ঞপ্তির লেখা বা ফোন নম্বর ছাড়া একটি সাধারণ টেক্সট রিপোর্ট কপি করে।";
 "Copies of phone files you opened on the Mac." = "Mac-এ খোলা ফোনের ফাইলের কপি।";
+"Copies versions, link state and recent events. No pairing code, notifications or numbers." = "ভার্সন, লিংকের অবস্থা ও সাম্প্রতিক ঘটনা কপি করে। পেয়ারিং কোড, বিজ্ঞপ্তি বা নম্বর থাকে না।";
 "Copies what you copied here" = "এখানে যা কপি করেছেন তা কপি করে";
 "Copy" = "কপি করুন";
+"Copy Diagnostics" = "ডায়াগনস্টিকস কপি করুন";
 "Copy Number" = "নম্বর কপি করুন";
 "Copy Package Name" = "প্যাকেজের নাম কপি করুন";
 "Copy Serial" = "সিরিয়াল কপি করুন";
@@ -342,6 +351,8 @@
 "Device" = "ডিভাইস";
 "Device name" = "ডিভাইসের নাম";
 "Devices" = "ডিভাইস";
+"Diagnostics copied" = "ডায়াগনস্টিকস কপি হয়েছে";
+"Diagnostics report" = "ডায়াগনস্টিকস রিপোর্ট";
 "Discovery port" = "ডিসকভারি পোর্ট";
 "Dismiss" = "সরিয়ে দিন";
 "Dismiss this notification" = "এই বিজ্ঞপ্তিটি সরিয়ে দিন";
@@ -385,6 +396,7 @@
 "Encrypted (Bluetooth)" = "এনক্রিপ্টেড (Bluetooth)";
 "Encrypted (TLS)" = "এনক্রিপ্টেড (TLS)";
 "Encrypted (older method)" = "এনক্রিপ্টেড (পুরনো পদ্ধতি)";
+"Encrypted (older sealed link)" = "এনক্রিপ্টেড (পুরনো সিল করা লিংক)";
 "End call" = "কল শেষ করুন";
 "Enter a number" = "একটি সংখ্যা লিখুন";
 "Enter code" = "কোড লিখুন";
@@ -392,12 +404,14 @@
 "Everything DroidDock needs is granted" = "DroidDock-এর প্রয়োজনীয় সব অনুমতি দেওয়া আছে";
 "Everything above" = "উপরের সবকিছু";
 "Expand sidebar" = "সাইডবার প্রসারিত করুন";
+"Fair" = "মোটামুটি";
 "Fair connection" = "মোটামুটি সংযোগ";
 "File" = "ফাইল";
 "File not found: {name}" = "ফাইল পাওয়া যায়নি: {name}";
 "Files" = "ফাইল";
 "Files & Sharing" = "ফাইল ও শেয়ারিং";
 "Files moving between your phone and this Mac show up here, with live speed and time left." = "আপনার ফোন আর এই Mac-এর মধ্যে যে ফাইলগুলো আদান-প্রদান হচ্ছে, সেগুলো এখানে লাইভ গতি ও বাকি সময়সহ দেখা যাবে।";
+"Files, photos and mirroring need Wi-Fi. Join the same network as the Mac to get them back." = "ফাইল, ফটো ও মিররিংয়ের জন্য Wi-Fi লাগে। ফিরে পেতে Mac-এর একই নেটওয়ার্কে যোগ দিন।";
 "Filter by App" = "অ্যাপ অনুযায়ী ফিল্টার করুন";
 "Filter by app" = "অ্যাপ অনুযায়ী ফিল্টার করুন";
 "Filter this folder" = "এই ফোল্ডার ফিল্টার করুন";
@@ -423,6 +437,7 @@
 "Forgot this phone." = "এই ফোনটি ভুলে যাওয়া হয়েছে।";
 "Forward" = "সামনে";
 "Forward  ⌘]" = "সামনে  ⌘]";
+"Found" = "পাওয়া গেছে";
 "Frame rate" = "ফ্রেম রেট";
 "Freeform windows on the phone" = "ফোনে ফ্রিফর্ম উইন্ডো";
 "Front" = "সামনের";
@@ -439,6 +454,7 @@
 "Go" = "যান";
 "Go Wireless" = "ওয়্যারলেসে যান";
 "Go wireless" = "ওয়্যারলেসে যান";
+"Good" = "ভালো";
 "Good connection" = "ভালো সংযোগ";
 "Got it" = "বুঝেছি";
 "Granted" = "দেওয়া হয়েছে";
@@ -525,12 +541,12 @@
 "Latency" = "লেটেন্সি";
 "Later" = "পরে";
 "Launch at login" = "লগইনে চালু হোক";
-"Let scripts send without asking" = "স্ক্রিপ্টকে জিজ্ঞাসা ছাড়াই পাঠাতে দিন";
 "Let the phone browse these folders" = "ফোনকে এই ফোল্ডারগুলি দেখতে দিন";
 "Let the phone control this Mac" = "ফোনকে এই Mac নিয়ন্ত্রণ করতে দিন";
 "Lets your Mac and phone find each other." = "আপনার Mac ও ফোনকে একে অপরকে খুঁজে পেতে দেয়।";
 "Level not reported yet" = "স্তর এখনও জানা যায়নি";
 "Light" = "লাইট";
+"Likely causes" = "সম্ভাব্য কারণ";
 "Link" = "লিংক";
 "Link port" = "লিংক পোর্ট";
 "Link your phone from the Dashboard to browse and open its apps from here." = "এখান থেকে ফোনের অ্যাপ দেখতে ও খুলতে ড্যাশবোর্ড থেকে ফোনটি লিঙ্ক করুন।";
@@ -547,6 +563,7 @@
 "Links" = "লিংক";
 "Liquid opacity" = "লিকুইড অপাসিটি";
 "List" = "তালিকা";
+"Live" = "লাইভ";
 "Loading" = "লোড হচ্ছে";
 "Loading apps…" = "অ্যাপ লোড হচ্ছে…";
 "Loading settings…" = "সেটিংস লোড হচ্ছে…";
@@ -602,7 +619,9 @@
 "Mirror your phone" = "আপনার ফোন মিরর করুন";
 "Mirroring" = "মিররিং";
 "Mirroring & Media" = "মিররিং ও মিডিয়া";
+"Mirroring needs scrcpy." = "মিররিংয়ের জন্য scrcpy লাগে।";
 "Mirroring {phone}" = "{phone} মিরর হচ্ছে";
+"Mirroring, the second screen and cable features need Android platform tools." = "মিররিং, দ্বিতীয় স্ক্রিন ও কেবল ফিচারের জন্য Android platform tools লাগে।";
 "Mirrors a second, virtual Android display instead of the phone's own screen — the phone stays usable. Needs Android 11+ and scrcpy 3.0 or newer." = "ফোনের নিজের স্ক্রিনের বদলে দ্বিতীয় একটি ভার্চুয়াল Android ডিসপ্লে মিরর করে — ফোনটি ব্যবহারযোগ্যই থাকে। এর জন্য Android 11+ এবং scrcpy 3.0 বা নতুন দরকার।";
 "Mirrors a second, virtual Android display instead of the phone's own screen. The phone stays usable. Needs Android 11+ and scrcpy 3.0 or newer." = "ফোনের নিজের স্ক্রিনের বদলে একটি দ্বিতীয়, ভার্চুয়াল Android ডিসপ্লে মিরর করে। ফোন ব্যবহারযোগ্য থাকে। Android 11+ ও scrcpy 3.0 বা নতুন লাগবে।";
 "Missed call" = "মিস্ড কল";
@@ -612,6 +631,7 @@
 "Mount Phone in Finder" = "Finder-এ ফোন মাউন্ট করুন";
 "Mount in Finder" = "Finder-এ মাউন্ট করুন";
 "Mounting…" = "মাউন্ট হচ্ছে…";
+"Move closer to the router, switch the phone to 5 GHz Wi-Fi, or use the cable." = "রাউটারের কাছে যান, ফোনকে 5 GHz Wi-Fi-তে নিন, অথবা কেবল ব্যবহার করুন।";
 "Mute" = "মিউট করুন";
 "Mute Mac banners" = "Mac-এর ব্যানার মিউট করুন";
 "Mute phone audio" = "ফোনের অডিও মিউট করুন";
@@ -667,9 +687,11 @@
 "No network" = "কোনো নেটওয়ার্ক নেই";
 "No notifications yet" = "এখনও কোনও বিজ্ঞপ্তি নেই";
 "No phone connected" = "কোনো ফোন সংযুক্ত নেই";
+"No phone is linked" = "কোনো ফোন লিংক করা নেই";
 "No phone linked" = "কোনও ফোন লিঙ্ক করা নেই";
 "No photos yet" = "এখনও কোনও ফটো নেই";
 "No results" = "কোনো ফলাফল নেই";
+"No sidebar. Your phone sits in the toolbar and a floating dock takes you anywhere." = "কোনো সাইডবার নেই। ফোন থাকে টুলবারে, আর ভাসমান ডক আপনাকে যেকোনো জায়গায় নিয়ে যায়।";
 "No transfers yet" = "এখনও কোনও ট্রান্সফার নেই";
 "No {kind} transfers yet." = "এখনো কোনো {kind} ট্রান্সফার নেই।";
 "Not allowed" = "অনুমোদিত নয়";
@@ -677,10 +699,12 @@
 "Not connected" = "সংযুক্ত নয়";
 "Not delivered" = "পৌঁছায়নি";
 "Not encrypted" = "এনক্রিপ্টেড নয়";
+"Not found" = "পাওয়া যায়নি";
 "Not granted" = "দেওয়া হয়নি";
 "Not installed" = "ইনস্টল করা নেই";
 "Not linked" = "লিঙ্ক করা নেই";
 "Not linked — connect your phone first" = "লিঙ্ক করা নেই — আগে আপনার ফোন কানেক্ট করুন";
+"Not reported by the phone" = "ফোন জানায়নি";
 "Not responding" = "সাড়া দিচ্ছে না";
 "Not set" = "সেট করা নেই";
 "Not shown on your Mac at all" = "আপনার Mac-এ একদমই দেখানো হয় না";
@@ -729,6 +753,7 @@
 "Open Command Bar" = "কমান্ড বার খুলুন";
 "Open Devices…" = "ডিভাইস খুলুন…";
 "Open DroidDock" = "DroidDock খুলুন";
+"Open DroidDock on the phone and keep it on the same Wi-Fi as this Mac, or plug it in by cable. If it never connects, pair again from the Connection settings." = "ফোনে DroidDock খুলুন এবং এই Mac-এর একই Wi-Fi-তে রাখুন, অথবা কেবল দিয়ে সংযুক্ত করুন। কখনও সংযোগ না হলে Connection সেটিংস থেকে আবার পেয়ার করুন।";
 "Open DroidDock on your Android, on the same Wi-Fi as this Mac." = "আপনার Android-এ DroidDock খুলুন, এই Mac যে Wi-Fi-তে আছে সেটিতেই।";
 "Open DroidDock on your Android, tap Pair with Mac, and scan this code. Both devices need the same Wi-Fi network." = "আপনার Android-এ DroidDock খুলুন, “Mac-এর সাথে পেয়ার করুন” চাপুন এবং এই কোড স্ক্যান করুন। দুই ডিভাইসই একই Wi-Fi নেটওয়ার্কে থাকতে হবে।";
 "Open DroidDock on your Android, tap Pair with Mac, and scan this code. Both devices need the same Wi-Fi." = "আপনার Android-এ DroidDock খুলুন, “Mac-এর সাথে পেয়ার করুন” চাপুন এবং এই কোড স্ক্যান করুন। দুই ডিভাইসই একই Wi-Fi-তে থাকতে হবে।";
@@ -837,6 +862,7 @@
 "Phone app link required" = "ফোনের অ্যাপের লিঙ্ক দরকার";
 "Phone app not linked" = "ফোন অ্যাপ লিংক করা নেই";
 "Phone app not paired" = "ফোনের অ্যাপ পেয়ার করা নেই";
+"Phone app version" = "ফোন অ্যাপের ভার্সন";
 "Phone apps appear here after they send a notification." = "ফোনের অ্যাপ বিজ্ঞপ্তি পাঠানোর পর এখানে দেখা যায়।";
 "Phone audio" = "ফোনের অডিও";
 "Phone audio: {e}" = "ফোনের অডিও: {e}";
@@ -847,6 +873,7 @@
 "Phone clock" = "ফোনের ঘড়ি";
 "Phone control is off" = "ফোন নিয়ন্ত্রণ বন্ধ আছে";
 "Phone disconnected mid-transfer" = "ট্রান্সফারের মাঝপথে ফোনের সংযোগ বিচ্ছিন্ন হয়েছে";
+"Phone features" = "ফোনের ফিচার";
 "Phone forgotten" = "ফোন ভুলে যাওয়া হয়েছে";
 "Phone in Finder" = "Finder-এ ফোন";
 "Phone media in Control Center" = "কন্ট্রোল সেন্টারে ফোনের মিডিয়া";
@@ -941,6 +968,7 @@
 "Reconnect automatically" = "নিজে থেকে পুনরায় সংযুক্ত হন";
 "Reconnect saved phone" = "সেভ করা ফোনে পুনরায় সংযুক্ত হন";
 "Reconnect saved phone  ⌘R" = "সেভ করা ফোনে পুনরায় সংযুক্ত হন  ⌘R";
+"Reconnecting to the phone" = "ফোনে আবার সংযোগ হচ্ছে";
 "Reconnecting to {name}…" = "{name}-এর সাথে পুনরায় সংযুক্ত হচ্ছে…";
 "Reconnecting…" = "পুনরায় সংযুক্ত হচ্ছে…";
 "Record" = "রেকর্ড করুন";
@@ -991,6 +1019,7 @@
 "Ring phone" = "ফোন বাজান";
 "Ringing your phone — it stops itself after a minute" = "আপনার ফোন বাজছে — এক মিনিট পরে নিজেই থেমে যাবে";
 "Ringing your phone. It stops by itself after a minute." = "আপনার ফোন বাজানো হচ্ছে। এক মিনিট পর নিজে থেকেই থামে।";
+"Round trip" = "রাউন্ড ট্রিপ";
 "Run Setup Check" = "সেটআপ চেক চালান";
 "SMS sends through your phone's SIM — carrier rates apply as usual." = "SMS আপনার ফোনের SIM দিয়েই যায় — যথারীতি অপারেটরের চার্জ লাগবে।";
 "Same scrcpy stream, but it plays in DroidDock instead of a separate scrcpy window, and needs no “Allow screen capture” tap on the phone." = "একই scrcpy স্ট্রিম, কিন্তু আলাদা scrcpy উইন্ডোর বদলে DroidDock-এর ভেতরে চলে, আর ফোনে “স্ক্রিন ক্যাপচারের অনুমতি” চাপার দরকার হয় না।";
@@ -1031,6 +1060,9 @@
 "Screenshot" = "স্ক্রিনশট";
 "Screenshot saved" = "স্ক্রিনশট সেভ হয়েছে";
 "Screenshot saved to Downloads" = "স্ক্রিনশট Downloads-এ সংরক্ষিত হয়েছে";
+"Scripts" = "স্ক্রিপ্ট";
+"Scripts ask first." = "স্ক্রিপ্ট আগে জিজ্ঞেস করে।";
+"Scripts can do this without asking." = "স্ক্রিপ্ট জিজ্ঞেস না করেই এটি করতে পারে।";
 "Search" = "খুঁজুন";
 "Search apps" = "অ্যাপ খুঁজুন";
 "Search apps…" = "অ্যাপ খুঁজুন…";
@@ -1041,6 +1073,7 @@
 "Second screen" = "দ্বিতীয় স্ক্রিন";
 "Section" = "বিভাগ";
 "Sections" = "বিভাগ";
+"Security" = "নিরাপত্তা";
 "Seek" = "এগিয়ে-পিছিয়ে নিন";
 "Select" = "বাছুন";
 "Select a conversation" = "একটি কথোপকথন বেছে নিন";
@@ -1156,6 +1189,7 @@
 "Something went wrong. Try again." = "কিছু একটা ভুল হয়েছে। আবার চেষ্টা করুন।";
 "Speaker" = "স্পিকার";
 "Speaker toggle failed — ensure ADB is connected" = "স্পিকার বদলানো গেল না — ADB কানেক্ট আছে কিনা দেখুন";
+"Stalled" = "আটকে আছে";
 "Starred" = "তারকাচিহ্নিত";
 "Start Camera" = "ক্যামেরা চালু করুন";
 "Start Desktop Mode" = "ডেস্কটপ মোড চালু করুন";
@@ -1191,6 +1225,8 @@
 "Streaming" = "স্ট্রিম হচ্ছে";
 "Streams the phone's back camera into a pop-out window over Wi-Fi. Flip to the front camera once it's running." = "Wi-Fi দিয়ে ফোনের পিছনের ক্যামেরা একটি পপ-আউট উইন্ডোয় স্ট্রিম করে। চালু হয়ে গেলে সামনের ক্যামেরায় বদলে নিতে পারেন।";
 "Streams the phone's back camera over Wi-Fi. Flip to the front camera once it's running." = "Wi-Fi-তে ফোনের পেছনের ক্যামেরা স্ট্রিম করে। চালু হলে সামনের ক্যামেরায় যাওয়া যায়।";
+"Support" = "সহায়তা";
+"Support report" = "সহায়তা রিপোর্ট";
 "Switch back automatically" = "নিজে থেকেই ফিরে যান";
 "Switch front/back camera" = "সামনের/পিছনের ক্যামেরা বদলান";
 "Switch this phone to Wi-Fi ADB so you can unplug it" = "এই ফোনটিকে Wi-Fi ADB-তে নিন যাতে তার খুলে ফেলতে পারেন";
@@ -1222,15 +1258,18 @@
 "Test" = "পরীক্ষা";
 "Text a contact…" = "পরিচিতিকে বার্তা পাঠান…";
 "Text messages from your phone appear here." = "আপনার ফোনের টেক্সট মেসেজ এখানে দেখা যায়।";
+"Text sent to phone" = "টেক্সট ফোনে পাঠানো হয়েছে";
 "That Mac app is no longer installed" = "সেই Mac অ্যাপ আর ইনস্টল করা নেই";
 "That didn't take. Right-click DroidDock in the Dock › Options › Assign To › None." = "এটি কাজ করেনি। Dock-এ DroidDock-এ রাইট-ক্লিক করুন › অপশন › অ্যাসাইন করুন › কোনোটিই নয়।";
+"The Bluetooth fallback is unavailable while it's off." = "এটি বন্ধ থাকলে Bluetooth ফলব্যাক পাওয়া যায় না।";
 "The Dashboard shows a QR code. In the phone app, tap “Pair with Mac” and scan it. Both devices must be on the same Wi-Fi network — if the code won't scan, there's an IP-and-token fallback on the same screen." = "ড্যাশবোর্ডে একটি QR কোড দেখায়। ফোনের অ্যাপে “Mac-এর সঙ্গে পেয়ার করুন” ট্যাপ করে সেটি স্ক্যান করুন। দুটি ডিভাইসকেই একই Wi-Fi নেটওয়ার্কে থাকতে হবে — কোড স্ক্যান না হলে ওই স্ক্রিনেই IP ও টোকেন দিয়ে বিকল্প উপায় আছে।";
 "The Dock's Assign To setting puts its windows on whichever desktop you switch to." = "Dock-এর “অ্যাসাইন করুন” সেটিং এর উইন্ডোগুলো আপনি যে ডেস্কটপে যান সেখানেই রাখে।";
 "The adapter decides which address DroidDock advertises in the QR code and on Bonjour; the server itself accepts connections on every adapter." = "অ্যাডাপ্টার ঠিক করে DroidDock QR কোডে ও Bonjour-এ কোন ঠিকানা জানাবে; সার্ভার নিজে সব অ্যাডাপ্টারে সংযোগ নেয়।";
 "The current Mac clipboard would be copied to your phone." = "Mac-এর বর্তমান ক্লিপবোর্ড আপনার ফোনে কপি হবে।";
 "The file has been moved or deleted" = "ফাইলটি সরানো বা মুছে ফেলা হয়েছে";
 "The in-app mirror needs scrcpy." = "অ্যাপের ভিতরের মিররের জন্য scrcpy দরকার।";
-"The phone card with a few icon tabs. Everything else is under More." = "কয়েকটি আইকন ট্যাবসহ ফোন কার্ড। বাকি সবকিছু আরও-তে আছে।";
+"The link is slow" = "লিংকটি ধীর";
+"The phone dials back in by itself. Give it a few seconds, and keep both on the same network." = "ফোন নিজেই আবার সংযোগ করে। কয়েক সেকেন্ড অপেক্ষা করুন, আর দুটোকে একই নেটওয়ার্কে রাখুন।";
 "The phone didn't answer. Check that it's nearby and try again." = "ফোন সাড়া দেয়নি। কাছে আছে কি না দেখে আবার চেষ্টা করুন।";
 "The phone finds this Mac again by itself over Bonjour on most networks. If it doesn't, scan the new QR code once." = "বেশিরভাগ নেটওয়ার্কে ফোন Bonjour দিয়ে নিজেই এই Mac খুঁজে নেয়। না পেলে নতুন QR কোড একবার স্ক্যান করুন।";
 "The phone isn't responding. Unplug and reconnect it, or tap Reconnect." = "ফোন সাড়া দিচ্ছে না। খুলে আবার লাগান, অথবা “পুনরায় সংযুক্ত হন” চাপুন।";
@@ -1256,6 +1295,7 @@
 "This folder is empty." = "এই ফোল্ডারটি ফাঁকা।";
 "This is a system shortcut ({name})." = "এটি একটি সিস্টেম শর্টকাট ({name})।";
 "This is a test notification. If you can read this, banners work." = "এটি একটি পরীক্ষামূলক বিজ্ঞপ্তি। এটি পড়তে পারলে ব্যানার কাজ করছে।";
+"This link is not encrypted" = "এই লিংকটি এনক্রিপ্টেড নয়";
 "This screen is being rebuilt in native SwiftUI." = "এই স্ক্রিন নেটিভ SwiftUI-তে নতুন করে বানানো হচ্ছে।";
 "This window" = "এই উইন্ডো";
 "Thumbnail" = "থাম্বনেইল";
@@ -1286,6 +1326,7 @@
 "UHID keyboard" = "UHID কীবোর্ড";
 "URL" = "URL";
 "USB" = "USB";
+"USB cable" = "USB কেবল";
 "USB or wireless ADB" = "USB বা ওয়্যারলেস ADB";
 "USB or wireless ADB, in this app" = "USB বা ওয়্যারলেস ADB, এই অ্যাপে";
 "Unauthorized" = "অননুমোদিত";
@@ -1306,6 +1347,7 @@
 "Until resumed" = "আবার চালু না করা পর্যন্ত";
 "Up one level" = "এক ধাপ উপরে";
 "Update" = "আপডেট";
+"Update DroidDock on the phone so it can use an encrypted link." = "ফোনে DroidDock আপডেট করুন যাতে এটি এনক্রিপ্টেড লিংক ব্যবহার করতে পারে।";
 "Update DroidDock on your phone and it will switch to encryption automatically." = "আপনার ফোনে DroidDock আপডেট করুন, এটি নিজে থেকেই এনক্রিপশনে চলে যাবে।";
 "Update failed" = "আপডেট ব্যর্থ হয়েছে";
 "Update to {v}" = "{v}-এ আপডেট করুন";
@@ -1345,6 +1387,7 @@
 "Waiting for {name} to accept" = "{name}-এর গ্রহণের অপেক্ষায়";
 "Waiting for {name} to accept…" = "{name}-এর গ্রহণের অপেক্ষায়…";
 "Waiting to sync" = "সিঙ্কের অপেক্ষায়";
+"Weak" = "দুর্বল";
 "Weak connection" = "দুর্বল সংযোগ";
 "Welcome" = "স্বাগতম";
 "Welcome to DroidDock" = "DroidDock-এ স্বাগতম";
@@ -1383,6 +1426,7 @@
 "Wireless pairing removed" = "ওয়্যারলেস পেয়ারিং সরানো হয়েছে";
 "Wireless pairing, Android 11+" = "ওয়্যারলেস পেয়ারিং, Android 11+";
 "With an ADB device connected, Start mirroring uses ADB instead of Wi-Fi, so the phone isn't asked to approve capture." = "ADB ডিভাইস সংযুক্ত থাকলে «মিররিং শুরু করুন» Wi-Fi-এর বদলে ADB ব্যবহার করে, তাই ফোনকে ক্যাপচার অনুমোদন করতে হয় না।";
+"Without it the Bluetooth fallback can't find the phone." = "এটি ছাড়া Bluetooth ফলব্যাক ফোন খুঁজে পায় না।";
 "Work from any app. Nothing is set until you record a shortcut. Esc cancels, ⌫ clears." = "যেকোনো অ্যাপ থেকে কাজ করে। শর্টকাট রেকর্ড না করা পর্যন্ত কিছু সেট হয় না। Esc বাতিল করে, ⌫ মুছে দেয়।";
 "Worth knowing" = "জেনে রাখা ভালো";
 "Writable." = "লেখা যাবে।";
@@ -1402,6 +1446,7 @@
 "Your phone on the left, five tabs along the top." = "বাঁদিকে আপনার ফোন, উপরে পাঁচটি ট্যাব।";
 "Your phone will be disconnected and must scan the new QR code to pair again." = "আপনার ফোনের সংযোগ বিচ্ছিন্ন হবে এবং আবার পেয়ার করতে নতুন QR কোড স্ক্যান করতে হবে।";
 "Your phone's camera is streaming in its own window. Flip front/back from there." = "আপনার ফোনের ক্যামেরা নিজস্ব উইন্ডোয় স্ট্রিম হচ্ছে। সামনের/পিছনের ক্যামেরা সেখান থেকেই বদলান।";
+"adb was not found" = "adb পাওয়া যায়নি";
 "adb — installed automatically on first launch" = "adb — প্রথমবার চালু করার সময় আপনাআপনি ইনস্টল হয়";
 "and scan this code" = "আর এই কোডটি স্ক্যান করুন";
 "and {n} more" = "এবং আরও {n}টি";
@@ -1427,6 +1472,7 @@
 "scrcpy installed" = "scrcpy ইনস্টল করা আছে";
 "scrcpy installs through Homebrew" = "scrcpy Homebrew দিয়ে ইনস্টল হয়";
 "scrcpy not installed" = "scrcpy ইনস্টল করা নেই";
+"scrcpy was not found" = "scrcpy পাওয়া যায়নি";
 "scrcpy {v} can't create virtual displays; this applies from 3.0 onward." = "scrcpy {v} ভার্চুয়াল ডিসপ্লে বানাতে পারে না; এটি 3.0 থেকে প্রযোজ্য।";
 "scrcpy {v} is too old" = "scrcpy {v} খুব পুরোনো";
 "scrcpy's flex display — dragging the window edge resizes the Android display itself instead of scaling a fixed one. Needs scrcpy 4.0 or newer; ignored on older builds." = "scrcpy-র ফ্লেক্স ডিসপ্লে — উইন্ডোর কিনারা টানলে নির্দিষ্ট মাপের ডিসপ্লে ছোট-বড় না হয়ে Android ডিসপ্লেটির মাপই বদলে যায়। এর জন্য scrcpy 4.0 বা নতুন দরকার; পুরনো বিল্ডে উপেক্ষা করা হয়।";

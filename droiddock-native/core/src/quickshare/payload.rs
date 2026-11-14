@@ -201,6 +201,7 @@ impl Reassembler {
                     let _ = std::fs::remove_file(&part);
                     return Err(PayloadError::Io(e.to_string()));
                 }
+                crate::transfer::mark_quarantined(&path);
                 Completed::File { id, path }
             }
         }))

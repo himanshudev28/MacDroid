@@ -60,6 +60,10 @@ pub const COMMANDS: &[&str] = &[
     "photo_sync_backfill",
     "sms_threads",
     "sms_messages",
+    "sms_caps",
+    "sms_threads_page",
+    "sms_messages_page",
+    "sms_search",
     "sms_send",
     "contacts_list",
     "action_call",
@@ -68,6 +72,7 @@ pub const COMMANDS: &[&str] = &[
     "ring_phone",
     "health_check",
     "health_fix",
+    "tool_versions",
     "media_cmd",
     "clipboard_push_now",
     "wallpaper_get",
@@ -289,6 +294,11 @@ const SWIFT_ONLY: &[&str] = &[
 ];
 #[cfg(test)]
 const NEW_COMMANDS: &[&str] = &[
+    "tool_versions",
+    "sms_caps",
+    "sms_threads_page",
+    "sms_messages_page",
+    "sms_search",
     "notif_open",
     "pairing_reset",
     "quickshare_discover_start",
@@ -466,6 +476,30 @@ pub async fn dispatch(
             let s0 = app.state::<crate::ws_server::SharedState>();
             res(crate::commands::sms_messages(s0, arg!(args, "threadId")).await)
         }
+        "sms_caps" => {
+            let s0 = app.state::<crate::ws_server::SharedState>();
+            res(crate::commands::sms_caps(s0).await)
+        }
+        "sms_threads_page" => {
+            let s0 = app.state::<crate::ws_server::SharedState>();
+            res(crate::commands::sms_threads_page(s0, arg!(args, "offset"), arg!(args, "limit")).await)
+        }
+        "sms_messages_page" => {
+            let s0 = app.state::<crate::ws_server::SharedState>();
+            res(crate::commands::sms_messages_page(
+                s0,
+                arg!(args, "threadId"),
+                arg!(args, "before"),
+                arg!(args, "after"),
+                arg!(args, "around"),
+                arg!(args, "limit"),
+            )
+            .await)
+        }
+        "sms_search" => {
+            let s0 = app.state::<crate::ws_server::SharedState>();
+            res(crate::commands::sms_search(s0, arg!(args, "query"), arg!(args, "offset"), arg!(args, "limit")).await)
+        }
         "sms_send" => {
             let s0 = app.state::<crate::ws_server::SharedState>();
             res(crate::commands::sms_send(s0, arg!(args, "address"), arg!(args, "text")).await)
@@ -497,6 +531,7 @@ pub async fn dispatch(
             let s1 = app.state::<crate::ws_server::SharedState>();
             res(crate::commands::health_check(app.clone(), s1).await)
         }
+        "tool_versions" => res(crate::commands::tool_versions(app.clone()).await),
         "health_fix" => {
             let s0 = app.state::<crate::ws_server::SharedState>();
             res(crate::commands::health_fix(s0, arg!(args, "id")).await)

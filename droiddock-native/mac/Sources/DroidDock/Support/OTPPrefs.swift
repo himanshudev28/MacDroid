@@ -5,7 +5,8 @@ enum OTPPrefs {
     static let showCopyActionKey = "otpShowCopyAction"
     static let autoCopyKey = "otpAutoCopy"
     static let clearSecondsKey = "otpClearSeconds"
-    static let scriptingAllowSendKey = "scriptingAllowSend"
+    static let scriptingAllowSendKey = "scriptingAllowSend"        // legacy single flag, migrated by ScriptGuard
+    static let scriptingAllowedKey = "scriptingAllowedActions"     // "ring,clipboard,mirror" subset
 
     static let showCopyActionDefault = true
     static let autoCopyDefault = false

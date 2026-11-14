@@ -116,6 +116,8 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, @un
 
     /// Applies the per-app privacy option: the message text is replaced by a neutral line.
     static func masked(_ n: NativeNotification) -> NativeNotification {
+        // Android hid the content itself (15+): say so rather than show a blank or a made-up line.
+        if n.redacted == true, n.id != "call" { var m = n; m.body = tr("Content hidden by Android"); return m }
         guard n.hidePreview == true else { return n }
         var m = n
         m.body = tr("New notification")
@@ -147,7 +149,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, @un
         if quiet { c.interruptionLevel = .passive } else if n.sound ?? false { c.sound = .default }
         c.categoryIdentifier = n.replyKey != nil ? Self.replyCategory : Self.plainCategory
         if let k = n.replyKey { c.userInfo = ["replyKey": k] }
-        if n.id != "call", OTPPrefs.showCopyAction, let code = OTPDetector.extract(title: n.title, text: n.body) {
+        if n.id != "call", n.redacted != true, OTPPrefs.showCopyAction, let code = OTPDetector.extract(title: n.title, text: n.body) {
             c.categoryIdentifier = n.replyKey != nil ? Self.otpReplyCategory : Self.otpPlainCategory
             c.userInfo["otp"] = code
         }

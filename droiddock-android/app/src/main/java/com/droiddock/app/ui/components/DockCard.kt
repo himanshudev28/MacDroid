@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
@@ -55,11 +56,22 @@ fun DockCard(
     Column(
         modifier
             .fillMaxWidth()
+            // Press first, so the whole card (surface included) squashes / tilts / flashes, not just its content.
+            .then(if (onClick != null) Modifier.clip(shape).dockClickable(tilt = true, onClick = onClick) else Modifier)
             .dockSurface(shape, color)
-            .then(if (onClick != null) Modifier.dockClickable(onClick = onClick) else Modifier)
+            .dockCornerTicks()
             .padding(contentPadding),
-        content = content,
-    )
+    ) {
+        // Children that don't set a colour (Text, DockNumeral, icons) get the right "on" colour for this card in both
+        // themes; without it they fell back to black, invisible on dark cards.
+        val on = when (tone) {
+            CardTone.ACCENT -> if (DockTheme.style == UiStyle.MINIMAL_MONO) s.onSurface else s.onPrimaryContainer
+            else -> s.onSurface
+        }
+        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides on) {
+            content()
+        }
+    }
 }
 
 /**
@@ -92,7 +104,9 @@ fun DockGroup(
         rows.forEachIndexed { i, row ->
             val top = if (i == 0) r else inner
             val bottom = if (i == rows.lastIndex) r else inner
-            Box(Modifier.fillMaxWidth().dockSurface(RoundedCornerShape(top, top, bottom, bottom))) { row() }
+            // BLOCKS: the group docks on its bottom-start corner like a single card.
+            val bottomStart = if (i == rows.lastIndex && DockTheme.signature == com.droiddock.app.ui.theme.DockSignature.BLOCKS) 8.dp else bottom
+            Box(Modifier.fillMaxWidth().dockSurface(RoundedCornerShape(top, top, bottom, bottomStart))) { row() }
         }
     }
 }

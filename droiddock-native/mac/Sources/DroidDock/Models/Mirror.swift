@@ -52,6 +52,8 @@ struct NativeNotification: Codable, Sendable, Equatable {
     var sound: Bool?
     /// Per-app privacy option: show a neutral line instead of the message text.
     var hidePreview: Bool?
+    /// Android hid the content of this notification: show "Content hidden by Android", never look for a code.
+    var redacted: Bool?
 }
 
 struct MenubarTitle: Codable, Sendable, Equatable { var title: String? }

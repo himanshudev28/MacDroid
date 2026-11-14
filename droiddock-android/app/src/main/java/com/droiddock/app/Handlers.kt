@@ -18,13 +18,36 @@ internal object MessagingHandlers {
         val cm = ConnectionManager
         val ctx = cm.appCtx
         when (type) {
+            // `smspage` / `smssearch` (see caps()): an old Mac sends none of the optional fields and gets the
+            // old fixed first page. The new fields are only ever sent by a Mac that saw the cap.
             "sms-threads" -> cm.respondAsync(link, msg, "sms-threads") {
-                it.put("threads", SmsRepo.threads(ctx))
+                val page = SmsRepo.threads(
+                    ctx,
+                    msg.optInt("limit", 30).coerceIn(1, if (link.kind == LinkKind.BLE) 50 else 500),
+                    msg.optInt("offset", 0).coerceAtLeast(0),
+                )
+                it.put("threads", page.threads).put("more", page.more)
             }
             "sms-messages" -> cm.respondAsync(link, msg, "sms-messages") {
                 val tid = msg.optLong("threadId")
-                val (address, messages) = SmsRepo.messages(ctx, tid, if (link.kind == LinkKind.BLE) 50 else 60)
-                it.put("threadId", tid).put("address", address).put("messages", messages)
+                val cap = if (link.kind == LinkKind.BLE) 50 else 500
+                val default = if (link.kind == LinkKind.BLE) 50 else 60
+                fun opt(k: String): Long? = if (msg.has(k) && !msg.isNull(k)) msg.optLong(k) else null
+                val page = SmsRepo.messages(
+                    ctx, tid, msg.optInt("limit", default).coerceIn(2, cap),
+                    beforeDate = opt("beforeDate"), beforeId = msg.optLong("beforeId"),
+                    afterDate = opt("afterDate"), afterId = msg.optLong("afterId"),
+                    around = opt("around"),
+                )
+                it.put("threadId", tid).put("address", page.address).put("messages", page.messages)
+                    .put("moreOlder", page.moreOlder).put("moreNewer", page.moreNewer)
+            }
+            "sms-search" -> cm.respondAsync(link, msg, "sms-search") {
+                val page = SmsRepo.search(
+                    ctx, msg.optString("query"),
+                    msg.optInt("limit", 30).coerceIn(1, 100), msg.optInt("offset", 0).coerceAtLeast(0),
+                )
+                it.put("results", page.results).put("more", page.more)
             }
             "sms-send" -> cm.respond(link, msg, "sms-send") {
                 SmsRepo.send(ctx, msg.optString("address"), msg.optString("text"))

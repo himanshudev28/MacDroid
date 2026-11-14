@@ -56,6 +56,24 @@ extension Core {
     // MARK: Messages / contacts / calls
     func smsThreads() async throws -> [SmsThread] { try await invoke("sms_threads") }
     func smsMessages(threadId: Int) async throws -> SmsMessages { try await invoke("sms_messages", ["threadId": threadId]) }
+    /// Which optional SMS features the phone advertised (older phones: neither).
+    func smsCaps() async throws -> SmsCaps { try await invoke("sms_caps") }
+    func smsThreadsPage(offset: Int, limit: Int) async throws -> SmsThreadPage {
+        try await invoke("sms_threads_page", ["offset": offset, "limit": limit])
+    }
+    /// `before`/`after` are `[date, id]` of a message already loaded; `around` is a message id.
+    func smsMessagesPage(threadId: Int, before: SmsMessage? = nil, after: SmsMessage? = nil,
+                         around: Int? = nil, limit: Int? = nil) async throws -> SmsMessagePage {
+        var a: [String: Any] = ["threadId": threadId]
+        if let before { a["before"] = [Int64(before.date), Int64(before.id)] }
+        if let after { a["after"] = [Int64(after.date), Int64(after.id)] }
+        if let around { a["around"] = around }
+        if let limit { a["limit"] = limit }
+        return try await invoke("sms_messages_page", a)
+    }
+    func smsSearch(query: String, offset: Int, limit: Int = 30) async throws -> SmsSearchPage {
+        try await invoke("sms_search", ["query": query, "offset": offset, "limit": limit])
+    }
     func smsSend(address: String, text: String) async throws { try await invoke("sms_send", ["address": address, "text": text]) }
     func contactsList() async throws -> [Contact] { try await invoke("contacts_list") }
     func actionCall(number: String) async throws { try await invoke("action_call", ["number": number]) }
@@ -67,6 +85,7 @@ extension Core {
 
     // MARK: Health / media remote
     func healthCheck() async throws -> [HealthItem] { try await invoke("health_check") }
+    func toolVersions() async throws -> ToolVersions { try await invoke("tool_versions") }
     func healthFix(id: String) async throws -> String { try await invoke("health_fix", ["id": id]) }
     func mediaCmd(_ cmd: String, value: Double = 0) async throws { try await invoke("media_cmd", ["cmd": cmd, "value": Int64(value.rounded())]) }   // the core takes an i64; a fractional JSON number is rejected
     func mediaState() async throws -> MediaState? { try await invoke("media_state") }

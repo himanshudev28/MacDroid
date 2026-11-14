@@ -102,6 +102,11 @@ object ConnectionManager {
         add("notifopen")
         // "notifopendisplay": `notif-open` may carry an optional `displayId` (fire the tap action on that display).
         add("notifopendisplay")
+        // "smspage": `sms-threads` takes {limit,offset} and `sms-messages` takes {limit,beforeDate,beforeId,
+        // afterDate,afterId,around}; both replies carry more/moreOlder/moreNewer. "smssearch": `sms-search`.
+        // Both name messages this build understands; the Mac sends the new fields only when it sees the cap.
+        add("smspage")
+        add("smssearch")
         add(LinkCrypto.CAP)
         add(LinkCrypto.CAP_FRAMES)
         // "ble": this build speaks BLE-DESIGN (link-mode / link-prefer / mid). Advertised whenever the
@@ -1216,6 +1221,8 @@ object ConnectionManager {
         .put("caps", JSONArray(caps()))
         // Stable across reconnects and re-pairs; the Mac keys its photo-sync ledger on this.
         .put("deviceId", Prefs.deviceId(appCtx))
+        // Additive: lets the Mac's link-health view and support report show the phone app's version.
+        .put("appVersion", BuildConfig.VERSION_NAME)
 
     private fun parseCaps(msg: JSONObject): List<String> =
         msg.optJSONArray("caps")?.let { arr -> List(arr.length()) { i -> arr.optString(i) } } ?: emptyList()

@@ -37,10 +37,16 @@ import com.droiddock.app.ui.common.formatTimeAgo
 import com.droiddock.app.ui.components.ButtonKind
 import com.droiddock.app.ui.components.DockButton
 import com.droiddock.app.ui.components.DockCard
-import com.droiddock.app.ui.components.DockEmptyState
 import com.droiddock.app.ui.components.DockGroup
 import com.droiddock.app.ui.components.DockListItem
-import com.droiddock.app.ui.components.DockProgress
+import com.droiddock.app.ui.components.DockNumeral
+import com.droiddock.app.ui.components.TetherState
+import com.droiddock.app.ui.theme.DockEntrance
+import com.droiddock.app.ui.theme.dockStagger
+import com.droiddock.app.ui.theme.rememberDockEntrance
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
 import com.droiddock.app.ui.components.DockScaffold
 import com.droiddock.app.ui.components.DockSection
 import com.droiddock.app.ui.components.DockSectionHeader
@@ -65,6 +71,8 @@ internal fun FilesTab(
     onSendClipboard: () -> Unit,
 ) {
     val toggle = LocalSourceToggle.current
+    // Plays once per process for the first screenful; rows arriving later or scrolled back in stay still.
+    val entrance = rememberDockEntrance("files")
     val todayBytes = remember(recentTransfers) {
         val cal = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
@@ -78,6 +86,12 @@ internal fun FilesTab(
         if (toggle != null) item(key = "source", contentType = "toggle") { toggle() }
 
         item(key = "summary", contentType = "summary") {
+            val (num, unit) = remember(todayBytes) { bytesNumeral(todayBytes) }
+            val activeFrac = remember(activeTransfers) {
+                val total = activeTransfers.sumOf { it.totalBytes }
+                if (activeTransfers.isEmpty() || total <= 0L) null
+                else (activeTransfers.sumOf { it.sentBytes }.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+            }
             DockCard(dockItemAnimation()) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -86,11 +100,9 @@ internal fun FilesTab(
                             style = DockTheme.type.overline,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Text(
-                            if (todayBytes == 0L) "—" else formatBytes(todayBytes),
-                            style = DockTheme.type.numeral,
+                        DockNumeral(
+                            value = num, unit = unit,
                             color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
                         )
                     }
                     Spacer(Modifier.width(DockTheme.spacing.m))
@@ -102,6 +114,14 @@ internal fun FilesTab(
                         glow = true,
                     )
                 }
+                Spacer(Modifier.size(DockTheme.spacing.m))
+                // The link itself: fills while files move, pulses once when one lands, breaks when the Mac is away.
+                PhoneMacTether(
+                    state = if (connected) TetherState.LINKED else TetherState.OFFLINE,
+                    modifier = Modifier.fillMaxWidth(),
+                    progress = if (connected) activeFrac else null,
+                    pulseKey = recentTransfers.firstOrNull()?.id,
+                )
             }
         }
 
@@ -109,7 +129,7 @@ internal fun FilesTab(
             item(key = "active", contentType = "group") {
                 Column(dockItemAnimation()) {
                     DockSectionHeader(t("Sending now"))
-                    DockGroup(rows = activeTransfers.map { tr -> { ActiveTransferRow(tr) } })
+                    DockGroup(rows = activeTransfers.mapIndexed { i, tr -> { ActiveTransferRow(tr, entrance, i) } })
                 }
             }
         }
@@ -118,16 +138,17 @@ internal fun FilesTab(
             item(key = "recent", contentType = "group") {
                 Column(dockItemAnimation()) {
                     DockSectionHeader(t("Recent transfers"))
-                    DockGroup(rows = recentTransfers.map { r -> { RecentTransferRow(r) } })
+                    DockGroup(rows = recentTransfers.mapIndexed { i, r -> { RecentTransferRow(r, entrance, i) } })
                 }
             }
         } else if (activeTransfers.isEmpty()) {
             item(key = "empty", contentType = "empty") {
-                DockEmptyState(
+                LinkStatePanel(
+                    state = if (connected) TetherState.LINKED else TetherState.OFFLINE,
                     modifier = dockItemAnimation(),
-                    icon = Icons.Rounded.SwapVert,
-                    title = t("No transfers yet"),
-                    body = t("Files you send or receive show up here."),
+                    title = if (connected) t("No transfers yet") else t("Not connected to Mac"),
+                    body = if (connected) t("Files you send or receive show up here.") else null,
+                    showTether = connected,
                 )
             }
         }
@@ -162,8 +183,8 @@ internal fun FilesTab(
                     Modifier.padding(horizontal = DockTheme.spacing.cardPadding, vertical = DockTheme.spacing.s),
                     verticalArrangement = Arrangement.spacedBy(DockTheme.spacing.m),
                 ) {
-                    TIPS.forEach { tip ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(DockTheme.spacing.m)) {
+                    TIPS.forEachIndexed { i, tip ->
+                        Row(Modifier.dockStagger(entrance, i), horizontalArrangement = Arrangement.spacedBy(DockTheme.spacing.m)) {
                             Box(
                                 Modifier
                                     .padding(top = 7.dp)
@@ -191,11 +212,11 @@ private val TIPS = listOf(
 )
 
 @Composable
-internal fun ActiveTransferRow(transfer: TransferProgress) {
+internal fun ActiveTransferRow(transfer: TransferProgress, entrance: DockEntrance, index: Int = 0) {
     val sp = DockTheme.spacing
     val s = MaterialTheme.colorScheme
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = sp.cardPadding, vertical = sp.m),
+        Modifier.dockStagger(entrance, index).fillMaxWidth().padding(horizontal = sp.cardPadding, vertical = sp.m),
         verticalAlignment = Alignment.Top,
     ) {
         FileBadge(transfer.fileName)
@@ -207,7 +228,7 @@ internal fun ActiveTransferRow(transfer: TransferProgress) {
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                 )
                 Spacer(Modifier.width(sp.s))
-                Text("${transfer.percent}%", style = MaterialTheme.typography.labelLarge, color = s.primary)
+                DockNumeral(transfer.percent, unit = "%", style = MaterialTheme.typography.titleMedium, color = s.primary)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(formatBytes(transfer.totalBytes), style = MaterialTheme.typography.bodySmall, color = s.onSurfaceVariant)
@@ -216,15 +237,22 @@ internal fun ActiveTransferRow(transfer: TransferProgress) {
                 }
             }
             Spacer(Modifier.size(sp.s))
-            DockProgress(transfer.sentBytes.toFloat() / transfer.totalBytes.toFloat().coerceAtLeast(1f))
+            val frac = (transfer.sentBytes.toFloat() / transfer.totalBytes.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f)
+            PhoneMacTether(
+                TetherState.LINKED,
+                Modifier.fillMaxWidth().semantics { progressBarRangeInfo = ProgressBarRangeInfo(frac, 0f..1f) },
+                progress = frac,
+                height = 20.dp,
+            )
         }
     }
 }
 
 @Composable
-internal fun RecentTransferRow(record: TransferRecord) {
+internal fun RecentTransferRow(record: TransferRecord, entrance: DockEntrance, index: Int = 0) {
     val dir = if (record.direction == "toMac") "→ Mac" else "← Phone"
     DockListItem(
+        modifier = Modifier.dockStagger(entrance, index),
         headline = record.fileName,
         supporting = "${formatBytes(record.sizeBytes)} · $dir · ${formatTimeAgo(record.completedAt)}",
         leading = { FileBadge(record.fileName) },
@@ -236,4 +264,19 @@ internal fun RecentTransferRow(record: TransferRecord) {
             }
         },
     )
+}
+
+/**
+ * Bytes as a whole number plus unit for [DockNumeral]; null means nothing yet. Stays in the smaller unit until the
+ * number reaches four digits, so 1.9 GB reads "1900 MB" rather than a truncated "1 GB".
+ */
+internal fun bytesNumeral(bytes: Long): Pair<Int?, String?> {
+    fun r(div: Long) = ((bytes + div / 2) / div).toInt()
+    return when {
+        bytes <= 0L -> null to null
+        bytes < 10_000L -> bytes.toInt() to "B"
+        bytes < 10_000_000L -> r(1_000L) to "KB"
+        bytes < 10_000_000_000L -> r(1_000_000L) to "MB"
+        else -> r(1_000_000_000L) to "GB"
+    }
 }

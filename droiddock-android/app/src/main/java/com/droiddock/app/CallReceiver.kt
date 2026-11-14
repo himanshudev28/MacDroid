@@ -3,6 +3,8 @@ package com.droiddock.app
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.telephony.TelephonyManager
 import org.json.JSONObject
 
@@ -31,6 +33,9 @@ class CallReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         if (intent.action != TelephonyManager.ACTION_PHONE_STATE_CHANGED) return
         val app = ctx.applicationContext
+        // Exported receiver with no permission: any app can send this action. Don't trust the
+        // extras for the state; ignore the intent if the telephony stack says otherwise.
+        if (!stateMatches(intent.getStringExtra(TelephonyManager.EXTRA_STATE), realCallState(app))) return
         ConnectionManager.wake(app)
 
         // An internet call's notification already drives the Mac (VoipCalls): don't announce it twice,
@@ -100,6 +105,37 @@ class CallReceiver : BroadcastReceiver() {
     }
 
     companion object {
+        /**
+         * The call state according to [TelephonyManager], or null when it can't be read (READ_PHONE_STATE
+         * not granted on API 31+, no telephony service, OEM failure). `callState` is deprecated from API 31
+         * in favour of a callback, but remains the only synchronous read and is what we need here.
+         */
+        @Suppress("DEPRECATION")
+        private fun realCallState(ctx: Context): Int? = runCatching {
+            if (Build.VERSION.SDK_INT >= 31 &&
+                ctx.checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED
+            ) return@runCatching null
+            (ctx.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager)?.callState
+        }.getOrNull()
+
+        /** True when the broadcast's claimed [EXTRA_STATE] agrees with [real] (a `CALL_STATE_*`), or [real] is unknown. */
+        internal fun stateMatches(claimed: String?, real: Int?): Boolean {
+            if (real == null) return true // cannot verify: keep the pre-existing behaviour
+            return when (claimed) {
+                // The broadcast can lag the real state (a call answered right as it rings is already
+                // OFFHOOK when RINGING is delivered), so only refuse a call claimed on an idle phone.
+                // Literals (the documented values of EXTRA_STATE_*): those constants are not compile-time
+                // ones, and touching TelephonyManager would make this untestable on the JVM.
+                "RINGING", "OFFHOOK" -> real != CALL_STATE_IDLE
+                // A late IDLE for a call that just ended must still clear the overlay, even if the next
+                // call is already ringing; a forged IDLE gains nothing.
+                "IDLE" -> true
+                else -> true // unknown values fall through the `when` in onReceive and do nothing
+            }
+        }
+
+        private const val CALL_STATE_IDLE = 0 // TelephonyManager.CALL_STATE_IDLE
+
         @Volatile private var announced = false
         @Volatile private var lastNumber = ""
         @Volatile private var lastName = ""

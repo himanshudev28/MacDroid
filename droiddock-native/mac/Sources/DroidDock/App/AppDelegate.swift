@@ -51,6 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if DDSelfTest.runIfRequested() { return }   // DD_SELFTEST=mirror|audio|all (WP4)
         #endif
         AppModel.shared.start()
+        ServicesProvider.register()
         #if DEBUG
         // Test hook: quit through the app's own terminate path after N seconds.
         if let v = ProcessInfo.processInfo.environment["DD_TEST_QUIT_AFTER"], let secs = Double(v) {

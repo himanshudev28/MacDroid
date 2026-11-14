@@ -149,6 +149,8 @@ private fun SystemBarsFollow(dark: Boolean) {
 /** Token accessors: `DockTheme.colors.success`, `DockTheme.spacing.gutter`, ... */
 object DockTheme {
     val style: UiStyle @Composable get() = LocalDockStyle.current
+    /** The "Docking" signature of the current style. Components read it; screens should not need to. */
+    val signature: DockSignature @Composable get() = LocalDockStyle.current.signature
     val appearance: Appearance @Composable get() = LocalAppearance.current
     val scheme: ColorScheme @Composable get() = MaterialTheme.colorScheme
     val colors: DockColors @Composable get() = LocalDockColors.current

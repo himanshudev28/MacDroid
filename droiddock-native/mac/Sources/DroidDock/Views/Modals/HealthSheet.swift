@@ -8,6 +8,12 @@ struct HealthSheet: View {
     @State private var error: String?
     @State private var fixing: String?
     @State private var refreshing = false
+    @State private var snap = LinkSnapshot()
+    @State private var showCaps = false
+    @State private var versionsWhileConnected: Bool?
+    @State private var issueFixing: String?
+
+    private var issues: [LinkIssue] { LinkHealth.issues(model: model, snap: snap) }
 
     private var problems: [HealthItem] {
         (items ?? []).filter { !$0.ok && $0.severity != "info" }
@@ -35,6 +41,10 @@ struct HealthSheet: View {
                 }
                 if items == nil, error == nil {
                     Section { ProgressView().controlSize(.small).frame(maxWidth: .infinity, minHeight: 80) }
+                }
+                connectionSection
+                if !issues.isEmpty {
+                    Section(tr("Likely causes")) { ForEach(issues) { issueRow($0) } }
                 }
                 if items != nil, problems.isEmpty {
                     Section {
@@ -74,16 +84,69 @@ struct HealthSheet: View {
 
             Divider()
             HStack {
+                Button(tr("Copy Diagnostics")) { Task { await LinkHealth.copyReport(model: model, items: items ?? []) } }
+                    .help(tr("Copies a plain-text report with no pairing code, notification text or phone numbers."))
                 Spacer()
                 Button(tr("Done")) { dismiss() }.buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
             }
             .padding(.horizontal, DD.Space.xl).padding(.vertical, DD.Space.md)
         }
-        .frame(width: 560, height: 520)
+        .frame(width: 560, height: 620)
         .ddAppearance(AppearanceSettings.shared)
         .task {
             await UIActivity.shared.pollWhileWindowVisible(every: .seconds(4), tolerance: .seconds(1)) { await refresh() }
         }
+    }
+
+    private var connectionSection: some View {
+        Section(tr("Connection")) {
+            LabeledContent(tr("Link")) {
+                StatusPill(text: LinkHealth.transportName(model), kind: model.wifi.connected ? .ok : .neutral)
+            }
+            if model.wifi.connected {
+                LabeledContent(tr("Security")) {
+                    Text(LinkHealth.securityName(model)).foregroundStyle(model.wifi.security == "plain" ? DD.badText : DD.dim)
+                }
+                LabeledContent(tr("Round trip")) {
+                    Text("\(LinkHealth.rttText(model.linkQuality)) · \(LinkHealth.gradeName(model.linkQuality))").foregroundStyle(DD.dim)
+                }
+                LabeledContent(tr("Phone app version")) {
+                    Text(verbatim: snap.versions.phoneAppVersion ?? tr("Not reported by the phone")).foregroundStyle(DD.dim)
+                }
+                if let caps = model.wifi.caps, !caps.isEmpty {
+                    DisclosureGroup(isExpanded: $showCaps) {
+                        Text(verbatim: caps.sorted().joined(separator: ", ")).font(DD.Font.mono).foregroundStyle(DD.dim)
+                            .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                    } label: {
+                        LabeledContent(tr("Phone features")) { Text(verbatim: "\(caps.count)").foregroundStyle(DD.dim) }
+                    }
+                }
+            }
+            LabeledContent(tr("Port")) { Text(verbatim: String(model.config?.port ?? 0)).font(DD.Font.mono).foregroundStyle(DD.dim) }
+            LabeledContent("adb") { Text(verbatim: toolText(snap.tools.adb, snap.versions.adbVersion)).foregroundStyle(DD.dim) }
+            LabeledContent("scrcpy") { Text(verbatim: toolText(snap.tools.scrcpy, snap.versions.scrcpyVersion ?? snap.tools.scrcpyVersion)).foregroundStyle(DD.dim) }
+        }
+    }
+
+    private func toolText(_ found: Bool, _ version: String?) -> String { found ? (version ?? tr("Found")) : tr("Not found") }
+
+    private func issueRow(_ i: LinkIssue) -> some View {
+        let tone: Color = i.severity == "error" ? DD.bad : i.severity == "warn" ? DD.warn : DD.dim
+        return HStack(alignment: .top, spacing: DD.Space.md) {
+            Image(systemName: i.severity == "info" ? "info.circle.fill" : "exclamationmark.triangle.fill")
+                .symbolRenderingMode(.hierarchical).foregroundStyle(tone).font(.system(size: 15)).frame(width: 20)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(i.title).font(DD.Font.headline)
+                Text(i.detail).font(DD.Font.callout).foregroundStyle(DD.dim).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: DD.Space.md)
+            if let label = i.fixLabel, let fix = i.fix {
+                Button(label) { Task { issueFixing = i.id; await fix(); try? await Task.sleep(for: .seconds(1)); await refresh(); issueFixing = nil } }
+                    .buttonStyle(SecondaryButtonStyle(compact: true)).disabled(issueFixing != nil)
+            }
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
     }
 
     private func sideTag(_ side: String) -> some View {
@@ -115,6 +178,11 @@ struct HealthSheet: View {
     private func refresh() async {
         refreshing = true
         do { items = try await Core.shared.healthCheck(); error = nil } catch { self.error = error.localizedDescription }
+        // adb's version is a process spawn: reuse it across polls, but re-ask when the link
+        // came up or went down, since the phone's app version changes with it.
+        let linked = model.wifi.connected
+        snap = await LinkHealth.snapshot(items: items ?? [], versions: versionsWhileConnected == linked ? snap.versions : nil)
+        versionsWhileConnected = linked
         refreshing = false
     }
     private func fix(_ item: HealthItem) async {

@@ -202,7 +202,8 @@ internal fun dockColors(scheme: ColorScheme, style: UiStyle, dark: Boolean, amol
     return when (style) {
         UiStyle.REACH -> DockColors(
             // One UI's inset-grouped look: white cards on a slightly darker page.
-            page = if (dark) scheme.surfaceContainerLowest else scheme.surfaceContainer,
+            // SHELF: a page softly tinted with the accent, so the white pebbles read as objects resting on it.
+            page = lerp(if (dark) scheme.surfaceContainerLowest else scheme.surfaceContainer, scheme.primary, if (dark) 0.05f else 0.035f),
             card = if (dark) scheme.surfaceContainer else scheme.surfaceContainerLowest,
             raised = if (dark) scheme.surfaceContainerHigh else scheme.surfaceContainerLow,
             inset = scheme.surfaceContainerHighest,

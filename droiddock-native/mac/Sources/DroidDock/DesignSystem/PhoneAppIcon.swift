@@ -105,7 +105,10 @@ final class PhoneIconStore {
     private static func fakeIcon(_ pkg: String) -> CGImage {
         let symbols = ["message.fill", "phone.fill", "envelope.fill", "bag.fill", "camera.fill", "map.fill"]
         let colors: [NSColor] = [.systemGreen, .systemBlue, .systemOrange, .systemPink, .systemPurple, .systemTeal]
-        let h = abs(pkg.hashValue)
+        // FNV-1a, stable across launches (`hashValue` is randomised per launch; `abs(Int.min)` would trap).
+        var fnv: UInt32 = 2_166_136_261
+        for b in pkg.utf8 { fnv = (fnv ^ UInt32(b)) &* 16_777_619 }
+        let h = Int(fnv)
         let side = pixels
         let img = NSImage(size: NSSize(width: side, height: side), flipped: false) { r in
             colors[h % colors.count].setFill()

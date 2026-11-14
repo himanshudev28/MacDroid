@@ -32,6 +32,12 @@ import com.droiddock.app.ui.theme.DockTheme
 import com.droiddock.app.ui.theme.UiStyle
 import com.droiddock.app.ui.theme.dockGlow
 
+/**
+ * True inside a surface filled with `primary` (BLOCKS' connected hero): PRIMARY buttons invert to onPrimary/primary so
+ * they never vanish into their container. Provided by the component that paints the primary fill.
+ */
+internal val LocalButtonOnAccent = androidx.compose.runtime.staticCompositionLocalOf { false }
+
 enum class ButtonKind {
     /** The one main action on a screen. Filled primary (ink in Mono). */
     PRIMARY,
@@ -69,8 +75,9 @@ fun DockButton(
     val glass = DockTheme.style == UiStyle.LIQUID_GLASS
     val shape = DockTheme.shapes.control
     val haptics = DockTheme.haptics
+    val onAccent = LocalButtonOnAccent.current
     val (bg, fg, border) = when (kind) {
-        ButtonKind.PRIMARY -> Triple(s.primary, s.onPrimary, null)
+        ButtonKind.PRIMARY -> if (onAccent) Triple(s.onPrimary, s.primary, null) else Triple(s.primary, s.onPrimary, null)
         ButtonKind.TONAL -> when {
             mono -> Triple(d.raised, s.onSurface, null)
             glass -> Triple(s.onSurface.copy(alpha = if (d.isDark) 0.12f else 0.09f), s.onSurface, d.hairline)
@@ -97,12 +104,13 @@ fun DockButton(
             .then(if (fullWidth) Modifier.fillMaxWidth() else Modifier)
             .defaultMinSize(minHeight = height)
             .then(if (glow && kind == ButtonKind.PRIMARY && enabled) Modifier.dockGlow(shape, 0.9f) else Modifier)
+            // Press first, so the whole button (fill included) reacts, not just its label.
+            .clip(shape).dockClickable(enabled = enabled) { haptics.tap(); onClick() }
             .then(
                 if (frost && kind != ButtonKind.GHOST) Modifier.glassControl(shape, glassFill, 1f)
                 else Modifier.clip(shape).background(bg)
                     .then(if (border != null) Modifier.border(1.dp, border, shape) else Modifier)
             )
-            .dockClickable(enabled = enabled) { haptics.tap(); onClick() }
             .alpha(if (enabled) 1f else 0.38f)
             .padding(horizontal = if (kind == ButtonKind.GHOST) 12.dp else horizontalPadding),
         horizontalArrangement = Arrangement.Center,

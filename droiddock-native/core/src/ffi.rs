@@ -138,8 +138,10 @@ fn invoke(cmd: String, args: Option<String>, body: Option<Vec<u8>>, req_id: u64)
         },
     };
     async_runtime::spawn_command(async move {
-        let fut = crate::dispatch::dispatch(&app, &cmd, args, body);
-        let r = match AssertUnwindSafe(fut).catch_unwind().await {
+        // Building the future can panic too (before its first poll), so the
+        // construction sits inside the guarded block as well.
+        let guarded = AssertUnwindSafe(async { crate::dispatch::dispatch(&app, &cmd, args, body).await });
+        let r = match guarded.catch_unwind().await {
             Ok(r) => r,
             Err(_) => Err(format!("internal error: `{cmd}` panicked")),
         };
@@ -152,10 +154,15 @@ fn invoke(cmd: String, args: Option<String>, body: Option<Vec<u8>>, req_id: u64)
 #[no_mangle]
 pub unsafe extern "C" fn dd_core_invoke(cmd: *const c_char, args_json: *const c_char, req_id: u64) {
     let (cmd, args) = (cstr(cmd), cstr(args_json));
-    let _ = catch_unwind(AssertUnwindSafe(|| match cmd {
+    if catch_unwind(AssertUnwindSafe(|| match cmd {
         Some(cmd) => invoke(cmd, args, None, req_id),
         None => deliver(req_id, Err("missing command".into())),
-    }));
+    }))
+    .is_err()
+    {
+        // The caller is waiting on `req_id`; a swallowed panic would hang it forever.
+        let _ = catch_unwind(|| deliver(req_id, Err("internal error: invoke panicked".into())));
+    }
 }
 
 /// # Safety
@@ -175,10 +182,15 @@ pub unsafe extern "C" fn dd_core_invoke_bytes(
     } else {
         std::slice::from_raw_parts(bytes, len).to_vec()
     };
-    let _ = catch_unwind(AssertUnwindSafe(|| match cmd {
+    if catch_unwind(AssertUnwindSafe(|| match cmd {
         Some(cmd) => invoke(cmd, args, Some(body), req_id),
         None => deliver(req_id, Err("missing command".into())),
-    }));
+    }))
+    .is_err()
+    {
+        // The caller is waiting on `req_id`; a swallowed panic would hang it forever.
+        let _ = catch_unwind(|| deliver(req_id, Err("internal error: invoke panicked".into())));
+    }
 }
 
 /// Blocking, bounded (~8 s). Idempotent (`shutdown::on_quit` runs once).

@@ -41,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -57,6 +58,9 @@ import com.droiddock.app.ui.theme.UiStyle
 import com.droiddock.app.ui.theme.dockGlow
 
 /** Connection state, which the hero shows by colour AND shape AND text. */
+/** The hero's tether key when the caller sends no events. */
+private object HeroNoEvents
+
 enum class HeroState { CONNECTED, CONNECTING, PAUSED, OFFLINE, UNPAIRED }
 
 /**
@@ -86,6 +90,10 @@ fun DockHero(
     secondaryLabel: String? = null,
     onSecondary: (() -> Unit)? = null,
     onClick: (() -> Unit)? = null,
+    /** Change to send one pulse along the hero's tether (a file, a clip, a notification). */
+    tetherPulseKey: Any? = null,
+    /** The phone ↔ Mac tether under the title. Off for compact heroes. */
+    showTether: Boolean = true,
 ) {
     val style = DockTheme.style
     val s = MaterialTheme.colorScheme
@@ -96,8 +104,9 @@ fun DockHero(
     val live = state == HeroState.CONNECTED
 
     val targetBg = when (style) {
+        // BLOCKS: the connected hero is the one solid primary slab on the screen.
         UiStyle.MATERIAL_YOU -> when (state) {
-            HeroState.CONNECTED -> s.primaryContainer
+            HeroState.CONNECTED -> s.primary
             HeroState.CONNECTING -> s.tertiaryContainer
             else -> s.surfaceContainerHigh
         }
@@ -107,7 +116,7 @@ fun DockHero(
     }
     val bg by animateColorAsState(targetBg, motion.fade(), label = "hero-bg")
     val onBg = when {
-        style == UiStyle.MATERIAL_YOU && state == HeroState.CONNECTED -> s.onPrimaryContainer
+        style == UiStyle.MATERIAL_YOU && state == HeroState.CONNECTED -> s.onPrimary
         style == UiStyle.MATERIAL_YOU && state == HeroState.CONNECTING -> s.onTertiaryContainer
         style == UiStyle.REACH && live -> s.onPrimaryContainer
         else -> s.onSurface
@@ -120,7 +129,10 @@ fun DockHero(
         HeroState.OFFLINE, HeroState.UNPAIRED -> s.outline
     }
 
-    val shimmer = if (state == HeroState.CONNECTING && motion.enabled && motion.ambient) {
+    // Loops run only in the foreground (rememberAmbientActive). While connecting, the tether's drifting dashes already say
+    // "connecting", so the bottom-edge shimmer only runs when the tether is hidden (at most two loops: radar + one).
+    val ambientActive = com.droiddock.app.ui.theme.rememberAmbientActive()
+    val shimmer = if (state == HeroState.CONNECTING && ambientActive && !showTether) {
         rememberInfiniteTransition(label = "hero-shimmer").animateFloat(
             0f, 1f, infiniteRepeatable(tween(1400, easing = LinearEasing), RepeatMode.Restart), label = "x",
         )
@@ -132,12 +144,13 @@ fun DockHero(
             // Content swaps between states change the height (detail line, action): glide it.
             .animateContentSize(motion.smooth())
             .dockGlow(shape, visible = live || style == UiStyle.LIQUID_GLASS)
+            .then(if (onClick != null) Modifier.clip(shape).dockClickable(tilt = true, onClick = onClick) else Modifier)
             .then(
                 if (frostActive()) Modifier.frosted(shape, bg, accent = s.tertiary)
                 else Modifier.clip(shape).background(bg)
                     .then(DockTheme.surfaces.cardBorder?.let { Modifier.border(it, shape) } ?: Modifier)
             )
-            .then(if (onClick != null) Modifier.dockClickable(onClick = onClick) else Modifier)
+            .dockCornerTicks()
             .drawWithContent {
                 drawContent()
                 val p = shimmer?.value ?: return@drawWithContent
@@ -166,10 +179,7 @@ fun DockHero(
             Spacer(Modifier.weight(1f))
             if (battery != null) {
                 Column(horizontalAlignment = Alignment.End) {
-                    AnimatedCounter(
-                        battery, style = DockTheme.type.numeral, color = onBg,
-                        suffix = "%", suffixSize = DockTheme.type.numeral.fontSize * 0.5f,
-                    )
+                    DockNumeral(battery, unit = "%", color = onBg)
                     if (charging) {
                         Icon(Icons.Rounded.BatteryChargingFull, null, tint = onBgDim, modifier = Modifier.size(16.dp))
                     }
@@ -233,6 +243,21 @@ fun DockHero(
                 }
             }
         }
+        if (showTether && state != HeroState.UNPAIRED) {
+            Spacer(Modifier.height(sp.m))
+            DockTether(
+                state = when (state) {
+                    HeroState.CONNECTED -> TetherState.LINKED
+                    HeroState.CONNECTING -> TetherState.CONNECTING
+                    else -> TetherState.OFFLINE
+                },
+                // Never null: the hero always takes the tether's animated path, so it gets its one reconnect pulse.
+                pulseKey = tetherPulseKey ?: HeroNoEvents,
+                height = 16.dp,
+                // On BLOCKS' solid primary slab the tether is drawn in the slab's own content colour.
+                tint = if (style == UiStyle.MATERIAL_YOU && live) onBg else null,
+            )
+        }
         // The action row: a state change that swaps its label cross-fades with a slight scale.
         AnimatedContent(
             targetState = primaryLabel,
@@ -244,7 +269,9 @@ fun DockHero(
             if (label != null && onPrimary != null) {
                 Column {
                     Spacer(Modifier.height(if (style == UiStyle.REACH) sp.xxl else sp.l + sp.xs))
-                    Row(horizontalArrangement = Arrangement.spacedBy(sp.s), verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        LocalButtonOnAccent provides (style == UiStyle.MATERIAL_YOU && live),
+                    ) { Row(horizontalArrangement = Arrangement.spacedBy(sp.s), verticalAlignment = Alignment.CenterVertically) {
                         DockButton(
                             label, onPrimary, icon = primaryIcon,
                             kind = ButtonKind.PRIMARY, glow = true,
@@ -253,7 +280,7 @@ fun DockHero(
                         if (secondaryLabel != null && onSecondary != null) {
                             DockButton(secondaryLabel, onSecondary, kind = ButtonKind.TONAL)
                         }
-                    }
+                    } }
                 }
             }
         }
@@ -271,15 +298,26 @@ private fun DeviceBadge(icon: ImageVector, live: Boolean, onBg: Color, modifier:
         UiStyle.LIQUID_GLASS -> Modifier.background(
             Brush.linearGradient(listOf(s.primary, s.tertiary)), shape,
         )
-        UiStyle.MATERIAL_YOU -> Modifier.background(if (live) s.primary else s.surfaceContainerHighest, shape)
+        // On the primary slab the badge flips to onPrimary so it stays visible.
+        UiStyle.MATERIAL_YOU -> Modifier.background(if (live) s.onPrimary else s.surfaceContainerHighest, shape)
         UiStyle.REACH -> Modifier.background(if (live) s.primary else DockTheme.colors.raised, shape)
     }
     val tint = when (style) {
         UiStyle.MINIMAL_MONO -> onBg
         UiStyle.LIQUID_GLASS -> s.onPrimary
+        UiStyle.MATERIAL_YOU -> if (live) s.primary else s.onSurfaceVariant
         else -> if (live) s.onPrimary else s.onSurfaceVariant
     }
-    Box(modifier.size(size).clip(shape).then(fill), contentAlignment = Alignment.Center) {
+    // BLOCKS: the cookie turns an eighth (a one-shot pop) when the link comes up or drops; the icon stays upright.
+    val turn by androidx.compose.animation.core.animateFloatAsState(
+        if (style == UiStyle.MATERIAL_YOU && live) 45f else 0f, DockTheme.motion.pop(), label = "badge-turn",
+    )
+    Box(modifier.size(size), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.matchParentSize()
+                .then(if (turn != 0f) Modifier.graphicsLayer { rotationZ = turn } else Modifier)
+                .clip(shape).then(fill),
+        )
         Icon(icon, null, tint = tint, modifier = Modifier.size(size * 0.48f))
     }
 }

@@ -5,6 +5,9 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import com.droiddock.app.ui.theme.dockEnterTransition
+import com.droiddock.app.ui.theme.dockExitTransition
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -81,7 +84,7 @@ internal fun BluetoothFallbackRows() {
         onChecked = { v -> if (v) enable() else { denied = false; ConnectionManager.setConnectionMode(ctx, "network") } },
     )
 
-    if (denied && !on) {
+    AnimatedVisibility(denied && !on, enter = dockEnterTransition(), exit = dockExitTransition()) {
         val sp = DockTheme.spacing
         Column(Modifier.fillMaxWidth().padding(horizontal = sp.cardPadding, vertical = sp.m)) {
             Text(
@@ -102,7 +105,8 @@ internal fun BluetoothFallbackRows() {
         }
     }
 
-    if (on) {
+    AnimatedVisibility(on, enter = dockEnterTransition(), exit = dockExitTransition()) {
+      Column {
         DockDivider()
         ToggleRow(
             icon = Icons.Outlined.SwapHoriz, tone = Tone.SECONDARY,
@@ -139,6 +143,7 @@ internal fun BluetoothFallbackRows() {
                 }
             }
         }
+      }
     }
 
     if (explain) {

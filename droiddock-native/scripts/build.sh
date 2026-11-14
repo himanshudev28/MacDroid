@@ -12,8 +12,18 @@ echo "==> cargo build (core)"
 ( cd "$ROOT/core" && MACOSX_DEPLOYMENT_TARGET=14.0 cargo build --release --target aarch64-apple-darwin )
 
 echo "==> swift build"
-( cd "$ROOT/mac" && swift build -c release --arch arm64 )
 BIN="$( cd "$ROOT/mac" && swift build -c release --arch arm64 --show-bin-path )/DroidDock"
+# SwiftPM does not relink when only the Rust static library changed, which would ship an old core: force a relink.
+rm -f "$BIN"
+( cd "$ROOT/mac" && swift build -c release --arch arm64 )
+[ -f "$BIN" ] || { echo "error: swift build produced no $BIN" >&2; exit 1; }
+CORE_LIB="$ROOT/core/target/aarch64-apple-darwin/release/libdroiddock_core.a"
+# The core exposes no embedded version marker that survives LTO reliably, so check freshness instead:
+# the linked binary must be newer than the static library it was built from.
+if [ -f "$CORE_LIB" ] && [ "$CORE_LIB" -nt "$BIN" ]; then
+  echo "error: $BIN is older than the Rust core library; the app would ship a stale core" >&2
+  exit 1
+fi
 
 VERSION="$(grep -m1 '^version' "$ROOT/core/Cargo.toml" | sed -E 's/.*"([^"]+)".*/\1/')"
 echo "==> assemble $APP (v$VERSION)"

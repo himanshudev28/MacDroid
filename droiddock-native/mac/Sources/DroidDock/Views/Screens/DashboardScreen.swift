@@ -10,12 +10,14 @@ struct DashboardScreen: View {
     @State private var chrome = ShellChrome.shared
 
     private var layout: AppLayout { AppLayout(rawValue: layoutRaw) ?? .phoneTabs }
-    /// Is a phone card on screen next to the dashboard? (sidebar card, classic's phone panel, grouped's
-    /// compact card) — the user can hide it, and grouped hides it while the rail is collapsed.
+    /// Is a full phone card on screen next to the dashboard? (phone-tabs' sidebar card, classic's phone panel.)
+    /// Grouped shows only a compact header and Minimal keeps the card in a toolbar popover, so the dashboard is their
+    /// phone hero and pairing QR. Uses the *effective* state: a panel auto-hidden by a narrow window isn't on screen.
     private var phoneCardVisible: Bool {
-        if chrome.isPhoneHidden(layout) { return false }
-        if layout == .grouped, chrome.isCollapsed(.grouped) { return false }
-        return true
+        switch layout {
+        case .grouped, .minimal: false
+        case .phoneTabs, .classic: !chrome.effectivePhoneHidden(layout)
+        }
     }
     /// A phone has paired before (the card then shows "Reconnecting…", not the QR).
     private var isPaired: Bool {
@@ -25,7 +27,7 @@ struct DashboardScreen: View {
     /// while a known phone reconnects the card shows that instead, so the QR goes here, straight away,
     /// for anyone who wants to pair a new phone meanwhile.
     private var cardShowsQR: Bool {
-        phoneCardVisible && layout != .grouped && (!isPaired || shell.forcePairing)
+        phoneCardVisible && (!isPaired || shell.forcePairing)
     }
     /// A visible card already shows name, battery and link: no second hero.
     private var cardShowsPhone: Bool { phoneCardVisible }

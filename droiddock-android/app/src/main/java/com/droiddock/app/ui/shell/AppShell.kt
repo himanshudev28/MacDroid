@@ -64,6 +64,8 @@ import com.droiddock.app.ui.components.dockNavBarHeight
 import com.droiddock.app.ui.theme.DockTheme
 import com.droiddock.app.ui.theme.NavLayout
 import com.droiddock.app.ui.theme.UiStyle
+import com.droiddock.app.ui.theme.DockSignature
+import com.droiddock.app.ui.theme.signature
 import com.droiddock.app.ui.theme.dockPageBackground
 import com.droiddock.app.ui.theme.glass.GlassHost
 
@@ -168,14 +170,22 @@ fun AppShell(
         back.from = current
         back.committed = false
         back.active = true
+        var finished = false
         try {
             events.collect { back.progress = it.progress; back.edge = it.swipeEdge }
             haptics.gestureEnd()
             back.committed = true
             animate(back.progress, 1f, 0f, motion.chrome<Float>()) { v, _ -> back.progress = v }
             onSelect(Dest.HOME)
+            finished = true
         } catch (e: CancellationException) {
+            // Abandoned gesture: the LaunchedEffect below springs the page back. Rethrow so cancellation propagates.
             back.active = false
+            throw e
+        } finally {
+            // Cancelled after the commit (e.g. the layout switched to Hub mid-settle): no navigation happens, so nothing
+            // else would clear the shrunken pose. Reset it here.
+            if (back.committed && !finished) back.reset()
         }
     }
     LaunchedEffect(back.active) {
@@ -209,16 +219,16 @@ fun AppShell(
 }
 
 /**
- * Tab content. Fade-through with a subtle shift in the direction of travel:
- * the old page fades out in 90 ms, the new one fades in (60 ms later) while
- * drifting in from 1/14 of the width. Chrome never bounces (chrome spring,
- * damping >= 0.92), so Calm/Standard/Bouncy differ only in stiffness.
- * Minimal Mono: plain fade, no shift. Animations off: swap.
+ * Tab content docks: the new page travels in from 1/14 of the width in the direction of travel and seats with the
+ * personality's spatial spring (a small settle in Standard/Bouncy, none in Calm) while scaling up from 0.985; the old page
+ * undocks the other way and fades in 90 ms. Predictive back plays the same undock, driven by the gesture (see
+ * [BackState]). Minimal Mono (Instrument): plain fade, no travel. Animations off: swap.
  */
 @Composable
 private fun Pages(current: String, order: List<String>, back: BackState, content: @Composable (String) -> Unit) {
     val motion = DockTheme.motion
-    val mono = DockTheme.style == UiStyle.MINIMAL_MONO
+    // Shell motion, not screen layout: the one place the page transition reads the signature.
+    val mono = DockTheme.signature == DockSignature.INSTRUMENT
     val density = LocalDensity.current
     val drift = with(density) { 24.dp.toPx() }
     val corner = RoundedCornerShape(28.dp)
@@ -233,10 +243,12 @@ private fun Pages(current: String, order: List<String>, back: BackState, content
                 val from = order.indexOf(initialState).let { if (it < 0) order.size else it }
                 val to = order.indexOf(targetState).let { if (it < 0) order.size else it }
                 val dir = if (to >= from) 1 else -1
-                val spec = motion.chrome<IntOffset>(IntOffset.VisibilityThreshold)
+                val seat = motion.spatial<IntOffset>(IntOffset.VisibilityThreshold)
                 (fadeIn(tween(motion.pageMs - 60, delayMillis = 60, easing = motion.easing)) +
-                    slideInHorizontally(spec) { dir * it / 14 }) togetherWith
-                    (fadeOut(tween(90, easing = motion.easing)) + slideOutHorizontally(spec) { -dir * it / 14 })
+                    slideInHorizontally(seat) { dir * it / 14 } +
+                    scaleIn(motion.spatial(), initialScale = 0.985f)) togetherWith
+                    (fadeOut(tween(90, easing = motion.easing)) +
+                        slideOutHorizontally(motion.exit()) { -dir * it / 20 })
             }
         },
         label = "dest",

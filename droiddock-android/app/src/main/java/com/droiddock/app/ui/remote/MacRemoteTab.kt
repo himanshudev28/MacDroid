@@ -30,6 +30,22 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.material.icons.outlined.PanTool
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.material.icons.outlined.LaptopMac
+import androidx.compose.material.icons.outlined.PhoneAndroid
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
+import com.droiddock.app.ui.components.DockTether
+import com.droiddock.app.ui.components.TetherState
+import com.droiddock.app.ui.theme.dockEnterTransition
+import com.droiddock.app.ui.theme.dockExitTransition
+import com.droiddock.app.ui.theme.dockPress
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.rememberUpdatedState
@@ -134,24 +150,42 @@ internal fun MacRemoteTab(connected: Boolean, previewDrag: Boolean? = null, prev
     LaunchedEffect(downSent) {
         while (downSent) { delay(10_000); if (downSent) ConnectionManager.sendRemoteButton(true) }
     }
-    val keyFeel = remember(haptics, style) { { if (style != UiStyle.LIQUID_GLASS && style != UiStyle.MINIMAL_MONO) haptics.longPress() } }
+    // Every command sent to the Mac sends one pulse down the tether at the top.
+    var sent by remember { mutableIntStateOf(0) }
+    val keyFeel = remember(haptics, style) { { sent++; if (style != UiStyle.LIQUID_GLASS && style != UiStyle.MINIMAL_MONO) haptics.longPress() } }
 
     // A landscape phone is wide but short (the shell shows a rail). Stacked, the fixed
     // controls took all the height and left the trackpad 0 dp tall, so go side by side there.
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val sideBySide = maxWidth > maxHeight && maxHeight < 560.dp
         val hint: @Composable () -> Unit = {
+            Column(verticalArrangement = Arrangement.spacedBy(sp.xs)) {
+            DockTether(
+                state = if (connected) TetherState.LINKED else TetherState.OFFLINE,
+                pulseKey = sent, height = 20.dp,
+                start = { Icon(Icons.Outlined.PhoneAndroid, null, tint = scheme.primary, modifier = Modifier.size(16.dp)) },
+                end = { Icon(Icons.Outlined.LaptopMac, null, tint = if (connected) scheme.primary else scheme.outline, modifier = Modifier.size(16.dp)) },
+            )
             Text(
                 if (connected) t("Drag to move · tap to click · long-press to right-click")
                 else t("Not connected to your Mac."),
                 style = MaterialTheme.typography.bodySmall,
                 color = if (connected) scheme.onSurfaceVariant else scheme.error,
             )
+            }
         }
         val pad: @Composable (Modifier) -> Unit = { padModifier ->
             // The trackpad is the point of this screen: it takes all the slack
             // (about two thirds of the page) and is floored at a size worth dragging on.
             var pressed by remember { mutableStateOf(false) }
+            // Touch feedback: a glow under every finger, a fading trail behind the first, and a ring that
+            // expands from where the last finger lifted. Event-driven (no loop), so it needs no ambient gate.
+            val motion = DockTheme.motion
+            val padScope = rememberCoroutineScope()
+            var fingers by remember { mutableStateOf(emptyList<Offset>()) }
+            var trail by remember { mutableStateOf(emptyList<Offset>()) }
+            val ring = remember { Animatable(1f) }
+            var ringAt by remember { mutableStateOf(Offset.Zero) }
             val gridColor = scheme.onSurface
             val pressTint = scheme.primary
             Box(
@@ -167,6 +201,40 @@ internal fun MacRemoteTab(connected: Boolean, previewDrag: Boolean? = null, prev
                         while (y < size.height) { drawLine(line, Offset(0f, y), Offset(size.width, y), 1f); y += step }
                         // Pressed state is read here, so a touch only redraws.
                         if (pressed) drawRect(pressTint.copy(alpha = 0.10f))
+                        if (motion.enabled) {
+                            val n = trail.size
+                            trail.forEachIndexed { i, p ->
+                                val f = (i + 1f) / (n + 1f)
+                                drawCircle(pressTint.copy(alpha = 0.16f * f), radius = 4.dp.toPx() + 10.dp.toPx() * f, center = p)
+                            }
+                            fingers.forEach { p ->
+                                drawCircle(pressTint.copy(alpha = 0.20f), radius = 36.dp.toPx(), center = p)
+                                drawCircle(pressTint.copy(alpha = 0.55f), radius = 36.dp.toPx(), center = p, style = Stroke(1.5.dp.toPx()))
+                            }
+                            val r = ring.value
+                            if (r < 1f) drawCircle(
+                                pressTint.copy(alpha = 0.45f * (1f - r)),
+                                radius = 36.dp.toPx() + 56.dp.toPx() * r, center = ringAt, style = Stroke(2.dp.toPx()),
+                            )
+                        }
+                    }
+                    .pointerInput(connected, motion.enabled) {
+                        if (!motion.enabled) return@pointerInput
+                        // Observe only (Initial pass, never consumed) so the gesture detectors below are untouched.
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            do {
+                                val e = awaitPointerEvent(PointerEventPass.Initial)
+                                val down = e.changes.filter { it.pressed }
+                                fingers = down.map { it.position }
+                                down.firstOrNull()?.let { trail = (trail + it.position).takeLast(10) }
+                                if (down.isEmpty()) e.changes.firstOrNull()?.let { up ->
+                                    ringAt = up.position
+                                    padScope.launch { ring.snapTo(0f); ring.animateTo(1f, motion.effects()) }
+                                }
+                            } while (down.isNotEmpty())
+                            fingers = emptyList(); trail = emptyList()
+                        }
                     }
                     .pointerInput(connected) {
                         if (!connected) return@pointerInput
@@ -226,6 +294,7 @@ internal fun MacRemoteTab(connected: Boolean, previewDrag: Boolean? = null, prev
                                     if (locked) { haptics.gestureEnd(); releaseHold() }
                                     return@detectTapGestures
                                 }
+                                sent++
                                 haptics.tap().also { if (style != UiStyle.LIQUID_GLASS && style != UiStyle.MINIMAL_MONO) haptics.select() }
                                 ConnectionManager.sendRemote("mouse_click") { it.put("button", "left") }
                             },
@@ -256,7 +325,7 @@ internal fun MacRemoteTab(connected: Boolean, previewDrag: Boolean? = null, prev
             )
         }
         val hold: @Composable () -> Unit = {
-            if (dragCap && connected) {
+            AnimatedVisibility(dragCap && connected, enter = dockEnterTransition(), exit = dockExitTransition()) {
                 HoldButton(
                     holdPressed = holdPressed,
                     locked = locked,
@@ -285,11 +354,11 @@ internal fun MacRemoteTab(connected: Boolean, previewDrag: Boolean? = null, prev
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(sp.xs)
                 ) {
-                    ArrowKey(Icons.Outlined.KeyboardArrowUp, t("Up"), haptics, "up", connected)
+                    ArrowKey(Icons.Outlined.KeyboardArrowUp, t("Up"), haptics, "up", connected) { sent++ }
                     Row(horizontalArrangement = Arrangement.spacedBy(sp.xs)) {
-                        ArrowKey(Icons.Outlined.KeyboardArrowLeft, t("Left"), haptics, "left", connected)
-                        ArrowKey(Icons.Outlined.KeyboardArrowDown, t("Down"), haptics, "down", connected)
-                        ArrowKey(Icons.Outlined.KeyboardArrowRight, t("Right"), haptics, "right", connected)
+                        ArrowKey(Icons.Outlined.KeyboardArrowLeft, t("Left"), haptics, "left", connected) { sent++ }
+                        ArrowKey(Icons.Outlined.KeyboardArrowDown, t("Down"), haptics, "down", connected) { sent++ }
+                        ArrowKey(Icons.Outlined.KeyboardArrowRight, t("Right"), haptics, "right", connected) { sent++ }
                     }
                 }
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(sp.xs)) {
@@ -326,7 +395,7 @@ internal fun MacRemoteTab(connected: Boolean, previewDrag: Boolean? = null, prev
                     enabled = canSend,
                     tint = if (canSend) scheme.primary else scheme.onSurfaceVariant,
                     onClick = {
-                        haptics.confirm()
+                        haptics.confirm(); sent++
                         ConnectionManager.sendRemote("text") { it.put("text", typed) }
                         typed = ""
                     },
@@ -391,10 +460,14 @@ internal fun RemoteKey(label: String, modifier: Modifier = Modifier, feel: () ->
  * second key; the click remains for TalkBack and keyboards.
  */
 @Composable
-private fun ArrowKey(icon: androidx.compose.ui.graphics.vector.ImageVector, description: String, haptics: DockHaptics, key: String, connected: Boolean) {
+private fun ArrowKey(icon: androidx.compose.ui.graphics.vector.ImageVector, description: String, haptics: DockHaptics, key: String, connected: Boolean, onSent: () -> Unit = {}) {
     val linkUp by rememberUpdatedState(connected)
+    // The touch is consumed on the Initial pass (so the key repeats instead of double-firing), which also starves the
+    // button of its own press interaction. Feed one by hand so the key still sinks under the finger.
+    val interaction = remember { MutableInteractionSource() }
+    val sentNow by rememberUpdatedState(onSent)
     Box(
-        Modifier.pointerInput(key) {
+        Modifier.dockPress(interaction, scale = 0.88f, tilt = true).pointerInput(key) {
             // One persistent pointer loop tracks the pressed state; the repeat runs as a job that is
             // cancelled when the last pointer lifts, on cancel, or when this leaves composition.
             coroutineScope {
@@ -402,9 +475,11 @@ private fun ArrowKey(icon: androidx.compose.ui.graphics.vector.ImageVector, desc
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     down.consume()
                     var repeat: Job? = null
+                    val press = PressInteraction.Press(down.position)
+                    interaction.tryEmit(press)
                     try {
                         if (linkUp) {
-                            haptics.longPress(); sendKey(key)
+                            haptics.longPress(); sendKey(key); sentNow()
                             repeat = launch {
                                 delay(KeyRepeat.DELAY_MS)
                                 while (isActive && linkUp) { sendKey(key); delay(KeyRepeat.INTERVAL_MS) }
@@ -415,6 +490,7 @@ private fun ArrowKey(icon: androidx.compose.ui.graphics.vector.ImageVector, desc
                             e.changes.forEach { it.consume() }
                         } while (e.changes.any { it.pressed })
                     } finally {
+                        interaction.tryEmit(PressInteraction.Release(press))
                         repeat?.cancel()
                     }
                 }
@@ -456,6 +532,17 @@ private fun HoldButton(
         else -> s.onSurface.copy(alpha = if (d.isDark) 0.12f else 0.07f)
     }
     val label = if (locked) t("Drag lock on") else t("Hold to drag")
+    val fillAnim by animateColorAsState(fill, DockTheme.motion.fade(), label = "holdFill")
+    val fgAnim by animateColorAsState(fg, DockTheme.motion.fade(), label = "holdFg")
+    // The hold is driven by raw pointer events, so it reports presses to dockPress by hand.
+    val holdInteraction = remember { MutableInteractionSource() }
+    LaunchedEffect(holdPressed, locked) {
+        if (holdPressed || locked) {
+            val p = PressInteraction.Press(Offset.Zero)
+            holdInteraction.emit(p)
+            try { kotlinx.coroutines.awaitCancellation() } finally { holdInteraction.tryEmit(PressInteraction.Release(p)) }
+        }
+    }
     val holdDesc = t("Hold mouse button")
     val lockOn = t("Drag lock on")
     val lockOff = t("Drag lock off")
@@ -464,11 +551,12 @@ private fun HoldButton(
     Row(
         Modifier
             .fillMaxWidth()
+            .dockPress(holdInteraction, scale = 0.97f)
             .defaultMinSize(minHeight = DockTheme.spacing.touch + 12.dp)
             .then(if (locked) Modifier.dockGlow(shape, 0.9f) else Modifier)
             .then(
-                if (frostActive()) Modifier.glassControl(shape, if (active) s.primary.copy(alpha = 0.90f) else fill)
-                else Modifier.clip(shape).background(fill)
+                if (frostActive()) Modifier.glassControl(shape, if (active) s.primary.copy(alpha = 0.90f) else fillAnim)
+                else Modifier.clip(shape).background(fillAnim)
             )
             .semantics {
                 contentDescription = holdDesc
@@ -507,8 +595,8 @@ private fun HoldButton(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Spacer(Modifier.height(DockTheme.spacing.touch + 12.dp))
-        Icon(if (locked) Icons.Outlined.Lock else Icons.Outlined.PanTool, null, tint = fg, modifier = Modifier.size(20.dp))
+        Icon(if (locked) Icons.Outlined.Lock else Icons.Outlined.PanTool, null, tint = fgAnim, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(8.dp))
-        Text(label, style = MaterialTheme.typography.labelLarge, color = fg)
+        Text(label, style = MaterialTheme.typography.labelLarge, color = fgAnim)
     }
 }

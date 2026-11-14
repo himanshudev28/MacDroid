@@ -12,10 +12,11 @@ struct MainShell: View {
     @Environment(\.layoutDirection) private var inheritedDirection
     @State private var chrome = ShellChrome.shared
 
-    /// Phone tabs and Minimal: the phone is the sidebar, so the system sidebar toggle hides the phone. Classic and Grouped:
-    /// the column never hides; the toggle collapses it to an icon rail.
+    /// Phone tabs: the phone is the sidebar, so the system sidebar toggle hides the phone. Classic and Grouped: the column
+    /// never hides; the toggle collapses it to an icon rail. Minimal: no sidebar at all (detail only, always).
     private var visibility: Binding<NavigationSplitViewVisibility> {
         let l = layout
+        if l == .minimal { return .constant(.detailOnly) }
         if ShellChrome.phoneIsSidebar(l) {
             return Binding(get: { chrome.effectivePhoneHidden(l) ? .detailOnly : .all },
                            set: { chrome.setPhoneHidden(l, $0 == .detailOnly) })
@@ -42,7 +43,17 @@ struct MainShell: View {
         // Keep the split view's chrome (sidebar side, toolbar zones) left-to-right in the tab layouts: with the system toolbar
         // still LTR, a mirrored split view pushes the principal tab bar into the `»` menu. Content columns mirror themselves.
         .environment(\.layoutDirection, ShellChrome.phoneIsSidebar(layout) ? .leftToRight : inheritedDirection)
-        .onChange(of: layout) { _, new in SplitWidth.applyIdeal(new, chrome: chrome) }
+        .onChange(of: layout) { old, new in
+            chrome.minimalPhoneOpen = false
+            SplitWidth.applyIdeal(new, chrome: chrome)
+            // Leaving Minimal the column is still hidden/1 pt on this pass, so applyIdeal bails; retry once it is shown.
+            if old == .minimal {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(120))
+                    SplitWidth.applyIdeal(new, chrome: chrome)
+                }
+            }
+        }
     }
 }
 
@@ -52,13 +63,13 @@ struct MainShell: View {
 enum SplitWidth {
     static func ideal(_ l: AppLayout) -> CGFloat {
         switch l {
-        case .phoneTabs, .grouped, .minimal: LayoutMetrics.phoneIdeal
+        case .phoneTabs, .grouped, .minimal: LayoutMetrics.phoneIdeal   // minimal never shows its column
         case .classic: LayoutMetrics.listIdeal
         }
     }
 
     static func applyIdeal(_ l: AppLayout, chrome: ShellChrome) {
-        guard !chrome.isCollapsed(l), !chrome.effectivePhoneHidden(l) || !ShellChrome.phoneIsSidebar(l),
+        guard l != .minimal, !chrome.isCollapsed(l), !chrome.effectivePhoneHidden(l) || !ShellChrome.phoneIsSidebar(l),
               let root = WindowControl.mainWindow?.contentView?.superview, let split = outerSplit(in: root),
               let first = split.arrangedSubviews.first, !first.isHidden, first.frame.width > 1 else { return }
         split.setPosition(ideal(l), ofDividerAt: 0)

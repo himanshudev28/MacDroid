@@ -81,6 +81,12 @@ import com.droiddock.app.ui.remote.*
 import com.droiddock.app.ui.mirror.*
 import com.droiddock.app.ui.setup.*
 import com.droiddock.app.ui.guide.*
+import com.droiddock.app.ui.components.DockProgress
+import com.droiddock.app.ui.components.DockTether
+import com.droiddock.app.ui.components.TetherState
+import com.droiddock.app.ui.theme.DockTheme
+import com.droiddock.app.ui.theme.dockEnterTransition
+import com.droiddock.app.ui.theme.dockExitTransition
 
 /**
  * Check → download → install, in one row that never moves.
@@ -135,6 +141,7 @@ internal fun UpdateRow(known: UpdateChecker.Release?) {
 
     val busy = state is UpdateUi.Checking || state is UpdateUi.Downloading
 
+    Column {
     ServiceRow(
         icon     = Icons.Outlined.SystemUpdate,
         tone     = com.droiddock.app.ui.components.Tone.SECONDARY,
@@ -205,6 +212,24 @@ internal fun UpdateRow(known: UpdateChecker.Release?) {
                     .onFailure { state = UpdateUi.Failed(it.message ?: "check failed") }
             }
         }
+    }
+    // Download progress rides under the row: a determinate bar while bytes arrive, a drifting tether while the
+    // release list is being fetched. Both dock in and out; the row above never moves.
+    val down = state as? UpdateUi.Downloading
+    AnimatedVisibility(
+        visible = busy,
+        enter = dockEnterTransition(), exit = dockExitTransition(),
+    ) {
+        Column(
+            Modifier.padding(horizontal = DockTheme.spacing.cardPadding).padding(bottom = DockTheme.spacing.m),
+        ) {
+            if (down != null) {
+                DockProgress(down.percent / 100f)
+            } else {
+                DockTether(TetherState.CONNECTING, height = 16.dp)
+            }
+        }
+    }
     }
 }
 

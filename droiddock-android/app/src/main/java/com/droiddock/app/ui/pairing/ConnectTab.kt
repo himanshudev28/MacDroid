@@ -42,6 +42,10 @@ import com.droiddock.app.ui.components.DockSection
 import com.droiddock.app.ui.components.DockStatusPill
 import com.droiddock.app.ui.components.Tone
 import com.droiddock.app.ui.theme.DockTheme
+import com.droiddock.app.ui.theme.dockEnter
+import com.droiddock.app.ui.components.TetherState
+import com.droiddock.app.ui.home.LinkBay
+import com.droiddock.app.ui.home.rememberTetherPulse
 
 @Composable
 internal fun ConnectTab(
@@ -97,6 +101,20 @@ internal fun ConnectContent(
     ) {
         item(key = "status", contentType = "status") {
             DockCard(dockItemAnimation()) {
+                // Connect is always looking (it sweeps mDNS while open), so the tether reaches until a Mac answers, then
+                // snaps taut. A Mac sits at the far end once there is one to reach: a pairing, or one found nearby.
+                val linked = connected
+                LinkBay(
+                    state = if (linked) TetherState.LINKED else TetherState.CONNECTING,
+                    description = when {
+                        connected -> t("Connected to {mac}", "mac" to (macName ?: "Mac"))
+                        paired -> t("Searching for Mac…")
+                        else -> t("Not paired")
+                    },
+                    pulseKey = rememberTetherPulse(linked = linked),
+                    showMac = paired || discovered.isNotEmpty(),
+                    modifier = Modifier.padding(bottom = sp.l),
+                )
                 DockStatusPill(
                     text = when {
                         connected -> t("Connected to {mac}", "mac" to (macName ?: "Mac"))
@@ -125,11 +143,12 @@ internal fun ConnectContent(
         }
         item(key = "how", contentType = "section") {
             DockSection(t("How to pair"), dockItemAnimation()) {
+                // Matches today's Mac app: the QR is on its phone card (and in Settings › Connection), not a sidebar button.
                 val steps = listOf(
-                    "Open DroidDock on your Mac",
-                    "Click 'Pair Device' or the QR icon in the sidebar",
-                    "Tap 'Scan QR code' above and scan the code on screen",
-                    "Both devices join the same Wi-Fi network automatically",
+                    t("Open DroidDock on your Mac"),
+                    t("Its phone card shows a QR code. It's also in Settings › Connection › Pair your phone."),
+                    t("Tap Scan QR code above and point the camera at it"),
+                    t("Keep both devices on the same Wi-Fi network, or connect them with a USB cable"),
                 )
                 steps.forEachIndexed { i, step ->
                     if (i > 0) DockDivider()
@@ -145,7 +164,7 @@ internal fun ConnectContent(
                         }
                         Spacer(Modifier.width(sp.m))
                         Text(
-                            t(step), style = MaterialTheme.typography.bodyMedium,
+                            step, style = MaterialTheme.typography.bodyMedium,
                             color = s.onSurfaceVariant, modifier = Modifier.weight(1f),
                         )
                     }
@@ -175,9 +194,12 @@ internal fun AvailableDevicesCard(
             )
         } else {
             discovered.forEachIndexed { idx, mac ->
+                // Keyed, so a Mac that appears mid-sweep docks in on its own and the others stay put.
+                androidx.compose.runtime.key(mac.ip, mac.port) {
                 if (idx > 0) DockDivider()
                 val known = ConnectionManager.knownFor(mac)
                 DockListItem(
+                    modifier = Modifier.dockEnter(idx),
                     headline = mac.name,
                     supporting = "${mac.ip}:${mac.port} · ${mac.via}",
                     icon = Icons.Outlined.LaptopMac,
@@ -191,6 +213,7 @@ internal fun AvailableDevicesCard(
                         )
                     },
                 )
+                }
             }
         }
     }

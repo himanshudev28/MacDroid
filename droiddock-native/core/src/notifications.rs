@@ -64,6 +64,16 @@ fn is_duplicate(app: &AppHandle, key: &str, hash: &str) -> bool {
     false
 }
 
+/// An ongoing progress / timer / stopwatch update (ride ETA, download, countdown). The menu-bar panel shows it
+/// live, so it must neither raise a banner nor count as a new unread notification on every tick.
+pub fn is_live_update(m: &Value) -> bool {
+    m.get("ongoing").and_then(Value::as_bool) == Some(true)
+        && (m.get("progressMax").and_then(Value::as_i64).is_some_and(|v| v > 0)
+            || m.get("progressIndeterminate").and_then(Value::as_bool) == Some(true)
+            || m.get("chrono").and_then(Value::as_bool) == Some(true)
+            || matches!(m.get("category").and_then(Value::as_str), Some("progress") | Some("stopwatch")))
+}
+
 fn forget(app: &AppHandle, key: &str) {
     let state = app.state::<NotifState>();
     state.live.lock().unwrap().retain(|(k, _)| k != key);
@@ -118,6 +128,10 @@ pub fn on_notification(app: &AppHandle, m: &Value) {
     {
         return;
     }
+    // A running timer / stopwatch (chronometer) is shown live in the menu-bar panel, not as a banner.
+    if is_live_update(m) {
+        return;
+    }
 
     // wifi.js: `String(msg.key || randomUUID())` — a keyless notification gets
     // a throwaway unique key so it's never deduped (folding them all onto one
@@ -132,7 +146,16 @@ pub fn on_notification(app: &AppHandle, m: &Value) {
     let text = m.get("text").and_then(Value::as_str).unwrap_or("");
     let app_label = m.get("app").and_then(Value::as_str).unwrap_or("");
 
-    if is_duplicate(app, &key, &content_hash(title, text)) {
+    // Android 15+ hid the content: title/text are empty, `redacted` says so. The host shows "Content hidden by
+    // Android" (it owns the localised string) and never runs OTP detection. The post time keeps a repost of the
+    // same key from being swallowed as an identical duplicate.
+    let redacted = m.get("redacted").and_then(Value::as_bool) == Some(true);
+    let hash = if redacted {
+        format!("\u{1}redacted|{}", m.get("time").and_then(Value::as_i64).unwrap_or(0))
+    } else {
+        content_hash(title, text)
+    };
+    if is_duplicate(app, &key, &hash) {
         return;
     }
 
@@ -157,6 +180,7 @@ pub fn on_notification(app: &AppHandle, m: &Value) {
         replyable.then(|| key.clone()),
         app_opts.sound,
         !app_opts.preview,
+        redacted,
     );
 }
 
@@ -170,7 +194,7 @@ pub fn native_notification(
     reply_key: Option<String>,
     sound: bool,
 ) {
-    native_notification_ext(app, id, title, body, reply_key, sound, false);
+    native_notification_ext(app, id, title, body, reply_key, sound, false, false);
 }
 
 /// As [`native_notification`], plus `hidePreview`: the host replaces the
@@ -183,10 +207,11 @@ pub fn native_notification_ext(
     reply_key: Option<String>,
     sound: bool,
     hide_preview: bool,
+    redacted: bool,
 ) {
     let _ = app.emit(
         "native-notification",
-        json!({ "id": id, "title": title, "body": body, "replyKey": reply_key, "sound": sound, "hidePreview": hide_preview }),
+        json!({ "id": id, "title": title, "body": body, "replyKey": reply_key, "sound": sound, "hidePreview": hide_preview, "redacted": redacted }),
     );
 }
 
@@ -230,3 +255,27 @@ pub fn on_call(app: &AppHandle, m: &Value) {
 /// Call ended / idle. No native banner to retract (see module note); the UI
 /// hides its overlay off the `call` idle event.
 pub fn on_call_cleared(_app: &AppHandle) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn live_updates_are_progress_timers_and_stopwatches_that_are_ongoing() {
+        assert!(is_live_update(&json!({"ongoing": true, "progressMax": 100, "progress": 40})));
+        assert!(is_live_update(&json!({"ongoing": true, "progressIndeterminate": true})));
+        assert!(is_live_update(&json!({"ongoing": true, "chrono": true, "chronoBase": 1})));
+        assert!(is_live_update(&json!({"ongoing": true, "category": "stopwatch"})));
+        assert!(is_live_update(&json!({"ongoing": true, "category": "progress"})));
+    }
+
+    #[test]
+    fn ordinary_and_non_ongoing_notifications_are_not_live() {
+        assert!(!is_live_update(&json!({"title": "Ada", "text": "hi"})));
+        assert!(!is_live_update(&json!({"ongoing": true, "category": "msg"})));
+        assert!(!is_live_update(&json!({"ongoing": true, "progressMax": 0})));
+        assert!(!is_live_update(&json!({"ongoing": false, "chrono": true})));
+        assert!(!is_live_update(&json!({"chrono": true})));
+        assert!(!is_live_update(&json!({"ongoing": true, "redacted": true})));
+    }
+}

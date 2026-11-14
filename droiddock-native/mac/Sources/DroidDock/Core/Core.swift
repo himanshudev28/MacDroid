@@ -1,5 +1,6 @@
 import Foundation
 import CDroidDockCore
+import os
 
 struct CoreEvent: Sendable {
     let name: String
@@ -11,6 +12,8 @@ enum CoreError: Error, LocalizedError {
     case start(Int32)
     case notStarted
     case badArgs
+    case timeout(String)
+    case abiMismatch(found: UInt32, expected: UInt32)
 
     var errorDescription: String? {
         switch self {
@@ -18,6 +21,8 @@ enum CoreError: Error, LocalizedError {
         case .start(let c): "DroidDock core failed to start (code \(c))"
         case .notStarted: "DroidDock core is not running"
         case .badArgs: "Invalid command arguments"
+        case .timeout(let c): "The DroidDock core did not answer in time (\(c))"
+        case .abiMismatch(let f, let e): "DroidDock core ABI mismatch (core \(f), app expects \(e)). Reinstall DroidDock."
         }
     }
 }
@@ -35,6 +40,28 @@ func dlog(_ msg: @autoclosure () -> String) {
 /// Callbacks arrive on arbitrary core threads: copy bytes, hand off, never block.
 final class Core: @unchecked Sendable {
     static let shared = Core()
+
+    /// C ABI version this Swift side was written against (`DD_ABI_VERSION` in core/include/droiddock_core.h).
+    static let expectedABIVersion: UInt32 = 1
+
+    /// Ordinary commands get this long before `raw` gives up with `CoreError.timeout`.
+    static let commandTimeout: TimeInterval = 30
+    /// Commands that legitimately run long (transfers, installs, pairing waits, device setup, mirror/session start).
+    /// They are not timed out: the core, an adb process or the phone bounds them.
+    private static let longRunning: Set<String> = [
+        "fs_pull", "fs_push", "fs_open_in_place", "quickshare_send", "photo_sync_backfill", "update_check", "update_install",
+        "adb_scrcpy_install", "adb_pair_wireless", "adb_qr_pair_start", "adb_go_wireless", "adb_reconnect_now",
+        "adb_mirror", "adb_mirror_app", "adb_desktop", "adb_second_screen", "adb_app_window_open", "adb_app_window_place",
+        "adb_camera", "adb_screenshot", "phone_screenshot", "adb_freeform_enable", "adb_freeform_revert",
+        "adb_projection_grant", "adb_devices", "adb_device_info", "adb_tools", "adb_unpair",
+        "scrcpy_embedded_start", "mirror_save_capture", "health_check", "health_fix", "webdav_start",
+        "cache_clear", "server_restart", "contacts_list", "sms_threads", "sms_messages", "sms_send",
+        "photos_list", "photo_thumb", "photo_open", "apps_list", "app_icon", "wallpaper_get", "audio_attach", "mirror_attach",
+        "mirror_popout", "tool_versions",
+    ]
+    /// Every `adb_*` command waits on an adb or scrcpy process, which the core bounds itself.
+    private static func isLongRunning(_ cmd: String) -> Bool { longRunning.contains(cmd) || cmd.hasPrefix("adb_") }
+    private let timerQueue = DispatchQueue(label: "droiddock.core-timeout", qos: .utility)
 
     /// Single consumer: `AppModel`. Buffered, so events emitted before the consumer starts are kept.
     let events: AsyncStream<CoreEvent>
@@ -110,6 +137,12 @@ final class Core: @unchecked Sendable {
             on_frame: coreOnFrame,
             on_result: coreOnResult
         )
+        let abi = dd_abi_version()
+        guard abi == Core.expectedABIVersion else {
+            Logger(subsystem: "com.droiddock.mac", category: "core")
+                .fault("core ABI mismatch: core \(abi), app expects \(Core.expectedABIVersion)")
+            throw CoreError.abiMismatch(found: abi, expected: Core.expectedABIVersion)   // surfaces via AppModel.coreError
+        }
         let rc = json.withCString { dd_core_start($0, cbs) }
         guard rc == 0 else { throw CoreError.start(rc) }
         lock.lock(); started = true; lock.unlock()
@@ -119,6 +152,7 @@ final class Core: @unchecked Sendable {
     func shutdown() {
         guard isStarted else { return }
         dd_core_shutdown()
+        lock.lock(); started = false; lock.unlock()
         // Nothing answers after shutdown: fail what is still waiting so no caller hangs on its continuation.
         lock.lock(); let waiting = pending; pending.removeAll(); lock.unlock()
         for (_, c) in waiting { c.resume(throwing: CoreError.notStarted) }
@@ -154,9 +188,18 @@ final class Core: @unchecked Sendable {
         let argStr = String(decoding: argData, as: UTF8.self)
         return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Data, Error>) in
             lock.lock()
+            guard started else { lock.unlock(); cont.resume(throwing: CoreError.notStarted); return }
             let id = nextID; nextID += 1
             pending[id] = cont      // registered before the call: the result can arrive instantly
             lock.unlock()
+            if !Core.isLongRunning(cmd) {
+                // Removal from `pending` decides who resumes: the result callback, shutdown or this timer, never two.
+                timerQueue.asyncAfter(deadline: .now() + Core.commandTimeout) { [weak self] in
+                    guard let self else { return }
+                    self.lock.lock(); let c = self.pending.removeValue(forKey: id); self.lock.unlock()
+                    c?.resume(throwing: CoreError.timeout(cmd))
+                }
+            }
             cmd.withCString { c in
                 argStr.withCString { a in
                     if let body {

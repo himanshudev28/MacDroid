@@ -44,6 +44,27 @@ const CONSENT_TIMEOUT: Duration = Duration::from_secs(60);
 /// Guard against a peer that completes the handshake and then says nothing.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// The whole handshake, from the first byte to the consent prompt being shown.
+/// Nothing a real phone does takes anywhere near this long; a peer that dribbles
+/// bytes to hold a slot is cut off here.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// One write (keep-alive included) may not block longer than this: a peer that
+/// stops reading must not pin the connection.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Sum of the announced file sizes, refusing negative sizes and overflow.
+fn total_size(files: &[IncomingFile]) -> Res<i64> {
+    let mut total: i64 = 0;
+    for f in files {
+        if f.size < 0 {
+            return Err("the sender announced a negative file size".into());
+        }
+        total = total.checked_add(f.size).ok_or("the announced file sizes are too large")?;
+    }
+    Ok(total)
+}
+
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct IncomingFile {
     pub name: String,
@@ -160,6 +181,7 @@ async fn run<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    let (peer_name, pin, mut channel, introduction) = tokio::time::timeout(HANDSHAKE_TIMEOUT, async {
     // ── 1. Connection request ────────────────────────────────────────────
     let raw = read(stream).await?;
     let frame = conn::OfflineFrame::decode(raw.as_slice()).map_err(|_| "bad connection request")?;
@@ -311,6 +333,10 @@ where
             None => continue,
         }
     };
+    Ok::<_, String>((peer_name, pin, channel, introduction))
+    })
+    .await
+    .map_err(|_| "the handshake took too long".to_string())??;
 
     let files: Vec<IncomingFile> = introduction
         .file_metadata
@@ -329,7 +355,7 @@ where
             reassembler.expect_file(id, name);
         }
     }
-    let total: i64 = files.iter().map(|f| f.size).sum();
+    let total = total_size(&files)?;
 
     // ── 8. Ask the user ──────────────────────────────────────────────────
     let (tx, rx) = oneshot::channel();
@@ -535,12 +561,36 @@ pub(super) async fn read<S: AsyncRead + Unpin>(s: &mut S) -> Res<Vec<u8>> {
 }
 
 pub(super) async fn write<S: AsyncWrite + Unpin>(s: &mut S, body: &[u8]) -> Res<()> {
-    wire::write_frame(s, body).await.map_err(|e| e.to_string())
+    write_within(s, body, WRITE_TIMEOUT).await
+}
+
+async fn write_within<S: AsyncWrite + Unpin>(s: &mut S, body: &[u8], limit: Duration) -> Res<()> {
+    tokio::time::timeout(limit, wire::write_frame(s, body))
+        .await
+        .map_err(|_| "the sender stopped accepting data".to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn announced_sizes_are_summed_safely() {
+        let f = |size: i64| IncomingFile { name: "a".into(), size, mime: String::new() };
+        assert_eq!(total_size(&[f(3), f(4)]).unwrap(), 7);
+        assert!(total_size(&[f(i64::MAX), f(1)]).is_err(), "overflow is refused");
+        assert!(total_size(&[f(5), f(-1)]).is_err(), "negative size is refused");
+    }
+
+    #[tokio::test]
+    async fn a_write_to_a_peer_that_never_reads_times_out() {
+        // 64-byte pipe, nobody reading: a large frame can never be flushed.
+        let (mut a, _b) = tokio::io::duplex(64);
+        let big = vec![0u8; 10_000];
+        let r = write_within(&mut a, &big, Duration::from_millis(100)).await;
+        assert!(r.is_err());
+    }
 
     #[test]
     fn signed_encoding_round_trips() {

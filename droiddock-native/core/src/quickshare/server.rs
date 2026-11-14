@@ -9,7 +9,8 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::net::IpAddr;
+use std::sync::{Arc, Mutex};
 
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 use crate::host::{AppHandle, Emitter, Manager};
@@ -18,6 +19,48 @@ use tokio::sync::{mpsc, oneshot};
 
 use super::connection::{self, Event, IncomingFile};
 use super::wire::{self, DeviceType, EndpointId};
+
+/// Inbound connections at once, and per peer address. Nearby phones need the
+/// listener open on every interface, so abuse is bounded here instead.
+const MAX_CONNECTIONS: usize = 16;
+const MAX_PER_IP: usize = 3;
+/// Consent prompts that may be on screen at once; more are refused, not queued.
+const MAX_PENDING_PROMPTS: usize = 3;
+
+#[derive(Default)]
+struct ConnTable {
+    total: usize,
+    per_ip: HashMap<IpAddr, usize>,
+}
+
+impl ConnTable {
+    fn try_take(&mut self, ip: IpAddr, max_total: usize, max_ip: usize) -> bool {
+        let n = self.per_ip.get(&ip).copied().unwrap_or(0);
+        if self.total >= max_total || n >= max_ip {
+            return false;
+        }
+        self.total += 1;
+        self.per_ip.insert(ip, n + 1);
+        true
+    }
+    fn release(&mut self, ip: IpAddr) {
+        self.total = self.total.saturating_sub(1);
+        match self.per_ip.get_mut(&ip) {
+            Some(n) if *n > 1 => *n -= 1,
+            _ => {
+                self.per_ip.remove(&ip);
+            }
+        }
+    }
+}
+
+/// Holds one connection slot; dropping it frees the slot however the task ends.
+struct ConnSlot(Arc<Mutex<ConnTable>>, IpAddr);
+impl Drop for ConnSlot {
+    fn drop(&mut self) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).release(self.1);
+    }
+}
 
 struct Running {
     task: crate::host::async_runtime::JoinHandle<()>,
@@ -96,9 +139,16 @@ pub async fn start(app: AppHandle) -> Result<u16, String> {
     eprintln!("[quickshare] advertising as {device_name:?} ({instance}) on port {port}");
 
     let handle = app.clone();
+    let conns = Arc::new(Mutex::new(ConnTable::default()));
     let task = crate::host::async_runtime::spawn(async move {
         loop {
             let Ok((stream, peer)) = listener.accept().await else { continue };
+            let ip = peer.ip();
+            if !conns.lock().unwrap_or_else(|e| e.into_inner()).try_take(ip, MAX_CONNECTIONS, MAX_PER_IP) {
+                eprintln!("[quickshare] too many connections; dropping {peer}");
+                continue; // `stream` drops here, closing the socket
+            }
+            let slot = ConnSlot(conns.clone(), ip);
             let app = handle.clone();
             let dest = match crate::transfer::download_dir(&app) {
                 Some(d) => d,
@@ -108,6 +158,7 @@ pub async fn start(app: AppHandle) -> Result<u16, String> {
                 }
             };
             crate::host::async_runtime::spawn(async move {
+                let _slot = slot;
                 let (tx, rx) = mpsc::unbounded_channel();
                 let pump = crate::host::async_runtime::spawn(forward_events(app.clone(), rx));
                 if let Err(e) = connection::serve(stream, dest, tx).await {
@@ -171,13 +222,20 @@ async fn forward_events(app: AppHandle, mut rx: mpsc::UnboundedReceiver<Event>) 
         let state = app.state::<QuickShareState>();
         match event {
             Event::Introduced { peer, pin, files, reply } => {
+                let mut pending = state.pending.lock().unwrap_or_else(|e| e.into_inner());
+                // Prompts whose connection already gave up are not pending.
+                pending.retain(|_, tx| !tx.is_closed());
+                if pending.len() >= MAX_PENDING_PROMPTS {
+                    // Refuse rather than queue: dropping `reply` makes the
+                    // connection decline and tell the peer.
+                    eprintln!("[quickshare] too many pending prompts; refusing {peer}");
+                    continue;
+                }
                 offered = files.clone();
                 let id = state.next_id.fetch_add(1, Ordering::Relaxed);
-                state.pending.lock().unwrap().insert(id, reply);
-                eprintln!(
-                    "[quickshare] {peer} offers {} file(s), PIN {pin}",
-                    files.len()
-                );
+                pending.insert(id, reply);
+                drop(pending);
+                eprintln!("[quickshare] {peer} offers {} file(s), PIN {pin}", files.len());
                 let _ = app.emit("quickshare-request", RequestPayload { id, peer, pin, files });
             }
             Event::Progress { received, total } => {
@@ -273,5 +331,29 @@ pub fn quickshare_respond(app: AppHandle, id: u64, accept: bool) -> Result<(), S
         }
         // Already answered, or the sender gave up first.
         None => Err("that transfer is no longer waiting".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connection_caps_apply_globally_and_per_address() {
+        let a: IpAddr = "10.0.0.1".parse().unwrap();
+        let b: IpAddr = "10.0.0.2".parse().unwrap();
+        let mut t = ConnTable::default();
+        for _ in 0..MAX_PER_IP {
+            assert!(t.try_take(a, MAX_CONNECTIONS, MAX_PER_IP));
+        }
+        assert!(!t.try_take(a, MAX_CONNECTIONS, MAX_PER_IP), "one peer is capped");
+        assert!(t.try_take(b, MAX_CONNECTIONS, MAX_PER_IP), "another peer still gets in");
+        t.release(a);
+        assert!(t.try_take(a, MAX_CONNECTIONS, MAX_PER_IP));
+        let mut g = ConnTable::default();
+        assert!(g.try_take(a, 1, 3));
+        assert!(!g.try_take(b, 1, 3), "global cap");
+        g.release(a);
+        assert!(g.per_ip.is_empty() && g.total == 0);
     }
 }

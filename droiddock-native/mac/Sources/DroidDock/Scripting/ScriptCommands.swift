@@ -97,7 +97,12 @@ final class DDGetBatteryCommand: NSScriptCommand {
                 scriptErrorString = tr("No phone linked")
                 return nil
             }
-            return [NSNumber(value: m.batteryPercent ?? -1), NSNumber(value: m.isCharging)] as NSArray
+            // Built by hand: Cocoa scripting cannot coerce an NSArray of NSNumber to the sdef's "list of any"
+            // (it raises "-scriptingAnyDescriptor" and the script gets error -1708).
+            let list = NSAppleEventDescriptor.list()
+            list.insert(NSAppleEventDescriptor(int32: Int32(m.batteryPercent ?? -1)), at: 0)
+            list.insert(NSAppleEventDescriptor(boolean: m.isCharging), at: 0)
+            return list
         }
     }
 }

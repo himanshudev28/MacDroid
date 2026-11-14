@@ -50,6 +50,14 @@ struct PhoneNotification: Codable, Sendable, Equatable, Identifiable {
     var actions: [String]?
     var number: String?
     var name: String?
+    /// Android 15+ hid the content (title/text are empty). Absent from older phones.
+    var redacted: Bool?
+    /// Live-card extras (additive, absent from older phones): Android category, subtext, chronometer.
+    var category: String?
+    var subText: String?
+    var chrono: Bool?
+    var chronoBase: Double?    // ms since epoch: count-up start, or count-down end
+    var chronoDown: Bool?
     var id: String { key }
 }
 
@@ -151,6 +159,17 @@ struct SmsMessage: Codable, Sendable, Equatable, Identifiable {
     var id: Int; var body: String; var date: Double; var out: Bool
 }
 struct SmsMessages: Codable, Sendable { var messages: [SmsMessage]; var address: String }
+struct SmsCaps: Codable, Sendable, Equatable { var paging = false; var search = false }
+struct SmsThreadPage: Codable, Sendable { var threads: [SmsThread]; var more: Bool }
+struct SmsMessagePage: Codable, Sendable {
+    var messages: [SmsMessage]; var address: String; var moreOlder: Bool; var moreNewer: Bool
+}
+/// One message-text search hit, from any conversation.
+struct SmsHit: Codable, Sendable, Equatable, Identifiable {
+    var id: Int; var threadId: Int; var address: String; var name: String
+    var body: String; var date: Double; var out: Bool
+}
+struct SmsSearchPage: Codable, Sendable { var results: [SmsHit]; var more: Bool }
 struct Contact: Codable, Sendable, Equatable, Identifiable {
     var name: String; var number: String; var starred: Bool
     var id: String { number + name }

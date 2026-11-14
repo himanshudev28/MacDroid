@@ -14,33 +14,27 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -48,7 +42,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
@@ -59,7 +52,6 @@ import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.QrCodeScanner
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -75,25 +67,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.PathMeasure
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.translate
-import androidx.compose.ui.graphics.drawscope.inset
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.VectorPainter
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -103,24 +77,29 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
-import com.droiddock.app.ui.setup.PHONE_PERMS
-import com.droiddock.app.ui.setup.notifAccessGranted
 import com.droiddock.app.t
 import com.droiddock.app.ui.components.ButtonKind
 import com.droiddock.app.ui.components.DockButton
 import com.droiddock.app.ui.components.DockCard
+import com.droiddock.app.ui.components.DockIconBadge
+import com.droiddock.app.ui.components.DockStatusPill
+import com.droiddock.app.ui.components.TetherState
+import com.droiddock.app.ui.components.Tone
+import com.droiddock.app.ui.home.LinkBay
+import com.droiddock.app.ui.setup.PHONE_PERMS
+import com.droiddock.app.ui.setup.RestrictedSettingsHint
+import com.droiddock.app.ui.setup.notifAccessGranted
 import com.droiddock.app.ui.theme.DockTheme
+import com.droiddock.app.ui.theme.dockEnter
+import com.droiddock.app.ui.theme.dockEnterTransition
+import com.droiddock.app.ui.theme.dockExitTransition
 import com.droiddock.app.ui.theme.dockPageBackground
+import com.droiddock.app.ui.theme.dockReveal
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlin.math.cos
-import kotlin.math.pow
-import kotlin.math.sin
 
 /**
  * First-run state. Kept in its own small prefs file so it never collides with
@@ -137,21 +116,17 @@ object Onboarding {
     }
 }
 
-// The three things that travel phone → Mac in the hero. The same colours mark the feature pills.
-internal val NotifRed = Color(0xFFFF5A5F)
-internal val FileBlue = Color(0xFF3B82F6)
-internal val ClipOrange = Color(0xFFFF9F0A)
-internal val CallGreen = Color(0xFF30C26B)
-internal val AccessPurple = Color(0xFF8B5CF6)
-
 /**
- * First-run flow: Welcome (phone → Mac hand-off animation) → Permissions
- * (each one optional, rows tick themselves green as they are granted) → Done
- * (check draws, a ring of dots bursts once). Ported from the Mac app's
- * OnboardingHero / OnboardingDoneMark so both apps open the same way.
+ * First run, told as one scene in the "Docking" language: the phone is the bay, the link to the Mac is the tether.
  *
- * One-shot motion that holds its final frame: nothing loops. With system
- * animations off, every piece renders at its final frame.
+ * - Welcome: the phone seats in its bay and the tether draws out toward a Mac that isn't there yet.
+ * - Permissions: each permission is a module that docks into a slot rail as it's granted ("2 of 4 ready"); every one is
+ *   optional. Sideloaded installs get the "Allow restricted settings" guide under notification access when Android
+ *   greys that switch out.
+ * - Done: the tether reaches the Mac and "Pair with your Mac" rises into the thumb zone.
+ *
+ * One-shot motion that holds its final frame (nothing loops), all through Motion tokens; with animations off every
+ * piece renders at its final frame.
  *
  * @param onFinish `pairNow` = the user tapped "Pair with your Mac".
  */
@@ -163,10 +138,7 @@ fun OnboardingFlow(onFinish: (pairNow: Boolean) -> Unit, initialStep: Int = 0) {
 
     Box(Modifier.fillMaxSize().dockPageBackground()) {
         Column(
-            Modifier
-                .fillMaxSize()
-                .systemBarsPadding()
-                .padding(horizontal = 24.dp),
+            Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Row(
@@ -188,10 +160,11 @@ fun OnboardingFlow(onFinish: (pairNow: Boolean) -> Unit, initialStep: Int = 0) {
                     if (!motion.enabled) {
                         fadeIn(snap()) togetherWith fadeOut(snap())
                     } else {
+                        // Pages dock: a short travel in the direction of the step, seated by the spatial spring.
                         val dir = if (targetState > initialState) 1 else -1
-                        val slide = motion.spatial<IntOffset>(IntOffset.VisibilityThreshold)
-                        (slideInHorizontally(slide) { dir * it / 5 } + fadeIn(tween(motion.pageMs, delayMillis = 60))) togetherWith
-                            (slideOutHorizontally(slide) { -dir * it / 5 } + fadeOut(tween(120)))
+                        val seat = motion.spatial<IntOffset>(IntOffset.VisibilityThreshold)
+                        (slideInHorizontally(seat) { dir * it / 6 } + fadeIn(motion.page())) togetherWith
+                            (slideOutHorizontally(motion.exit()) { -dir * it / 8 } + fadeOut(motion.exit()))
                     }
                 },
                 modifier = Modifier.weight(1f).fillMaxWidth().widthIn(max = 560.dp),
@@ -207,56 +180,71 @@ fun OnboardingFlow(onFinish: (pairNow: Boolean) -> Unit, initialStep: Int = 0) {
     }
 }
 
+/** One-shot 0 → 1 after [delayMs], for drawing the tether in. Snaps to 1 with animations off. */
+@Composable
+private fun rememberDrawIn(delayMs: Long): Float {
+    val motion = DockTheme.motion
+    val p = remember { Animatable(if (motion.enabled) 0f else 1f) }
+    LaunchedEffect(Unit) {
+        if (!motion.enabled) { p.snapTo(1f); return@LaunchedEffect }
+        delay(delayMs)
+        p.animateTo(1f, motion.smooth())
+    }
+    return p.value
+}
+
 // ---------------------------------------------------------------- Welcome
 
 @Composable
 private fun WelcomePage(onNext: () -> Unit) {
     val s = MaterialTheme.colorScheme
+    val draw = rememberDrawIn(delayMs = 220)
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
         CenteredScroll(Modifier.weight(1f).fillMaxWidth()) {
-            HandoffHero(Modifier.widthIn(max = 380.dp).fillMaxWidth().aspectRatio(300f / 150f))
-            Spacer(Modifier.height(36.dp))
+            // The phone seats first; the tether then draws out toward a Mac that isn't paired yet. LINKED because
+            // DockTether draws `progress` only on a linked line (CONNECTING would loop its dashes: nothing here loops).
+            LinkBay(
+                state = TetherState.LINKED,
+                description = t("Your phone, on your Mac"),
+                progress = draw,
+                showMac = false,
+                badge = 56.dp,
+                modifier = Modifier.widthIn(max = 380.dp).dockEnter(0, riseDp = 16f),
+            )
+            Spacer(Modifier.height(40.dp))
             Text(
                 t("Your phone, on your Mac"),
                 style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold, lineBreak = LineBreak.Heading),
                 color = s.onSurface, textAlign = TextAlign.Center,
-                modifier = Modifier.rise(180).semantics { heading() },
+                modifier = Modifier.dockEnter(2).semantics { heading() },
             )
             Spacer(Modifier.height(12.dp))
             Text(
                 t("Notifications, files, clipboard and calls move between your phone and your Mac, privately over your own Wi-Fi."),
                 style = MaterialTheme.typography.bodyLarge, color = s.onSurfaceVariant, textAlign = TextAlign.Center,
-                modifier = Modifier.rise(260),
+                modifier = Modifier.dockEnter(3),
             )
             Spacer(Modifier.height(24.dp))
-            // One pill per chip, each appearing as its chip lands on the Mac.
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FeaturePill(Icons.Rounded.Notifications, t("Alerts"), NotifRed, Modifier.rise(HeroTimeline.land(0)))
-                FeaturePill(Icons.Rounded.Description, t("Files"), FileBlue, Modifier.rise(HeroTimeline.land(1)))
-                FeaturePill(Icons.Rounded.ContentPaste, t("Clipboard"), ClipOrange, Modifier.rise(HeroTimeline.land(2)))
+            // What travels on the tether, each seating in turn. One accent: tonal badges, no per-feature colours.
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                FeatureMark(Icons.Rounded.Notifications, t("Alerts"), Modifier.dockEnter(4))
+                FeatureMark(Icons.Rounded.Description, t("Files"), Modifier.dockEnter(5))
+                FeatureMark(Icons.Rounded.ContentPaste, t("Clipboard"), Modifier.dockEnter(6))
             }
         }
         DockButton(
             t("Get started"), onNext, kind = ButtonKind.PRIMARY, glow = true, fullWidth = true,
-            icon = Icons.AutoMirrored.Rounded.ArrowForward, modifier = Modifier.rise(HeroTimeline.land(2) + 120),
+            icon = Icons.AutoMirrored.Rounded.ArrowForward, modifier = Modifier.dockEnter(6),
         )
         Spacer(Modifier.height(16.dp))
     }
 }
 
 @Composable
-private fun FeaturePill(icon: ImageVector, label: String, tint: Color, modifier: Modifier = Modifier) {
-    Row(
-        modifier
-            .clip(CircleShape)
-            .background(tint.copy(alpha = 0.14f))
-            .padding(start = 6.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(22.dp).clip(CircleShape).background(tint), contentAlignment = Alignment.Center) {
-            Icon(icon, null, tint = Color.White, modifier = Modifier.size(13.dp))
-        }
-        Spacer(Modifier.width(6.dp))
+private fun FeatureMark(icon: ImageVector, label: String, modifier: Modifier = Modifier) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        DockIconBadge(icon, tone = Tone.PRIMARY, size = 28.dp)
+        Spacer(Modifier.width(8.dp))
         Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface)
     }
 }
@@ -264,7 +252,7 @@ private fun FeaturePill(icon: ImageVector, label: String, tint: Color, modifier:
 // ---------------------------------------------------------------- Permissions
 
 @Immutable
-private data class PermItem(val id: String, val icon: ImageVector, val tint: Color, val title: String, val why: String)
+private data class PermItem(val id: String, val icon: ImageVector, val title: String, val why: String)
 
 private fun readGrants(ctx: Context): Map<String, Boolean> {
     fun has(p: String) = runCatching { ctx.checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED }.getOrDefault(false)
@@ -290,13 +278,13 @@ private fun PermissionsPage(onNext: () -> Unit) {
     val ctx = LocalContext.current
     val s = MaterialTheme.colorScheme
     val items = buildList {
-        if (Build.VERSION.SDK_INT >= 33) add(PermItem("notif", Icons.Rounded.Notifications, NotifRed,
+        if (Build.VERSION.SDK_INT >= 33) add(PermItem("notif", Icons.Rounded.Notifications,
             t("Notifications"), t("Transfer progress, call alerts and connection status.")))
-        add(PermItem("listener", Icons.Rounded.NotificationsActive, AccessPurple,
+        add(PermItem("listener", Icons.Rounded.NotificationsActive,
             t("Notification access"), t("Show your phone's notifications on the Mac.")))
-        add(PermItem("phone", Icons.Rounded.Call, CallGreen,
+        add(PermItem("phone", Icons.Rounded.Call,
             t("Calls & messages"), t("Answer calls and read texts from your Mac.")))
-        add(PermItem("camera", Icons.Rounded.CameraAlt, FileBlue,
+        add(PermItem("camera", Icons.Rounded.CameraAlt,
             t("Camera"), t("Scan the QR code your Mac shows to pair.")))
     }
     var granted by remember { mutableStateOf(readGrants(ctx)) }
@@ -326,6 +314,7 @@ private fun PermissionsPage(onNext: () -> Unit) {
             }
         }
     }
+    val ready = items.count { granted[it.id] == true }
 
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
@@ -333,32 +322,69 @@ private fun PermissionsPage(onNext: () -> Unit) {
             Text(
                 t("Turn on what you need"),
                 style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold, lineBreak = LineBreak.Heading),
-                color = s.onSurface, modifier = Modifier.rise(60).semantics { heading() },
+                color = s.onSurface, modifier = Modifier.dockEnter(0).semantics { heading() },
             )
             Spacer(Modifier.height(10.dp))
             Text(
                 t("Each permission powers one feature. All of them are optional, and you can change them later in Settings."),
-                style = MaterialTheme.typography.bodyLarge, color = s.onSurfaceVariant, modifier = Modifier.rise(120),
+                style = MaterialTheme.typography.bodyLarge, color = s.onSurfaceVariant, modifier = Modifier.dockEnter(1),
             )
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(20.dp))
+            SlotRail(items, granted, ready, Modifier.dockEnter(2))
+            Spacer(Modifier.height(20.dp))
             items.forEachIndexed { i, item ->
-                PermRow(item, granted[item.id] == true, { request(item.id) }, Modifier.rise(180 + i * 70))
+                val on = granted[item.id] == true
+                PermRow(item, on, { request(item.id) }, Modifier.dockEnter(3 + i)) {
+                    // Sideloaded on Android 13+: the notification-access switch stays greyed until "Allow restricted settings".
+                    if (item.id == "listener") RestrictedSettingsHint(switchOff = !on)
+                }
                 Spacer(Modifier.height(12.dp))
             }
         }
-        val all = items.all { granted[it.id] == true }
         DockButton(
-            t("Continue"), onNext, kind = ButtonKind.PRIMARY, glow = all, fullWidth = true,
-            icon = Icons.AutoMirrored.Rounded.ArrowForward, modifier = Modifier.rise(180 + items.size * 70),
+            t("Continue"), onNext, kind = ButtonKind.PRIMARY, glow = ready == items.size, fullWidth = true,
+            icon = Icons.AutoMirrored.Rounded.ArrowForward, modifier = Modifier.dockEnter(3 + items.size),
         )
         Spacer(Modifier.height(16.dp))
     }
 }
 
+/**
+ * The bay's module rail: one slot per permission. An empty slot is a hairline outline; a granted permission docks its
+ * module into the slot in the current signature (pop, rise, wipe…). Spoken as one line ("2 of 4 ready").
+ */
 @Composable
-private fun PermRow(item: PermItem, isGranted: Boolean, onAllow: () -> Unit, modifier: Modifier = Modifier) {
+private fun SlotRail(items: List<PermItem>, granted: Map<String, Boolean>, ready: Int, modifier: Modifier = Modifier) {
+    val shape = DockTheme.shapes.badge
+    val counter = t("{n} of {total} ready", "n" to ready, "total" to items.size)
+    Row(
+        modifier.fillMaxWidth().semantics(mergeDescendants = true) { contentDescription = counter },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        items.forEach { item ->
+            Box(Modifier.size(44.dp).clearAndSetSemantics { }, contentAlignment = Alignment.Center) {
+                Box(Modifier.size(44.dp).clip(shape).border(1.dp, DockTheme.colors.hairline, shape))
+                DockIconBadge(item.icon, tone = Tone.PRIMARY, size = 44.dp, modifier = Modifier.dockReveal(granted[item.id] == true))
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        Text(
+            counter, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.clearAndSetSemantics { },
+        )
+    }
+}
+
+@Composable
+private fun PermRow(
+    item: PermItem,
+    isGranted: Boolean,
+    onAllow: () -> Unit,
+    modifier: Modifier = Modifier,
+    below: @Composable ColumnScope.() -> Unit = {},
+) {
     val s = MaterialTheme.colorScheme
-    val motion = DockTheme.motion
     val haptics = DockTheme.haptics
     // Buzz when a row flips to granted while on screen, not on first composition.
     var seen by remember { mutableStateOf(isGranted) }
@@ -366,11 +392,7 @@ private fun PermRow(item: PermItem, isGranted: Boolean, onAllow: () -> Unit, mod
 
     DockCard(modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.size(44.dp).clip(RoundedCornerShape(13.dp))
-                    .background(Brush.verticalGradient(listOf(item.tint, item.tint.copy(alpha = 0.78f)))),
-                contentAlignment = Alignment.Center,
-            ) { Icon(item.icon, null, tint = Color.White, modifier = Modifier.size(22.dp)) }
+            DockIconBadge(item.icon, tone = if (isGranted) Tone.PRIMARY else Tone.NEUTRAL, size = 44.dp)
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(item.title, style = MaterialTheme.typography.titleMedium, color = s.onSurface)
@@ -378,22 +400,22 @@ private fun PermRow(item: PermItem, isGranted: Boolean, onAllow: () -> Unit, mod
                 Text(item.why, style = MaterialTheme.typography.bodyMedium, color = s.onSurfaceVariant)
             }
             Spacer(Modifier.width(12.dp))
+            val enter = dockEnterTransition()
+            val exit = dockExitTransition()
             AnimatedContent(
                 targetState = isGranted,
-                transitionSpec = {
-                    (scaleIn(motion.pop(), initialScale = 0.6f) + fadeIn(motion.fade())) togetherWith
-                        (scaleOut(motion.exit(), targetScale = 0.6f) + fadeOut(motion.exit()))
-                },
+                transitionSpec = { enter togetherWith exit },
                 contentAlignment = Alignment.Center,
                 label = "perm-${item.id}",
             ) { g ->
-                if (g) GrantedCheck()
+                if (g) DockStatusPill(t("On"))
                 else DockButton(
-                    t("Allow"), onAllow, kind = ButtonKind.TONAL, height = 40.dp, horizontalPadding = 16.dp,
+                    t("Allow"), onAllow, kind = ButtonKind.TONAL, height = 48.dp, horizontalPadding = 16.dp,
                     modifier = Modifier.semantics { contentDescription = "${t("Allow")}: ${item.title}" },
                 )
             }
         }
+        below()
     }
 }
 
@@ -403,30 +425,41 @@ private fun PermRow(item: PermItem, isGranted: Boolean, onAllow: () -> Unit, mod
 private fun DonePage(onFinish: (Boolean) -> Unit) {
     val s = MaterialTheme.colorScheme
     val haptics = DockTheme.haptics
-    LaunchedEffect(Unit) { delay(220); haptics.confirm() }
+    val draw = rememberDrawIn(delayMs = 160)
+    // One confirm as the tether reaches the Mac (not on a restored page that is already drawn).
+    var buzzed by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(draw >= 1f) { if (draw >= 1f && !buzzed) { buzzed = true; haptics.confirm() } }
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
         CenteredScroll(Modifier.weight(1f).fillMaxWidth()) {
-            DoneMark()
-            Spacer(Modifier.height(12.dp))
+            // The tether draws all the way to the Mac (LINKED: the only state that draws `progress`).
+            LinkBay(
+                state = TetherState.LINKED,
+                description = t("You're all set"),
+                progress = draw,
+                badge = 56.dp,
+                modifier = Modifier.widthIn(max = 380.dp).dockEnter(0, riseDp = 16f),
+            )
+            Spacer(Modifier.height(40.dp))
             Text(
                 t("You're all set"),
                 style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold, lineBreak = LineBreak.Heading),
                 color = s.onSurface, textAlign = TextAlign.Center,
-                modifier = Modifier.rise(260).semantics { heading() },
+                modifier = Modifier.dockEnter(2).semantics { heading() },
             )
             Spacer(Modifier.height(12.dp))
             Text(
                 t("Open DroidDock on your Mac and scan the QR code it shows to pair."),
                 style = MaterialTheme.typography.bodyLarge, color = s.onSurfaceVariant, textAlign = TextAlign.Center,
-                modifier = Modifier.rise(330),
+                modifier = Modifier.dockEnter(3),
             )
         }
+        // The one action rises into the thumb zone last.
         DockButton(
             t("Pair with your Mac"), { onFinish(true) }, kind = ButtonKind.PRIMARY, glow = true, fullWidth = true,
-            icon = Icons.Rounded.QrCodeScanner, modifier = Modifier.rise(400),
+            icon = Icons.Rounded.QrCodeScanner, modifier = Modifier.dockEnter(4, riseDp = 24f),
         )
         Spacer(Modifier.height(8.dp))
-        DockButton(t("Later"), { onFinish(false) }, kind = ButtonKind.GHOST, fullWidth = true, modifier = Modifier.rise(450))
+        DockButton(t("Later"), { onFinish(false) }, kind = ButtonKind.GHOST, fullWidth = true, modifier = Modifier.dockEnter(5))
         Spacer(Modifier.height(16.dp))
     }
 }
@@ -450,8 +483,11 @@ private fun CenteredScroll(modifier: Modifier, content: @Composable ColumnScope.
 private fun PageDots(step: Int, count: Int) {
     val s = MaterialTheme.colorScheme
     val motion = DockTheme.motion
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.padding(start = 4.dp)) {
+    val label = t("Step {n} of {total}", "n" to step + 1, "total" to count)
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(start = 4.dp).semantics(mergeDescendants = true) { contentDescription = label },
+    ) {
         for (i in 0 until count) {
             val w by animateDpAsState(if (i == step) 22.dp else 8.dp, motion.chrome(), label = "dot-w")
             val c by animateColorAsState(if (i <= step) s.primary else s.onSurface.copy(alpha = 0.18f), motion.fade(), label = "dot-c")
@@ -459,20 +495,3 @@ private fun PageDots(step: Int, count: Int) {
         }
     }
 }
-
-/** Fade + rise after [delayMs]. Draw-phase only; a no-op with animations off. */
-@Composable
-private fun Modifier.rise(delayMs: Int, riseDp: Float = 14f): Modifier {
-    val motion = DockTheme.motion
-    if (!motion.enabled) return this
-    val p = remember { Animatable(0f) }
-    LaunchedEffect(Unit) {
-        delay(delayMs.toLong())
-        p.animateTo(1f, spring(0.86f, 200f))
-    }
-    return this.graphicsLayer {
-        alpha = p.value.coerceIn(0f, 1f)
-        translationY = (1f - p.value) * riseDp.dp.toPx()
-    }
-}
-

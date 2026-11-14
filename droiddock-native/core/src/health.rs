@@ -259,10 +259,64 @@ async fn open_pane(url: &str) -> Result<String, String> {
         })
 }
 
+/// Versions of the helper tools and of this core, for the link-health view and
+/// the support report. Paths are reduced to a bare directory-free name by the
+/// caller; versions come from asking the binaries, with a short timeout, and a
+/// tool that doesn't answer is reported as `None` rather than guessed.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolVersions {
+    pub core_version: String,
+    pub adb_version: Option<String>,
+    pub scrcpy_version: Option<String>,
+    /// The linked phone's app version, when its hello carried one.
+    pub phone_app_version: Option<String>,
+}
+
+pub async fn tool_versions(app: &AppHandle) -> ToolVersions {
+    let tools = crate::adb::adb_tools(app.state::<crate::adb::AdbState>());
+    let adb_version = match tools.adb_path.as_deref() {
+        Some(p) => first_version_line(p, "version").await,
+        None => None,
+    };
+    ToolVersions {
+        core_version: env!("CARGO_PKG_VERSION").to_string(),
+        adb_version,
+        scrcpy_version: tools.scrcpy_version,
+        phone_app_version: ws_server::phone_app_version(&app.state::<SharedState>()).await,
+    }
+}
+
+/// `adb version` prints "Android Debug Bridge version 1.0.41" on its first
+/// line; keep the number, drop the rest (install paths and build ids follow).
+async fn first_version_line(path: &str, arg: &str) -> Option<String> {
+    let out = tokio::time::timeout(
+        std::time::Duration::from_secs(4),
+        tokio::process::Command::new(path).arg(arg).kill_on_drop(true).output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    parse_adb_version(&String::from_utf8_lossy(&out.stdout))
+}
+
+fn parse_adb_version(out: &str) -> Option<String> {
+    let line = out.lines().next()?;
+    let v = line.rsplit(' ').next()?.trim();
+    (v.chars().next()?.is_ascii_digit() && v.len() <= 24).then(|| v.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn adb_version_parses_first_line_only() {
+        assert_eq!(parse_adb_version("Android Debug Bridge version 1.0.41\nVersion 35.0.2-123\nInstalled as /x\n").as_deref(), Some("1.0.41"));
+        assert_eq!(parse_adb_version(""), None);
+        assert_eq!(parse_adb_version("no number here"), None);
+    }
 
     /// A phone row missing any required field is dropped, not rendered with a
     /// blank title. The panel's whole value is that you can believe it.

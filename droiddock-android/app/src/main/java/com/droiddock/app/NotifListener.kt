@@ -2,8 +2,10 @@ package com.droiddock.app
 
 import android.app.Notification
 import android.app.RemoteInput
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -17,6 +19,34 @@ class NotifListener : NotificationListenerService() {
         instance = this
         ConnectionManager.ensureLoop(applicationContext)
         MediaRemote.init(applicationContext)
+    }
+
+    /** Set by [onListenerDisconnected]; the next connect then redoes the per-binding setup. */
+    @Volatile private var wasDisconnected = false
+
+    /** The system (re)bound us. [ConnectionManager.ensureLoop] is idempotent, so it is safe on every connect. */
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        instance = this
+        ConnectionManager.ensureLoop(applicationContext)
+        if (wasDisconnected) {
+            wasDisconnected = false
+            // Session listeners registered through our component died with the old binding.
+            MediaRemote.init(applicationContext)
+            // Anything posted while unbound was missed: replay (flagged as backfill, like at link-up).
+            pushActive()
+        }
+        // A bound listener is a moment the process is alive: bring a bowed-out bridge back (schedule only).
+        if (!BridgeService.running) BridgeRearm.schedule(applicationContext)
+    }
+
+    /** The system dropped us (process pressure, OEM task killer). Ask to be bound again; no-op if access was revoked. */
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        wasDisconnected = true
+        if (Build.VERSION.SDK_INT >= 24) {
+            runCatching { requestRebind(ComponentName(applicationContext, NotifListener::class.java)) }
+        }
     }
 
     override fun onDestroy() {
@@ -43,7 +73,15 @@ class NotifListener : NotificationListenerService() {
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
         val text = (extras.getCharSequence(Notification.EXTRA_TEXT)
             ?: extras.getCharSequence(Notification.EXTRA_BIG_TEXT))?.toString().orEmpty()
-        if (title.isEmpty() && text.isEmpty()) return
+        // Android 15+ swaps sensitive content (OTPs…) for a placeholder before it reaches listeners;
+        // the placeholder is localised system text, so it is detected here and never forwarded.
+        val redacted = isRedacted(sbn, title, text)
+        if (title.isEmpty() && text.isEmpty() && !redacted && !isLive(sbn)) return
+        // Only the text is replaced by the placeholder: keep a real title (sender / app) for context.
+        val shownTitle = if (redacted && (title.isEmpty() || title == redactedPlaceholder)) "" else title
+        // A non-empty text even when hidden, so an older Mac (which knows no `redacted`) never shows a blank row;
+        // a newer Mac ignores it and shows its own localised line.
+        val shownText = if (redacted) (redactedPlaceholder ?: "Sensitive notification content hidden") else text
 
         // Progress (downloads, uploads, media conversions). `max == 0` with the
         // indeterminate flag set is Android's "spinner, no percentage".
@@ -56,7 +94,16 @@ class NotifListener : NotificationListenerService() {
         // Progress is part of the identity here on purpose: a download at 40%
         // and the same download at 60% are genuinely different states, and
         // hashing on title|text alone would swallow every update after the first.
-        val hash = if (hasProgress) "$title|$text|$progress/$progressMax" else "$title|$text"
+        val chrono = extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER, false)
+        val chronoDown = Build.VERSION.SDK_INT >= 24 && extras.getBoolean(Notification.EXTRA_CHRONOMETER_COUNT_DOWN, false)
+        val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString().orEmpty()
+        val category = sbn.notification.category.orEmpty()
+        val hash = when {
+            redacted -> "\u0001redacted|${sbn.postTime}"   // different content, same key: the post time is all that changes
+            hasProgress -> "$title|$text|$progress/$progressMax"
+            chrono -> "$title|$text|${sbn.notification.`when`}|$chronoDown"
+            else -> "$title|$text"
+        }
         val skip = synchronized(lastSent) {
             if (!force && lastSent[sbn.key] == hash) return@synchronized true
             lastSent[sbn.key] = hash
@@ -86,8 +133,8 @@ class NotifListener : NotificationListenerService() {
                 // Tier B: lets the Mac fetch the real app icon (via `app-icon`)
                 // instead of rendering two-letter initials.
                 .put("pkg", sbn.packageName)
-                .put("title", title.take(200))
-                .put("text", text.take(1000))
+                .put("title", shownTitle.take(200))
+                .put("text", shownText.take(1000))
                 .put("replyable", replyAction != null)
                 .put("when", sbn.postTime)
                 .put("backfill", force)
@@ -97,6 +144,15 @@ class NotifListener : NotificationListenerService() {
                 .put("priority", priorityName(sbn.notification))
                 .put("ongoing", sbn.isOngoing)
                 .apply {
+                    // Additive fields: an older Mac ignores them. `redacted`: the text is hidden by Android.
+                    if (redacted) put("redacted", true)
+                    if (category.isNotEmpty()) put("category", category)
+                    if (subText.isNotEmpty()) put("subText", subText.take(200))
+                    if (chrono) {
+                        put("chrono", true)
+                        put("chronoBase", sbn.notification.`when`)   // wall-clock ms: count-up start, or count-down end
+                        put("chronoDown", chronoDown)
+                    }
                     if (hasProgress) {
                         put("progress", progress)
                         put("progressMax", progressMax)
@@ -120,12 +176,9 @@ class NotifListener : NotificationListenerService() {
 
     private fun shouldMirror(sbn: StatusBarNotification): Boolean {
         if (sbn.packageName == packageName) return false
-        // Ongoing notifications are usually persistent chrome (VPN, sync
-        // service) and were dropped wholesale — but a download IS ongoing, and
-        // progress is precisely what's worth showing, so let those through.
-        if (sbn.isOngoing && sbn.notification.extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0) <= 0
-            && !sbn.notification.extras.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE, false)
-        ) return false
+        // Ongoing notifications are usually persistent chrome (VPN, sync service) and are dropped, except
+        // live ones: progress (downloads, rides, deliveries), timers/stopwatches. See [isLive].
+        if (sbn.isOngoing && !isLive(sbn)) return false
         val n = sbn.notification
         if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return false
         // music players spam progress updates — skip them
@@ -137,6 +190,42 @@ class NotifListener : NotificationListenerService() {
             (n.channelId == "MediaOngoingActivity" || n.extras.containsKey("android.ongoingActivityNoti.style"))
         ) return false
         return true
+    }
+
+    /** An ongoing notification worth a live card on the Mac: progress, chronometer (timer/stopwatch), or a
+     *  progress-style category. Kept narrow on purpose: VPN, sync and navigation chrome stay out. */
+    private fun isLive(sbn: StatusBarNotification): Boolean {
+        val n = sbn.notification
+        val x = n.extras
+        if (n.category == Notification.CATEGORY_CALL) return false
+        if (x.getInt(Notification.EXTRA_PROGRESS_MAX, 0) > 0 || x.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE, false)) return true
+        if (x.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER, false)) return true
+        if (n.category == Notification.CATEGORY_PROGRESS || n.category == "stopwatch") return true
+        return x.getString(Notification.EXTRA_TEMPLATE)?.contains("ProgressStyle") == true   // Android 16 live updates
+    }
+
+    /** Android 15+ "Sensitive notification content hidden": true when the content was replaced for listeners
+     *  (placeholder text from the system's own string), or when nothing is left at all. */
+    private fun isRedacted(sbn: StatusBarNotification, title: String, text: String): Boolean {
+        if (Build.VERSION.SDK_INT < 35) return false
+        if (title.isEmpty() && text.isEmpty()) {
+            // Nothing at all, and no other content either (lines, messages, picture, subtext): hidden.
+            val x = sbn.notification.extras
+            val other = x.containsKey(Notification.EXTRA_MESSAGES) || x.containsKey(Notification.EXTRA_TEXT_LINES) ||
+                x.containsKey(Notification.EXTRA_PICTURE) || !x.getCharSequence(Notification.EXTRA_SUB_TEXT).isNullOrEmpty()
+            return !other && !isLive(sbn)
+        }
+        val ph = redactedPlaceholder ?: return false
+        return text == ph || title == ph
+    }
+
+    /** The system's placeholder in the current locale (framework string; null if this build lacks it). */
+    private val redactedPlaceholder: String? by lazy {
+        runCatching {
+            val res = android.content.res.Resources.getSystem()
+            val id = res.getIdentifier("redacted_notification_message", "string", "android")
+            if (id != 0) res.getString(id) else null
+        }.getOrNull()
     }
 
     /** Maps Android's numeric importance/priority onto a stable string the Mac

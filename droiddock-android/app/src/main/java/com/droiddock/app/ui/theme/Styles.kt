@@ -92,12 +92,13 @@ internal fun dockTypeFor(style: UiStyle, t: Typography): DockType {
             upperCaseLabels = true,
             largeTitle = t.headlineLarge,
         )
+        // SHELF: big, light titles up top (they collapse away); calm medium weights below.
         UiStyle.REACH -> DockType(
-            heroTitle = t.headlineMedium.copy(fontWeight = FontWeight.SemiBold),
-            numeral = t.displaySmall.copy(fontFeatureSettings = tnum, fontWeight = FontWeight.Light),
+            heroTitle = t.headlineMedium.copy(fontWeight = FontWeight.Medium),
+            numeral = t.displayMedium.copy(fontFeatureSettings = tnum, fontWeight = FontWeight.Light),
             overline = t.titleSmall.copy(fontWeight = FontWeight.SemiBold),
             upperCaseLabels = false,
-            largeTitle = TextStyle(fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Normal, letterSpacing = (-0.4).sp),
+            largeTitle = TextStyle(fontSize = 40.sp, lineHeight = 46.sp, fontWeight = FontWeight.Light, letterSpacing = (-0.8).sp),
         )
         UiStyle.LIQUID_GLASS -> DockType(
             heroTitle = t.headlineSmall.copy(fontSize = 28.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp),
@@ -106,9 +107,10 @@ internal fun dockTypeFor(style: UiStyle, t: Typography): DockType {
             upperCaseLabels = false,
             largeTitle = t.headlineLarge,
         )
+        // BLOCKS: heavy, compact headlines that sit on the colour slabs like labels on a block.
         UiStyle.MATERIAL_YOU -> DockType(
-            heroTitle = t.headlineSmall.copy(fontSize = 28.sp, lineHeight = 34.sp),
-            numeral = t.displaySmall.copy(fontFeatureSettings = tnum, fontWeight = FontWeight.SemiBold),
+            heroTitle = t.headlineSmall.copy(fontSize = 30.sp, lineHeight = 34.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.6).sp),
+            numeral = t.displaySmall.copy(fontFeatureSettings = tnum, fontWeight = FontWeight.Black, letterSpacing = (-1).sp),
             overline = t.labelLarge,
             upperCaseLabels = false,
             largeTitle = t.headlineLarge,
@@ -116,42 +118,51 @@ internal fun dockTypeFor(style: UiStyle, t: Typography): DockType {
     }
 }
 
+/** Material You "Blocks": three generous corners and one tight "docked" corner at the bottom-start (RTL-aware). */
+private fun docked(big: Int, tight: Int) = RoundedCornerShape(
+    topStart = big.dp, topEnd = big.dp, bottomEnd = big.dp, bottomStart = tight.dp,
+)
+
 internal fun shapesFor(style: UiStyle): Pair<DockShapes, Shapes> = when (style) {
+    // BLOCKS: colour-blocked slabs that each "dock" on one tight corner.
     UiStyle.MATERIAL_YOU -> DockShapes(
-        hero = RoundedCornerShape(32.dp), card = RoundedCornerShape(24.dp), tile = RoundedCornerShape(28.dp),
+        hero = docked(32, 10), card = docked(28, 8), tile = docked(28, 8),
         control = CircleShape, chip = RoundedCornerShape(12.dp), sheet = RoundedCornerShape(28.dp),
-        badge = RoundedCornerShape(16.dp), deviceBadge = CookieShape(), field = RoundedCornerShape(16.dp),
-        cardRadius = 24.dp,
+        badge = RoundedCornerShape(16.dp), deviceBadge = CookieShape(), field = docked(18, 6),
+        cardRadius = 28.dp,
     ) to Shapes(
         extraSmall = RoundedCornerShape(8.dp), small = RoundedCornerShape(12.dp),
-        medium = RoundedCornerShape(16.dp), large = RoundedCornerShape(24.dp), extraLarge = RoundedCornerShape(32.dp),
+        medium = RoundedCornerShape(18.dp), large = docked(28, 8), extraLarge = docked(32, 10),
     )
+    // DEPTH: soft continuous lenses.
     UiStyle.LIQUID_GLASS -> DockShapes(
-        hero = RoundedCornerShape(32.dp), card = RoundedCornerShape(24.dp), tile = RoundedCornerShape(24.dp),
-        control = CircleShape, chip = CircleShape, sheet = RoundedCornerShape(32.dp),
-        badge = CircleShape, deviceBadge = RoundedCornerShape(20.dp), field = RoundedCornerShape(18.dp),
-        cardRadius = 24.dp,
+        hero = RoundedCornerShape(32.dp), card = RoundedCornerShape(28.dp), tile = RoundedCornerShape(28.dp),
+        control = CircleShape, chip = CircleShape, sheet = RoundedCornerShape(34.dp),
+        badge = CircleShape, deviceBadge = RoundedCornerShape(22.dp), field = RoundedCornerShape(20.dp),
+        cardRadius = 28.dp,
     ) to Shapes(
         extraSmall = RoundedCornerShape(10.dp), small = RoundedCornerShape(14.dp),
-        medium = RoundedCornerShape(18.dp), large = RoundedCornerShape(22.dp), extraLarge = RoundedCornerShape(30.dp),
+        medium = RoundedCornerShape(20.dp), large = RoundedCornerShape(28.dp), extraLarge = RoundedCornerShape(32.dp),
     )
+    // INSTRUMENT: machined panels, near-square, corner ticks drawn by DockCard.
     UiStyle.MINIMAL_MONO -> DockShapes(
-        hero = RoundedCornerShape(12.dp), card = RoundedCornerShape(10.dp), tile = RoundedCornerShape(10.dp),
-        control = RoundedCornerShape(8.dp), chip = RoundedCornerShape(6.dp), sheet = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-        badge = RoundedCornerShape(8.dp), deviceBadge = RoundedCornerShape(10.dp), field = RoundedCornerShape(8.dp),
-        pill = RoundedCornerShape(10.dp), cardRadius = 10.dp,
+        hero = RoundedCornerShape(3.dp), card = RoundedCornerShape(2.dp), tile = RoundedCornerShape(2.dp),
+        control = RoundedCornerShape(2.dp), chip = RoundedCornerShape(2.dp), sheet = RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp),
+        badge = RoundedCornerShape(2.dp), deviceBadge = RoundedCornerShape(2.dp), field = RoundedCornerShape(2.dp),
+        pill = RoundedCornerShape(2.dp), cardRadius = 2.dp,
     ) to Shapes(
-        extraSmall = RoundedCornerShape(4.dp), small = RoundedCornerShape(6.dp),
-        medium = RoundedCornerShape(8.dp), large = RoundedCornerShape(10.dp), extraLarge = RoundedCornerShape(12.dp),
+        extraSmall = RoundedCornerShape(2.dp), small = RoundedCornerShape(2.dp),
+        medium = RoundedCornerShape(2.dp), large = RoundedCornerShape(3.dp), extraLarge = RoundedCornerShape(4.dp),
     )
+    // SHELF: soft pebbles that stack up from the bottom.
     UiStyle.REACH -> DockShapes(
-        hero = RoundedCornerShape(28.dp), card = RoundedCornerShape(26.dp), tile = RoundedCornerShape(26.dp),
-        control = CircleShape, chip = CircleShape, sheet = RoundedCornerShape(28.dp),
-        badge = CircleShape, deviceBadge = CircleShape, field = RoundedCornerShape(20.dp),
-        cardRadius = 26.dp,
+        hero = RoundedCornerShape(36.dp), card = RoundedCornerShape(32.dp), tile = RoundedCornerShape(32.dp),
+        control = CircleShape, chip = CircleShape, sheet = RoundedCornerShape(32.dp),
+        badge = CircleShape, deviceBadge = CircleShape, field = RoundedCornerShape(24.dp),
+        cardRadius = 32.dp,
     ) to Shapes(
-        extraSmall = RoundedCornerShape(10.dp), small = RoundedCornerShape(16.dp),
-        medium = RoundedCornerShape(20.dp), large = RoundedCornerShape(26.dp), extraLarge = RoundedCornerShape(28.dp),
+        extraSmall = RoundedCornerShape(12.dp), small = RoundedCornerShape(18.dp),
+        medium = RoundedCornerShape(24.dp), large = RoundedCornerShape(32.dp), extraLarge = RoundedCornerShape(36.dp),
     )
 }
 

@@ -135,7 +135,7 @@ private struct BannerView: View {
 
     private var canOpenOnPhone: Bool { NotificationClickActions.shared.canOpenOnPhone(key: model.n.id) }
     private var code: String? {
-        guard OTPPrefs.showCopyAction, model.n.id != "call" else { return nil }
+        guard OTPPrefs.showCopyAction, model.n.id != "call", model.n.redacted != true else { return nil }
         return OTPDetector.extract(title: model.n.title, text: model.n.body)
     }
 

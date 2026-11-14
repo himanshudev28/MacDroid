@@ -14,7 +14,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -32,9 +31,20 @@ import com.droiddock.app.t
 import com.droiddock.app.ui.components.DockCard
 import com.droiddock.app.ui.components.DockScaffold
 import com.droiddock.app.ui.theme.DockTheme
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.graphicsLayer
+import com.droiddock.app.ui.theme.dockEnter
+import com.droiddock.app.ui.theme.dockEnterTransition
+import com.droiddock.app.ui.theme.dockExitTransition
+import com.droiddock.app.ui.theme.dockStagger
+import com.droiddock.app.ui.theme.rememberDockEntrance
 
 @Composable
 internal fun FeatureGuideScreen(onBack: () -> Unit) {
+    // Cards dock in once, on first open; scrolling later never replays it.
+    val entrance = rememberDockEntrance("guide")
     DockScaffold(
         title = t("Feature Guide"),
         subtitle = t("Tap any card for step-by-step help."),
@@ -43,7 +53,7 @@ internal fun FeatureGuideScreen(onBack: () -> Unit) {
         drawPageBackground = true,
     ) {
         items(GUIDE_SECTIONS.size, key = { GUIDE_SECTIONS[it].title }, contentType = { "guide" }) { i ->
-            GuideCard(GUIDE_SECTIONS[i], dockItemAnimation())
+            GuideCard(GUIDE_SECTIONS[i], dockItemAnimation().dockStagger(entrance, i))
         }
     }
 }
@@ -53,6 +63,7 @@ internal fun GuideCard(section: GuideSection, modifier: Modifier = Modifier) {
     var open by rememberSaveable(section.title) { mutableStateOf(false) }
     val sp = DockTheme.spacing
     val s = MaterialTheme.colorScheme
+    val turn by animateFloatAsState(if (open) 180f else 0f, DockTheme.motion.spatial(), label = "guideChevron")
     DockCard(modifier, onClick = { open = !open }) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -60,15 +71,16 @@ internal fun GuideCard(section: GuideSection, modifier: Modifier = Modifier) {
                 Text(t(section.subtitle), style = MaterialTheme.typography.bodyMedium, color = s.onSurfaceVariant)
             }
             Icon(
-                if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                Icons.Rounded.ExpandMore,
                 contentDescription = if (open) t("Collapse") else t("Expand"),
                 tint = s.primary,
+                modifier = Modifier.graphicsLayer { rotationZ = turn },
             )
         }
-        AnimatedVisibility(visible = open) {
+        AnimatedVisibility(visible = open, enter = dockEnterTransition(), exit = dockExitTransition()) {
             Column(Modifier.padding(top = sp.m), verticalArrangement = Arrangement.spacedBy(sp.s)) {
                 section.steps.forEachIndexed { i, step ->
-                    Row(verticalAlignment = Alignment.Top) {
+                    Row(Modifier.dockEnter(index = i), verticalAlignment = Alignment.Top) {
                         Box(
                             Modifier.size(24.dp).background(s.primaryContainer, CircleShape),
                             contentAlignment = Alignment.Center,

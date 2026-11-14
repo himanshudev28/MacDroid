@@ -17,7 +17,7 @@ class BootReceiver : BroadcastReceiver() {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
         val app = ctx.applicationContext
         if (!shouldStartOnBoot(Prefs.load(app) != null, Prefs.pausedUntil(app), System.currentTimeMillis())) return
-        runCatching { BridgeService.start(app) }
+        if (runCatching { BridgeService.start(app) }.isFailure) BridgeRearm.schedule(app)
     }
 
     companion object {

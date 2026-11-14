@@ -21,7 +21,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +34,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.droiddock.app.ConnectionManager
+import com.droiddock.app.ui.components.DockNumeral
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.droiddock.app.t
 import com.droiddock.app.ui.components.ButtonKind
 import com.droiddock.app.ui.components.DockButton
@@ -82,11 +83,15 @@ internal fun MacNowPlayingCard(media: ConnectionManager.MacMedia?) {
     )
 }
 
-/** Value readout at the end of a Mac-control slider row; shared so brightness and volume match exactly. */
+/**
+ * Value readout at the end of a Mac-control slider row; shared so brightness and volume match exactly. A [DockNumeral],
+ * so each style draws it its own way (odometer, dot matrix…). Fixed width: a changing digit count never shifts the slider.
+ */
 @Composable
-private fun SliderValue(text: String) {
-    Text(
-        text, style = DockTheme.type.numeral.copy(fontSize = MaterialTheme.typography.titleMedium.fontSize),
+private fun SliderValue(value: Int) {
+    DockNumeral(
+        value,
+        style = DockTheme.type.numeral.copy(fontSize = MaterialTheme.typography.titleMedium.fontSize),
         color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(36.dp),
     )
 }
@@ -100,8 +105,8 @@ internal fun MacControlsCard(volume: Int?) {
     val sp = DockTheme.spacing
     val s = MaterialTheme.colorScheme
     var slider by remember(volume) { mutableFloatStateOf((volume ?: 50).toFloat()) }
-    val caps by ConnectionManager.macCaps.collectAsState()
-    val macBrightness = ConnectionManager.macInfo.collectAsState().value?.brightness
+    val caps by ConnectionManager.macCaps.collectAsStateWithLifecycle()
+    val macBrightness = ConnectionManager.macInfo.collectAsStateWithLifecycle().value?.brightness
     val absoluteBrightness = "macbrightness" in caps
     val haptics = LocalHapticFeedback.current
     var bright by remember(macBrightness) { mutableFloatStateOf(macBrightness ?: 0.5f) }
@@ -147,7 +152,7 @@ internal fun MacControlsCard(volume: Int?) {
                         modifier = Modifier.weight(1f).semantics { contentDescription = brightLabel },
                     )
                     Spacer(Modifier.width(sp.s))
-                    SliderValue("${Math.round(bright * 100)}")
+                    SliderValue(Math.round(bright * 100))
                 }
             } else {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -182,7 +187,7 @@ internal fun MacControlsCard(volume: Int?) {
                         modifier = Modifier.weight(1f).semantics { contentDescription = volLabel },
                     )
                     Spacer(Modifier.width(sp.s))
-                    SliderValue("${slider.toInt()}")
+                    SliderValue(slider.toInt())
                 }
             }
         }

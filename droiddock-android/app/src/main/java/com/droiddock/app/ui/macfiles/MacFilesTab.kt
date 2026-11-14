@@ -42,15 +42,27 @@ import com.droiddock.app.ui.common.formatBytes
 import com.droiddock.app.ui.components.DockCard
 import com.droiddock.app.ui.components.DockChevron
 import com.droiddock.app.ui.components.DockChip
-import com.droiddock.app.ui.components.DockEmptyState
+import com.droiddock.app.ui.components.TetherState
+import com.droiddock.app.ui.components.DockTether
+import com.droiddock.app.ui.components.DockNumeral
+import com.droiddock.app.ui.files.LinkStatePanel
+import com.droiddock.app.ui.files.PhoneMacTether
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.runtime.mutableStateMapOf
+import com.droiddock.app.ui.theme.dockReveal
+import androidx.compose.foundation.layout.fillMaxSize
 import com.droiddock.app.ui.components.DockIconButton
-import com.droiddock.app.ui.components.DockProgress
 import com.droiddock.app.ui.components.DockScaffold
 import com.droiddock.app.ui.components.DockSkeleton
 import com.droiddock.app.ui.components.dockClickable
 import com.droiddock.app.ui.files.FileBadge
 import com.droiddock.app.ui.files.LocalSourceToggle
 import com.droiddock.app.ui.theme.DockTheme
+import com.droiddock.app.ui.theme.dockItemAnimation
+import com.droiddock.app.ui.theme.rememberDockEntrance
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
@@ -87,6 +99,7 @@ internal fun MacFilesTab(connected: Boolean) {
     val ctx   = LocalContext.current
     val scope = rememberCoroutineScope()
     val toggle = LocalSourceToggle.current
+    val entrance = rememberDockEntrance("macfiles")
 
     var path        by remember { mutableStateOf("") }
     var entries     by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
@@ -95,15 +108,20 @@ internal fun MacFilesTab(connected: Boolean) {
     var pullingPath by remember { mutableStateOf<String?>(null) }
     val pullFrac    = remember { mutableFloatStateOf(0f) }
     var reload      by remember { mutableIntStateOf(0) }
+    // Paths pulled this session: the row shows a seated check instead of the download key.
+    val pulled      = remember { mutableStateMapOf<String, Boolean>() }
     // The Mac's shared folders, learned from the synthetic root listing (the
     // only place their absolute paths are ever sent). Needed to know where
     // "up" stops.
     var roots       by remember { mutableStateOf<List<String>>(emptyList()) }
 
+    val notConnectedMsg = t("Not connected to Mac")
+    val loadFailedMsg = t("Could not load folder")
     LaunchedEffect(path, connected, reload) {
         if (!connected) {
-            error = "Not connected to Mac"
+            error = notConnectedMsg
             entries = emptyList()
+            loading = false
             return@LaunchedEffect
         }
         loading = true
@@ -117,7 +135,11 @@ internal fun MacFilesTab(connected: Boolean) {
                     }
                 }
             }
-            .onFailure { error = it.message ?: "Could not load folder" }
+            .onFailure {
+                // A cancelled load (the user moved on) must not paint a stale error over the new folder.
+                if (it is kotlinx.coroutines.CancellationException) throw it
+                error = it.message ?: loadFailedMsg
+            }
         loading = false
     }
 
@@ -159,7 +181,7 @@ internal fun MacFilesTab(connected: Boolean) {
                             modifier = Modifier.size(20.dp),
                         )
                         DockChip(
-                            label = label,
+                            label = if (i == 0) t("Mac") else label,
                             onClick = { path = target },
                             selected = i == crumbs.lastIndex,
                             icon = if (i == 0) Icons.Rounded.LaptopMac else null,
@@ -171,12 +193,17 @@ internal fun MacFilesTab(connected: Boolean) {
 
         when {
             loading -> item(key = "loading", contentType = "loading") {
-                DockCard(contentPadding = DockTheme.spacing.m) { DockSkeleton(rows = 6) }
+                // The link is being asked: dashes drift between phone and Mac while the rows load.
+                Column(dockItemAnimation()) {
+                    PhoneMacTether(TetherState.CONNECTING, Modifier.fillMaxWidth().padding(vertical = DockTheme.spacing.s))
+                    DockCard(contentPadding = DockTheme.spacing.m) { DockSkeleton(rows = 6) }
+                }
             }
 
             err != null -> item(key = "error", contentType = "empty") {
-                DockEmptyState(
-                    icon = Icons.Rounded.ErrorOutline,
+                LinkStatePanel(
+                    state = TetherState.OFFLINE,
+                    modifier = dockItemAnimation(),
                     title = err,
                     actionLabel = if (connected) t("Try again") else null,
                     onAction = { reload++ },
@@ -184,19 +211,22 @@ internal fun MacFilesTab(connected: Boolean) {
             }
 
             entries.isEmpty() -> item(key = "empty", contentType = "empty") {
-                DockEmptyState(
-                    icon = Icons.Rounded.FolderOff,
+                LinkStatePanel(
+                    state = TetherState.LINKED,
+                    modifier = dockItemAnimation(),
                     title = t("Empty folder"),
                     body = t("Nothing to show here."),
                 )
             }
 
-            else -> groupedRows(entries, keyOf = { macFsEntryPath(path, it) }) { entry ->
+            else -> groupedRows(entries, keyOf = { macFsEntryPath(path, it) }, entrance = entrance) { entry ->
                 val full = macFsEntryPath(path, entry)
                 val pulling = pullingPath == full
                 MacFsEntryRow(
                     entry    = entry,
                     pulling  = pulling,
+                    busy     = pullingPath != null,
+                    done     = pulled[full] == true,
                     fraction = { if (pulling) pullFrac.floatValue else 0f },
                     onOpen   = { if (entry.optBoolean("dir")) path = full },
                     onPull   = {
@@ -208,6 +238,7 @@ internal fun MacFilesTab(connected: Boolean) {
                                     (received.toFloat() / total.toFloat()).coerceIn(0f, 1f) else 0f
                             }
                             pullingPath = null
+                            if (result.isSuccess) pulled[full] = true
                             Toast.makeText(
                                 ctx,
                                 result.fold({ t("Saved to Downloads") }, { e -> e.message ?: t("Pull failed") }),
@@ -225,6 +256,8 @@ internal fun MacFilesTab(connected: Boolean) {
 internal fun MacFsEntryRow(
     entry:    JSONObject,
     pulling:  Boolean,
+    busy:     Boolean = false,
+    done:     Boolean = false,
     fraction: () -> Float,
     onOpen:   () -> Unit,
     onPull:   () -> Unit,
@@ -250,7 +283,10 @@ internal fun MacFsEntryRow(
             )
             if (pulling) {
                 Spacer(Modifier.size(2.dp))
-                DockProgress(fraction())
+                PhoneMacTether(
+                    TetherState.LINKED,
+                    Modifier.fillMaxWidth().semantics { progressBarRangeInfo = ProgressBarRangeInfo(fraction(), 0f..1f) },
+                    progress = fraction(), reverse = true, height = 20.dp)
             } else if (!isDir) {
                 Text(formatBytes(entry.optLong("size")), style = MaterialTheme.typography.bodySmall, color = s.onSurfaceVariant)
             }
@@ -259,13 +295,26 @@ internal fun MacFsEntryRow(
             isDir -> { Spacer(Modifier.width(sp.s)); DockChevron() }
             pulling -> {
                 Spacer(Modifier.width(sp.m))
-                Text("${(fraction() * 100).toInt()}%", style = MaterialTheme.typography.labelLarge, color = s.primary)
+                DockNumeral((fraction() * 100).toInt(), unit = "%", style = MaterialTheme.typography.titleMedium, color = s.primary)
+            }
+            done -> {
+                Icon(
+                    Icons.Rounded.CheckCircle, t("Saved to Downloads"), tint = DockTheme.colors.success,
+                    modifier = Modifier.size(24.dp).dockReveal(true),
+                )
+                Spacer(Modifier.width(sp.s))
+                DockIconButton(
+                    icon = Icons.Rounded.Download,
+                    contentDescription = t("Pull {name} to this phone", "name" to name),
+                    onClick = onPull, tint = s.primary, enabled = !busy, filled = false,
+                )
             }
             else -> DockIconButton(
                 icon = Icons.Rounded.Download,
                 contentDescription = t("Pull {name} to this phone", "name" to name),
                 onClick = onPull,
                 tint = s.primary,
+                enabled = !busy,
             )
         }
     }

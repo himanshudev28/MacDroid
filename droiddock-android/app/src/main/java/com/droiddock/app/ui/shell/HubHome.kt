@@ -38,6 +38,7 @@ import com.droiddock.app.ui.components.HeroState
 import com.droiddock.app.ui.components.LocalDockContentPadding
 import com.droiddock.app.ui.components.Tone
 import com.droiddock.app.ui.theme.DockTheme
+import com.droiddock.app.ui.home.rememberTetherPulse
 
 /** Everything [com.droiddock.app.ui.components.DockHero] shows, as data. */
 @Immutable
@@ -98,6 +99,7 @@ fun HubHome(
                 verticalArrangement = Arrangement.spacedBy(sp.m, Alignment.Bottom),
             ) {
                 DockHero(
+                    tetherPulseKey = rememberTetherPulse(linked = hero.state == HeroState.CONNECTED),
                     title = hero.title, status = hero.status, state = hero.state, detail = hero.detail,
                     battery = hero.battery, charging = hero.charging,
                     primaryLabel = hero.primaryLabel, primaryIcon = hero.primaryIcon, onPrimary = hero.onPrimary,

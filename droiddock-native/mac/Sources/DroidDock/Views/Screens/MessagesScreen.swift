@@ -11,6 +11,12 @@ struct MessagesScreen: View {
 
     private struct LoadKey: Hashable { var rev: Int; var connected: Bool }
 
+    /// True while the query is long enough to search message text (and the phone can).
+    /// Query typed but its debounced search hasn't reported yet.
+    private var searchPending: Bool { searchingText && store.searchQuery != search.trimmingCharacters(in: .whitespaces) }
+
+    private var searchingText: Bool { store.caps.search && search.trimmingCharacters(in: .whitespaces).count >= 2 }
+
     private var shown: [SmsThread] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return store.threads }
@@ -47,6 +53,12 @@ struct MessagesScreen: View {
             await store.loadThreads()
             await store.loadMessages()
         }
+        // Message-text search: debounced, so typing doesn't fire a phone query per keystroke.
+        .task(id: search) {
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            await store.search(search)
+        }
         .onChange(of: router.messageTarget, initial: true) { _, t in
             guard let t else { return }
             router.messageTarget = nil
@@ -73,8 +85,9 @@ struct MessagesScreen: View {
                     EmptyState(systemImage: "message", title: tr("No conversations"),
                                message: tr("Text messages from your phone appear here."),
                                actionTitle: tr("New Message")) { showNew = true }
-                } else if shown.isEmpty && store.compose == nil {
-                    NoResults(query: search)
+                } else if shown.isEmpty && store.compose == nil && store.hits.isEmpty {
+                    if store.searching || searchPending { ProgressView().controlSize(.small).padding(.top, 60) }
+                    else { NoResults(query: search) }
                 } else {
                     list
                 }
@@ -93,6 +106,10 @@ struct MessagesScreen: View {
                 .listRowSeparator(.hidden)
                 .transition(.opacity)
             }
+            if searchingText && !shown.isEmpty {
+                Text(tr("Conversations")).font(DD.Font.footnote).foregroundStyle(DD.dim)
+                    .listRowSeparator(.hidden)
+            }
             ForEach(shown) { t in
                 ListRow(title: t.name.isEmpty ? t.address : t.name, subtitle: t.snippet,
                         meta: InboxTime.short(t.date), subtitleLines: 2, hoverHighlight: false) {
@@ -107,6 +124,26 @@ struct MessagesScreen: View {
                         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(t.address, forType: .string)
                     }
                 }
+                .onAppear { if t.threadId == shown.last?.threadId && !searchingText { Task { await store.loadMoreThreads() } } }
+            }
+            if searchingText {
+                if !store.hits.isEmpty {
+                    Text(tr("Messages")).font(DD.Font.footnote).foregroundStyle(DD.dim)
+                        .listRowSeparator(.hidden)
+                }
+                ForEach(store.hits) { h in
+                    Button { Task { await store.jump(to: h) } } label: {
+                        ListRow(title: h.name.isEmpty ? h.address : h.name, subtitle: h.body,
+                                meta: InboxTime.short(h.date), subtitleLines: 2, hoverHighlight: true) {
+                            AvatarView(name: h.name.isEmpty ? h.address : h.name,
+                                       systemImage: isNumberOnly(h.name.isEmpty ? h.address : h.name) ? "number" : nil)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .listRowSeparator(.hidden)
+                    .onAppear { if h.id == store.hits.last?.id { Task { await store.loadMoreHits() } } }
+                }
+                if store.searching { ProgressView().controlSize(.small).frame(maxWidth: .infinity).listRowSeparator(.hidden) }
             }
         }
         .listStyle(.sidebar)
@@ -145,6 +182,10 @@ private struct ConversationPane: View {
                     case .failed(let msg):
                         EmptyState.failed(msg) { Task { await store.loadMessages() } }.frame(height: 320)
                     default:
+                        if store.moreOlder {
+                            ProgressView().controlSize(.small).frame(height: 24)
+                                .onAppear { loadOlder(proxy) }
+                        }
                         if store.rows.isEmpty {
                             Text(tr("No messages yet. Say hello."))
                                 .font(DD.Font.callout).foregroundStyle(DD.dim).padding(.top, 60)
@@ -152,21 +193,44 @@ private struct ConversationPane: View {
                         ForEach(store.rows) { row in
                             rowView(row).id(row.id)
                         }
+                        if store.moreNewer {
+                            ProgressView().controlSize(.small).frame(height: 24)
+                                .onAppear { if store.scrollTarget == nil { Task { await store.loadNewer() } } }
+                        }
                     }
                 }
                 .padding(.horizontal, DD.Space.content).padding(.vertical, DD.Space.md)
             }
             .defaultScrollAnchor(.bottom)
             .onChange(of: store.rows.last?.id) { _, id in
-                guard let id else { return }
+                // Not while reading a search-jump window or paging in history above.
+                guard let id, !store.moreNewer, store.scrollTarget == nil, !store.pagingMessages else { return }
                 withDDAnimation(Motion.content) { proxy.scrollTo(id, anchor: .bottom) }
             }
             .onChange(of: store.selectedID) { _, _ in
-                if let id = store.rows.last?.id { proxy.scrollTo(id, anchor: .bottom) }
+                if store.scrollTarget == nil, let id = store.rows.last?.id { proxy.scrollTo(id, anchor: .bottom) }
+            }
+            // A search hit: centre the message once its window has rendered.
+            .onChange(of: store.scrollTarget) { _, id in
+                guard let id else { return }
+                DispatchQueue.main.async {
+                    proxy.scrollTo(id, anchor: .center)
+                    store.clearScrollTarget()
+                }
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) { header }
         .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+    }
+
+    /// Load the page above and put the reader back on the message they were looking at.
+    private func loadOlder(_ proxy: ScrollViewProxy) {
+        Task {
+            if let keep = await store.loadOlder() {
+                await Task.yield()   // let the prepended rows lay out first
+                proxy.scrollTo(keep, anchor: .top)
+            }
+        }
     }
 
     private var header: some View {
@@ -234,6 +298,9 @@ private struct ConversationPane: View {
                 .padding(.top, DD.Space.md).padding(.bottom, DD.Space.xs)
         case .message(let m, let tail):
             Bubble(text: m.body, outgoing: m.out, tail: tail, date: Date(timeIntervalSince1970: m.date / 1000))
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.accentColor.opacity(store.highlightID == m.id ? 0.18 : 0)))
+                .ddAnimation(Motion.content, value: store.highlightID)
                 .padding(.bottom, tail ? 6 : 0)
         case .outgoing(let o, let tail):
             VStack(alignment: .trailing, spacing: 2) {

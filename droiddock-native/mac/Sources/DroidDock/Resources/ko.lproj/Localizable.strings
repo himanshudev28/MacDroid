@@ -7,13 +7,14 @@
 "30 seconds" = "30초";
 "60 feels smooth; 30 halves the bandwidth and is fine for reading." = "60은 부드럽고, 30은 대역폭을 절반으로 줄이며 읽기에는 충분합니다.";
 "8 hours" = "8시간";
+"A Finder-style sidebar with your phone at the top. Its card opens in a side panel." = "Finder 스타일 사이드바 맨 위에 휴대폰이 있습니다. 카드는 사이드 패널에서 열립니다.";
+"A compact phone header, live tiles for your inbox, and folding groups." = "간결한 휴대폰 헤더, 받은 편지함 라이브 타일, 접을 수 있는 그룹.";
 "A link or script asked DroidDock to copy your Mac clipboard to your phone." = "링크 또는 스크립트가 DroidDock에 Mac 클립보드를 휴대전화로 복사하도록 요청했습니다.";
 "A link or script asked DroidDock to do something with your phone." = "링크 또는 스크립트가 DroidDock에 휴대전화로 어떤 작업을 하도록 요청했습니다.";
 "A link or script asked DroidDock to open {app}." = "링크 또는 스크립트가 DroidDock에 {app}을(를) 열도록 요청했습니다.";
 "A link or script asked DroidDock to show your phone screen on this Mac." = "링크 또는 스크립트가 DroidDock에 이 Mac에 휴대전화 화면을 표시하도록 요청했습니다.";
 "A link or script asked DroidDock to start desktop mode on your phone." = "링크 또는 스크립트가 DroidDock에 휴대전화에서 데스크톱 모드를 시작하도록 요청했습니다.";
 "A number and a message are required" = "번호와 메시지가 필요합니다";
-"A phone card above a sidebar grouped into Inbox, Files and Phone." = "받은 편지함, 파일, 휴대폰으로 나뉜 사이드바 위에 휴대폰 카드가 표시됩니다.";
 "A script is asking DroidDock to make your phone ring." = "스크립트가 DroidDock에 휴대전화를 울리도록 요청하고 있습니다.";
 "A script wants to send a text from your phone to {number}." = "스크립트가 휴대전화에서 {number}(으)로 문자를 보내려고 합니다.";
 "A script wants to send {n} file to your phone's Downloads folder." = "스크립트가 휴대전화의 다운로드 폴더로 파일 {n}개를 보내려고 합니다.";
@@ -21,7 +22,6 @@
 "A second, virtual Android display. The phone stays usable. Android 11+ and scrcpy 3.0 or newer." = "두 번째 가상 Android 디스플레이입니다. 휴대폰은 계속 사용할 수 있습니다. Android 11 이상과 scrcpy 3.0 이상이 필요합니다.";
 "A separate phone screen with its own home screen and apps, in a Mac window. Your phone's own screen is never shown or touched, and apps opened there close with the window." = "자체 홈 화면과 앱이 있는 별도의 휴대전화 화면을 Mac 윈도우에 표시합니다. 휴대전화의 실제 화면은 표시되거나 조작되지 않으며, 거기서 연 앱은 윈도우를 닫으면 함께 종료됩니다.";
 "A separate phone screen with its own home screen and apps. Your phone's own screen is never shown or touched, and apps opened there close with the window." = "자체 홈 화면과 앱이 있는 별도의 휴대폰 화면입니다. 휴대폰 자체 화면은 표시되거나 조작되지 않으며, 여기서 연 앱은 창을 닫으면 종료됩니다.";
-"A sidebar with every screen. The phone sits in a side panel." = "모든 화면이 있는 사이드바입니다. 휴대폰은 사이드 패널에 표시됩니다.";
 "A small always-on-top panel with battery and now-playing that you can park anywhere. Not a macOS Widget — those need a Swift extension a Tauri app can't ship — but it's the same glanceable readout." = "배터리와 재생 중 정보를 보여 주는 작은 항상 위 패널로, 원하는 곳에 둘 수 있습니다. macOS 위젯은 아닙니다 — 위젯에는 Tauri 앱이 제공할 수 없는 Swift 확장이 필요합니다 — 하지만 한눈에 보는 정보는 똑같습니다.";
 "A small always-on-top panel with battery and now-playing." = "배터리와 재생 중인 곡을 보여 주는 작은 항상 위 패널입니다.";
 "A virtual display on the phone. “Window layout” decides whether Android serves desktop, tablet or phone layouts." = "휴대폰의 가상 디스플레이입니다. “창 레이아웃”에 따라 Android가 데스크톱, 태블릿, 휴대폰 중 어떤 레이아웃을 제공할지 정해집니다.";
@@ -102,6 +102,7 @@
 "App" = "앱";
 "App notifications" = "앱 알림";
 "Appearance" = "모양";
+"AppleScript, Shortcuts and Raycast ask before they act. Sending files and text messages always ask." = "AppleScript, 단축어, Raycast는 실행 전에 묻습니다. 파일과 문자 메시지 전송은 항상 묻습니다.";
 "AppleScript, Shortcuts and Raycast can ring your phone, send the clipboard, files and texts without a confirmation. When off, each one asks first." = "AppleScript, 단축어, Raycast가 확인 없이 휴대전화를 울리고 클립보드, 파일, 문자를 보낼 수 있습니다. 끄면 매번 먼저 묻습니다.";
 "AppleScript, Shortcuts and Raycast can ring your phone, start mirroring, and send the clipboard and texts without a confirmation. Sending files always asks. When off, each one asks first." = "AppleScript, 단축어, Raycast가 확인 없이 휴대전화를 울리고, 미러링을 시작하고, 클립보드와 문자를 보낼 수 있습니다. 파일 전송은 항상 먼저 묻습니다. 끄면 매번 먼저 묻습니다.";
 "Applies to Wi-Fi and ADB. Lower the bit rate if the mirror stutters on a busy network." = "Wi-Fi와 ADB에 적용됩니다. 혼잡한 네트워크에서 미러링이 끊기면 비트레이트를 낮추세요.";
@@ -149,11 +150,13 @@
 "Blocked an unencrypted connection from {name}, which normally connects securely. Update DroidDock on the phone." = "보통 보안 연결을 사용하는 {name}의 암호화되지 않은 연결을 차단했습니다. 휴대폰의 DroidDock을 업데이트하세요.";
 "Blocked an unencrypted connection from {name}. If this is your phone, use Reset pairing in Settings and pair it again." = "{name}의 암호화되지 않은 연결을 차단했습니다. 내 휴대폰이라면 설정에서 ‘페어링 재설정’을 사용한 뒤 다시 페어링하세요.";
 "Bluetooth" = "Bluetooth";
+"Bluetooth access is off for DroidDock" = "DroidDock의 Bluetooth 접근이 꺼져 있습니다";
 "Bluetooth connected" = "Bluetooth 연결됨";
 "Bluetooth fallback" = "블루투스 대체 연결";
 "Bluetooth is blocked for DroidDock" = "DroidDock의 Bluetooth가 차단되어 있습니다";
 "Bluetooth is forced" = "Bluetooth로 고정됨";
 "Bluetooth is off" = "Bluetooth가 꺼져 있습니다";
+"Bluetooth is turned off on this Mac" = "이 Mac의 Bluetooth가 꺼져 있습니다";
 "Bluetooth isn't available on this Mac" = "이 Mac에서는 Bluetooth를 사용할 수 없습니다";
 "Both devices need the same Wi-Fi network." = "두 기기가 같은 Wi-Fi 네트워크에 연결되어 있어야 합니다.";
 "Bring to Front" = "맨 앞으로 가져오기";
@@ -260,6 +263,7 @@
 "Connect via QR" = "QR로 연결";
 "Connect your phone first" = "먼저 휴대전화를 연결하세요";
 "Connect your phone to list apps" = "앱 목록을 보려면 휴대전화를 연결하세요";
+"Connected over Bluetooth only" = "Bluetooth로만 연결됨";
 "Connected over {t}" = "{t}(으)로 연결됨";
 "Connected to {name}" = "{name}에 연결됨";
 "Connecting over Bluetooth…" = "Bluetooth로 연결하는 중…";
@@ -276,12 +280,17 @@
 "Contacts need the Wi-Fi link. Pair your phone from the Dashboard, then come back." = "연락처에는 Wi-Fi 연결이 필요합니다. 대시보드에서 휴대폰을 페어링한 다음 다시 오세요.";
 "Contacts saved on your phone appear here for quick dialling." = "휴대폰에 저장된 연락처가 여기에 표시되어 빠르게 전화할 수 있습니다.";
 "Contacts saved on your phone appear here." = "휴대폰에 저장된 연락처가 여기에 표시됩니다.";
+"Content hidden by Android" = "Android에서 내용을 숨겼습니다";
 "Continue" = "계속";
 "Control Center" = "제어 센터";
+"Conversations" = "대화";
 "Copied" = "복사됨";
+"Copies a plain-text report with no pairing code, notification text or phone numbers." = "페어링 코드, 알림 내용, 전화번호가 없는 일반 텍스트 보고서를 복사합니다.";
 "Copies of phone files you opened on the Mac." = "Mac에서 연 휴대폰 파일의 사본.";
+"Copies versions, link state and recent events. No pairing code, notifications or numbers." = "버전, 연결 상태, 최근 이벤트를 복사합니다. 페어링 코드, 알림, 번호는 포함되지 않습니다.";
 "Copies what you copied here" = "여기서 복사한 내용을 보냅니다";
 "Copy" = "복사";
+"Copy Diagnostics" = "진단 정보 복사";
 "Copy Number" = "번호 복사";
 "Copy Package Name" = "패키지 이름 복사";
 "Copy Serial" = "일련번호 복사";
@@ -342,6 +351,8 @@
 "Device" = "기기";
 "Device name" = "기기 이름";
 "Devices" = "기기";
+"Diagnostics copied" = "진단 정보를 복사했습니다";
+"Diagnostics report" = "진단 보고서";
 "Discovery port" = "검색 포트";
 "Dismiss" = "닫기";
 "Dismiss this notification" = "이 알림 지우기";
@@ -385,6 +396,7 @@
 "Encrypted (Bluetooth)" = "암호화됨 (Bluetooth)";
 "Encrypted (TLS)" = "암호화됨 (TLS)";
 "Encrypted (older method)" = "암호화됨 (이전 방식)";
+"Encrypted (older sealed link)" = "암호화됨(이전 방식의 봉인 연결)";
 "End call" = "통화 종료";
 "Enter a number" = "번호를 입력하세요";
 "Enter code" = "코드 입력";
@@ -392,12 +404,14 @@
 "Everything DroidDock needs is granted" = "DroidDock에 필요한 모든 권한이 허용되었습니다";
 "Everything above" = "위의 모든 항목";
 "Expand sidebar" = "사이드바 펼치기";
+"Fair" = "보통";
 "Fair connection" = "연결 상태 보통";
 "File" = "파일";
 "File not found: {name}" = "파일을 찾을 수 없음: {name}";
 "Files" = "파일";
 "Files & Sharing" = "파일 및 공유";
 "Files moving between your phone and this Mac show up here, with live speed and time left." = "휴대폰과 이 Mac 사이에서 전송 중인 파일이 실시간 속도와 남은 시간과 함께 여기에 표시됩니다.";
+"Files, photos and mirroring need Wi-Fi. Join the same network as the Mac to get them back." = "파일, 사진, 미러링에는 Wi-Fi가 필요합니다. Mac과 같은 네트워크에 연결하면 다시 사용할 수 있습니다.";
 "Filter by App" = "앱별로 필터링";
 "Filter by app" = "앱별로 필터링";
 "Filter this folder" = "이 폴더 필터링";
@@ -423,6 +437,7 @@
 "Forgot this phone." = "이 휴대폰을 지웠습니다.";
 "Forward" = "앞으로";
 "Forward  ⌘]" = "앞으로  ⌘]";
+"Found" = "찾음";
 "Frame rate" = "프레임 속도";
 "Freeform windows on the phone" = "휴대폰의 자유 형식 윈도우";
 "Front" = "전면";
@@ -439,6 +454,7 @@
 "Go" = "이동";
 "Go Wireless" = "무선으로 전환";
 "Go wireless" = "무선으로 전환";
+"Good" = "좋음";
 "Good connection" = "연결 상태 좋음";
 "Got it" = "확인";
 "Granted" = "허용됨";
@@ -525,12 +541,12 @@
 "Latency" = "지연 시간";
 "Later" = "나중에";
 "Launch at login" = "로그인 시 실행";
-"Let scripts send without asking" = "스크립트가 묻지 않고 보내도록 허용";
 "Let the phone browse these folders" = "휴대폰이 이 폴더를 둘러보도록 허용";
 "Let the phone control this Mac" = "휴대폰이 이 Mac을 제어하도록 허용";
 "Lets your Mac and phone find each other." = "Mac과 휴대폰이 서로를 찾을 수 있게 합니다.";
 "Level not reported yet" = "아직 잔량이 보고되지 않았습니다";
 "Light" = "라이트";
+"Likely causes" = "가능한 원인";
 "Link" = "링크";
 "Link port" = "링크 포트";
 "Link your phone from the Dashboard to browse and open its apps from here." = "대시보드에서 휴대폰을 연결하면 여기에서 앱을 둘러보고 열 수 있습니다.";
@@ -547,6 +563,7 @@
 "Links" = "링크";
 "Liquid opacity" = "리퀴드 불투명도";
 "List" = "목록";
+"Live" = "실시간";
 "Loading" = "로드 중";
 "Loading apps…" = "앱 불러오는 중…";
 "Loading settings…" = "설정을 불러오는 중…";
@@ -602,7 +619,9 @@
 "Mirror your phone" = "휴대폰 미러링";
 "Mirroring" = "미러링";
 "Mirroring & Media" = "미러링 및 미디어";
+"Mirroring needs scrcpy." = "미러링에는 scrcpy가 필요합니다.";
 "Mirroring {phone}" = "{phone} 미러링 중";
+"Mirroring, the second screen and cable features need Android platform tools." = "미러링, 보조 화면, 케이블 기능에는 Android platform tools가 필요합니다.";
 "Mirrors a second, virtual Android display instead of the phone's own screen — the phone stays usable. Needs Android 11+ and scrcpy 3.0 or newer." = "휴대폰 화면 대신 두 번째 가상 Android 디스플레이를 미러링합니다 — 휴대폰은 계속 쓸 수 있습니다. Android 11 이상과 scrcpy 3.0 이상이 필요합니다.";
 "Mirrors a second, virtual Android display instead of the phone's own screen. The phone stays usable. Needs Android 11+ and scrcpy 3.0 or newer." = "휴대폰 자체 화면 대신 두 번째 가상 Android 디스플레이를 미러링합니다. 휴대폰은 계속 사용할 수 있습니다. Android 11 이상과 scrcpy 3.0 이상이 필요합니다.";
 "Missed call" = "부재중 전화";
@@ -612,6 +631,7 @@
 "Mount Phone in Finder" = "Finder에 휴대폰 마운트";
 "Mount in Finder" = "Finder에 마운트";
 "Mounting…" = "마운트 중…";
+"Move closer to the router, switch the phone to 5 GHz Wi-Fi, or use the cable." = "라우터에 더 가까이 가거나, 휴대폰을 5GHz Wi-Fi로 바꾸거나, 케이블을 사용하세요.";
 "Mute" = "음소거";
 "Mute Mac banners" = "Mac 배너 음소거";
 "Mute phone audio" = "휴대폰 오디오 음소거";
@@ -667,9 +687,11 @@
 "No network" = "네트워크 없음";
 "No notifications yet" = "아직 알림이 없습니다";
 "No phone connected" = "연결된 휴대폰 없음";
+"No phone is linked" = "연결된 휴대폰이 없습니다";
 "No phone linked" = "연결된 휴대폰 없음";
 "No photos yet" = "아직 사진이 없습니다";
 "No results" = "결과 없음";
+"No sidebar. Your phone sits in the toolbar and a floating dock takes you anywhere." = "사이드바 없음. 휴대폰은 도구 막대에, 떠 있는 Dock으로 어디든 이동합니다.";
 "No transfers yet" = "아직 전송 내역 없음";
 "No {kind} transfers yet." = "{kind} 전송이 아직 없습니다.";
 "Not allowed" = "허용되지 않음";
@@ -677,10 +699,12 @@
 "Not connected" = "연결되지 않음";
 "Not delivered" = "전달되지 않음";
 "Not encrypted" = "암호화 안 됨";
+"Not found" = "찾을 수 없음";
 "Not granted" = "허용 안 됨";
 "Not installed" = "설치되지 않음";
 "Not linked" = "연결되지 않음";
 "Not linked — connect your phone first" = "연결되지 않음 — 먼저 휴대폰을 연결하세요";
+"Not reported by the phone" = "휴대폰에서 보고하지 않음";
 "Not responding" = "응답 없음";
 "Not set" = "설정 안 됨";
 "Not shown on your Mac at all" = "Mac에 전혀 표시되지 않음";
@@ -695,7 +719,7 @@
 "Nothing new." = "새로운 소식이 없습니다.";
 "Nothing playing" = "재생 중인 항목 없음";
 "Nothing to capture yet" = "아직 캡처할 것이 없습니다";
-"Nothing to send" = "보낼 항목 없음";
+"Nothing to send" = "보낼 항목이 없습니다";
 "Nothing was sent." = "아무것도 전송되지 않았습니다.";
 "Notification" = "알림";
 "Notification Level" = "알림 수준";
@@ -729,6 +753,7 @@
 "Open Command Bar" = "명령 막대 열기";
 "Open Devices…" = "기기 열기…";
 "Open DroidDock" = "DroidDock 열기";
+"Open DroidDock on the phone and keep it on the same Wi-Fi as this Mac, or plug it in by cable. If it never connects, pair again from the Connection settings." = "휴대폰에서 DroidDock을 열고 이 Mac과 같은 Wi-Fi에 두거나 케이블로 연결하세요. 계속 연결되지 않으면 연결 설정에서 다시 페어링하세요.";
 "Open DroidDock on your Android, on the same Wi-Fi as this Mac." = "이 Mac과 같은 Wi-Fi에 연결된 Android에서 DroidDock을 여세요.";
 "Open DroidDock on your Android, tap Pair with Mac, and scan this code. Both devices need the same Wi-Fi network." = "Android에서 DroidDock을 열고 “Mac과 페어링”을 탭한 다음 이 코드를 스캔하세요. 두 기기가 같은 Wi-Fi 네트워크에 연결되어 있어야 합니다.";
 "Open DroidDock on your Android, tap Pair with Mac, and scan this code. Both devices need the same Wi-Fi." = "Android에서 DroidDock을 열고 “Mac과 페어링”을 탭한 다음 이 코드를 스캔하세요. 두 기기가 같은 Wi-Fi에 연결되어 있어야 합니다.";
@@ -837,6 +862,7 @@
 "Phone app link required" = "휴대폰 앱 연결이 필요합니다";
 "Phone app not linked" = "휴대폰 앱이 연결되지 않음";
 "Phone app not paired" = "휴대폰 앱이 페어링되지 않음";
+"Phone app version" = "휴대폰 앱 버전";
 "Phone apps appear here after they send a notification." = "휴대폰 앱은 알림을 보내면 여기에 나타납니다.";
 "Phone audio" = "휴대폰 오디오";
 "Phone audio: {e}" = "휴대폰 오디오: {e}";
@@ -847,6 +873,7 @@
 "Phone clock" = "휴대폰 시계";
 "Phone control is off" = "휴대전화 제어가 꺼져 있습니다";
 "Phone disconnected mid-transfer" = "전송 중에 휴대폰 연결이 끊겼습니다";
+"Phone features" = "휴대폰 기능";
 "Phone forgotten" = "휴대폰을 삭제했습니다";
 "Phone in Finder" = "Finder의 휴대폰";
 "Phone media in Control Center" = "제어 센터에 휴대폰 미디어 표시";
@@ -941,6 +968,7 @@
 "Reconnect automatically" = "자동으로 다시 연결";
 "Reconnect saved phone" = "저장된 휴대폰에 다시 연결";
 "Reconnect saved phone  ⌘R" = "저장된 휴대폰에 다시 연결  ⌘R";
+"Reconnecting to the phone" = "휴대폰에 다시 연결하는 중";
 "Reconnecting to {name}…" = "{name}에 다시 연결하는 중…";
 "Reconnecting…" = "다시 연결하는 중…";
 "Record" = "녹화";
@@ -991,6 +1019,7 @@
 "Ring phone" = "휴대폰 울리기";
 "Ringing your phone — it stops itself after a minute" = "휴대폰을 울리는 중 — 1분 뒤에 저절로 멈춥니다";
 "Ringing your phone. It stops by itself after a minute." = "휴대폰을 울리는 중입니다. 1분 후 자동으로 멈춥니다.";
+"Round trip" = "왕복 시간";
 "Run Setup Check" = "설정 점검 실행";
 "SMS sends through your phone's SIM — carrier rates apply as usual." = "SMS는 휴대폰의 SIM으로 발송되며, 통신사 요금이 평소대로 부과됩니다.";
 "Same scrcpy stream, but it plays in DroidDock instead of a separate scrcpy window, and needs no “Allow screen capture” tap on the phone." = "동일한 scrcpy 스트림이지만 별도의 scrcpy 창이 아닌 DroidDock 안에서 재생되며, 휴대폰에서 “화면 캡처 허용”을 탭할 필요가 없습니다.";
@@ -1031,6 +1060,9 @@
 "Screenshot" = "스크린샷";
 "Screenshot saved" = "스크린샷을 저장했습니다";
 "Screenshot saved to Downloads" = "스크린샷을 Downloads에 저장했습니다";
+"Scripts" = "스크립트";
+"Scripts ask first." = "스크립트가 먼저 묻습니다.";
+"Scripts can do this without asking." = "스크립트가 묻지 않고 이 작업을 할 수 있습니다.";
 "Search" = "검색";
 "Search apps" = "앱 검색";
 "Search apps…" = "앱 검색…";
@@ -1041,6 +1073,7 @@
 "Second screen" = "두 번째 화면";
 "Section" = "섹션";
 "Sections" = "섹션";
+"Security" = "보안";
 "Seek" = "탐색";
 "Select" = "선택";
 "Select a conversation" = "대화 선택";
@@ -1124,7 +1157,7 @@
 "Show on Mac (native banners)" = "Mac에 표시(기본 배너)";
 "Show or hide DroidDock" = "DroidDock 표시/숨기기";
 "Show pairing code" = "페어링 코드 표시";
-"Show phone" = "휴대폰 표시";
+"Show phone" = "휴대폰 보기";
 "Show player" = "플레이어 표시";
 "Show the mirror in" = "미러링을 표시할 위치";
 "Show the pairing code for your phone" = "휴대폰용 페어링 코드를 표시합니다";
@@ -1156,6 +1189,7 @@
 "Something went wrong. Try again." = "문제가 발생했습니다. 다시 시도하세요.";
 "Speaker" = "스피커";
 "Speaker toggle failed — ensure ADB is connected" = "스피커 전환에 실패했습니다 — ADB가 연결되어 있는지 확인하세요";
+"Stalled" = "멈춤";
 "Starred" = "즐겨찾기";
 "Start Camera" = "카메라 시작";
 "Start Desktop Mode" = "데스크톱 모드 시작";
@@ -1191,6 +1225,8 @@
 "Streaming" = "스트리밍 중";
 "Streams the phone's back camera into a pop-out window over Wi-Fi. Flip to the front camera once it's running." = "Wi-Fi로 휴대폰의 후면 카메라를 팝아웃 윈도우에 스트리밍합니다. 실행한 뒤 전면 카메라로 전환할 수 있습니다.";
 "Streams the phone's back camera over Wi-Fi. Flip to the front camera once it's running." = "Wi-Fi로 휴대폰 후면 카메라를 스트리밍합니다. 시작한 후 전면 카메라로 전환할 수 있습니다.";
+"Support" = "지원";
+"Support report" = "지원 보고서";
 "Switch back automatically" = "자동으로 다시 전환";
 "Switch front/back camera" = "전면/후면 카메라 전환";
 "Switch this phone to Wi-Fi ADB so you can unplug it" = "이 휴대폰을 Wi-Fi ADB로 전환해 케이블을 뽑을 수 있게 합니다";
@@ -1222,15 +1258,18 @@
 "Test" = "테스트";
 "Text a contact…" = "연락처에 문자 보내기…";
 "Text messages from your phone appear here." = "휴대폰의 문자 메시지가 여기에 표시됩니다.";
+"Text sent to phone" = "텍스트를 휴대폰으로 보냈습니다";
 "That Mac app is no longer installed" = "해당 Mac 앱이 더 이상 설치되어 있지 않습니다";
 "That didn't take. Right-click DroidDock in the Dock › Options › Assign To › None." = "적용되지 않았습니다. Dock에서 DroidDock을 오른쪽 클릭하고 옵션 › 할당 대상 › 없음을 선택하세요.";
+"The Bluetooth fallback is unavailable while it's off." = "꺼져 있는 동안에는 Bluetooth 대체 연결을 사용할 수 없습니다.";
 "The Dashboard shows a QR code. In the phone app, tap “Pair with Mac” and scan it. Both devices must be on the same Wi-Fi network — if the code won't scan, there's an IP-and-token fallback on the same screen." = "대시보드에 QR 코드가 표시됩니다. 휴대폰 앱에서 “Mac과 페어링”을 탭하고 스캔하세요. 두 기기는 같은 Wi-Fi 네트워크에 있어야 합니다 — 코드가 스캔되지 않으면 같은 화면에 IP와 토큰으로 연결하는 방법이 있습니다.";
 "The Dock's Assign To setting puts its windows on whichever desktop you switch to." = "Dock의 “할당 대상” 설정 때문에 창이 전환한 데스크톱에 나타납니다.";
 "The adapter decides which address DroidDock advertises in the QR code and on Bonjour; the server itself accepts connections on every adapter." = "어댑터는 DroidDock이 QR 코드와 Bonjour에 알리는 주소를 정합니다. 서버 자체는 모든 어댑터에서 연결을 받습니다.";
 "The current Mac clipboard would be copied to your phone." = "현재 Mac 클립보드가 휴대전화로 복사됩니다.";
 "The file has been moved or deleted" = "파일이 이동되었거나 삭제되었습니다";
 "The in-app mirror needs scrcpy." = "앱 내 미러링에는 scrcpy가 필요합니다.";
-"The phone card with a few icon tabs. Everything else is under More." = "아이콘 탭 몇 개가 있는 휴대폰 카드입니다. 나머지는 모두 더보기에 있습니다.";
+"The link is slow" = "연결이 느립니다";
+"The phone dials back in by itself. Give it a few seconds, and keep both on the same network." = "휴대폰이 스스로 다시 연결합니다. 몇 초 기다리고 두 기기를 같은 네트워크에 두세요.";
 "The phone didn't answer. Check that it's nearby and try again." = "휴대폰이 응답하지 않았습니다. 가까이에 있는지 확인하고 다시 시도하세요.";
 "The phone finds this Mac again by itself over Bonjour on most networks. If it doesn't, scan the new QR code once." = "대부분의 네트워크에서 휴대전화가 Bonjour로 이 Mac을 자동으로 다시 찾습니다. 찾지 못하면 새 QR 코드를 한 번 스캔하세요.";
 "The phone isn't responding. Unplug and reconnect it, or tap Reconnect." = "휴대폰이 응답하지 않습니다. 케이블을 뽑았다가 다시 연결하거나 “다시 연결”을 탭하세요.";
@@ -1256,6 +1295,7 @@
 "This folder is empty." = "이 폴더는 비어 있습니다.";
 "This is a system shortcut ({name})." = "시스템 단축키({name})입니다.";
 "This is a test notification. If you can read this, banners work." = "테스트 알림입니다. 이 내용이 보이면 배너가 정상 작동합니다.";
+"This link is not encrypted" = "이 연결은 암호화되지 않았습니다";
 "This screen is being rebuilt in native SwiftUI." = "이 화면은 네이티브 SwiftUI로 다시 만들고 있습니다.";
 "This window" = "이 창";
 "Thumbnail" = "썸네일";
@@ -1286,6 +1326,7 @@
 "UHID keyboard" = "UHID 키보드";
 "URL" = "URL";
 "USB" = "USB";
+"USB cable" = "USB 케이블";
 "USB or wireless ADB" = "USB 또는 무선 ADB";
 "USB or wireless ADB, in this app" = "USB 또는 무선 ADB(이 앱에서)";
 "Unauthorized" = "승인되지 않음";
@@ -1306,6 +1347,7 @@
 "Until resumed" = "다시 시작할 때까지";
 "Up one level" = "한 단계 위로";
 "Update" = "업데이트";
+"Update DroidDock on the phone so it can use an encrypted link." = "암호화된 연결을 사용하려면 휴대폰의 DroidDock을 업데이트하세요.";
 "Update DroidDock on your phone and it will switch to encryption automatically." = "휴대폰의 DroidDock을 업데이트하면 자동으로 암호화로 전환됩니다.";
 "Update failed" = "업데이트 실패";
 "Update to {v}" = "{v}(으)로 업데이트";
@@ -1345,6 +1387,7 @@
 "Waiting for {name} to accept" = "{name}의 수락을 기다리는 중";
 "Waiting for {name} to accept…" = "{name}의 수락을 기다리는 중…";
 "Waiting to sync" = "동기화 대기 중";
+"Weak" = "약함";
 "Weak connection" = "연결 상태 약함";
 "Welcome" = "환영합니다";
 "Welcome to DroidDock" = "DroidDock에 오신 것을 환영합니다";
@@ -1383,6 +1426,7 @@
 "Wireless pairing removed" = "무선 페어링이 해제되었습니다";
 "Wireless pairing, Android 11+" = "무선 페어링, Android 11 이상";
 "With an ADB device connected, Start mirroring uses ADB instead of Wi-Fi, so the phone isn't asked to approve capture." = "ADB 기기가 연결되어 있으면 '미러링 시작'이 Wi-Fi 대신 ADB를 사용하므로 휴대폰에서 캡처를 승인할 필요가 없습니다.";
+"Without it the Bluetooth fallback can't find the phone." = "이 권한이 없으면 Bluetooth 대체 연결이 휴대폰을 찾을 수 없습니다.";
 "Work from any app. Nothing is set until you record a shortcut. Esc cancels, ⌫ clears." = "어떤 앱에서든 작동합니다. 단축키를 기록하기 전에는 아무것도 설정되지 않습니다. Esc는 취소, ⌫는 지우기입니다.";
 "Worth knowing" = "알아 두면 좋은 점";
 "Writable." = "쓰기 가능합니다.";
@@ -1402,6 +1446,7 @@
 "Your phone on the left, five tabs along the top." = "왼쪽에 휴대폰, 위쪽에 탭 다섯 개.";
 "Your phone will be disconnected and must scan the new QR code to pair again." = "휴대폰 연결이 해제되며, 다시 페어링하려면 새 QR 코드를 스캔해야 합니다.";
 "Your phone's camera is streaming in its own window. Flip front/back from there." = "휴대폰 카메라가 별도 윈도우로 스트리밍되고 있습니다. 전면/후면 전환은 그 윈도우에서 하세요.";
+"adb was not found" = "adb를 찾을 수 없습니다";
 "adb — installed automatically on first launch" = "adb — 처음 실행할 때 자동으로 설치됩니다";
 "and scan this code" = "그리고 이 코드를 스캔하세요";
 "and {n} more" = "그 외 {n}개";
@@ -1427,6 +1472,7 @@
 "scrcpy installed" = "scrcpy 설치됨";
 "scrcpy installs through Homebrew" = "scrcpy는 Homebrew로 설치합니다";
 "scrcpy not installed" = "scrcpy가 설치되지 않음";
+"scrcpy was not found" = "scrcpy를 찾을 수 없습니다";
 "scrcpy {v} can't create virtual displays; this applies from 3.0 onward." = "scrcpy {v}에서는 가상 디스플레이를 만들 수 없습니다. 3.0 이상부터 지원됩니다.";
 "scrcpy {v} is too old" = "scrcpy {v}은(는) 너무 오래되었습니다";
 "scrcpy's flex display — dragging the window edge resizes the Android display itself instead of scaling a fixed one. Needs scrcpy 4.0 or newer; ignored on older builds." = "scrcpy의 유연한 디스플레이 기능입니다. 윈도우 가장자리를 끌면 고정 크기를 확대·축소하는 대신 Android 디스플레이 자체의 크기가 바뀝니다. scrcpy 4.0 이상이 필요하며, 이전 버전에서는 무시됩니다.";

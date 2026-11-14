@@ -11,6 +11,9 @@ struct DDTab<ID: Hashable>: Identifiable {
     var badge: Int = 0
     /// Shown in the tooltip, e.g. "⌘1". The Go menu owns the real key equivalent.
     var shortcut: String?
+    /// Optional live mark after the title (progress ring, "live" dot). Pass a view that reads its own state, so its
+    /// ticks invalidate only the mark and not the tab bar. Nil (the default) draws nothing.
+    var accessory: AnyView? = nil
 }
 
 /// Toolbar-centre view switcher drawn to the native macOS segmented-control metrics (track, white/raised knob,
@@ -25,6 +28,8 @@ struct SegmentedTabBar<ID: Hashable>: View {
     var numberShortcuts: Bool = true
 
     @Namespace private var ns
+    /// The segment under the pointer: unselected segments get a faint wash, like a toolbar button.
+    @State private var hovered: ID?
     @Environment(\.colorScheme) private var scheme
     @Environment(\.displayScale) private var scale
     @Environment(\.controlActiveState) private var activeState
@@ -77,12 +82,19 @@ struct SegmentedTabBar<ID: Hashable>: View {
                         .padding(.horizontal, 5).frame(minWidth: 16, minHeight: 15)
                         .background(Capsule().fill(activeState == .inactive ? DD.faint : Color.accentColor))
                         .contentTransition(.numericText(value: Double(tab.badge)))
+                        .ddTransition(.scale(scale: 0.6).combined(with: .opacity))
                 }
+                if let accessory = tab.accessory { accessory }
             }
-            .foregroundStyle(selected ? DD.fg : DD.fg.opacity(0.78))
+            .ddAnimation(Motion.select, value: tab.badge)
+            .foregroundStyle(selected ? DD.fg : DD.fg.opacity(hovered == tab.id ? 0.95 : 0.78))
             .padding(.horizontal, iconOnly ? 12 : 11)
             .frame(maxHeight: .infinity)
             .background {
+                if !selected && hovered == tab.id {
+                    RoundedRectangle(cornerRadius: Self.trackRadius - Self.inset, style: .continuous)
+                        .fill(DD.hover)
+                }
                 if selected {
                     let knob = RoundedRectangle(cornerRadius: Self.trackRadius - Self.inset, style: .continuous)
                     knob.fill(Color(nsColor: .controlColor))
@@ -94,7 +106,12 @@ struct SegmentedTabBar<ID: Hashable>: View {
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SegmentPressStyle())
+        .onHover { h in
+            withDDAnimation(Motion.hover) {
+                if h { hovered = tab.id } else if hovered == tab.id { hovered = nil }
+            }
+        }
         .help(tab.shortcut.map { "\(tab.title)  \($0)" } ?? tab.title)
         .accessibilityLabel(tab.badge > 0 ? "\(tab.title), \(tab.badge)" : tab.title)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -104,6 +121,18 @@ struct SegmentedTabBar<ID: Hashable>: View {
         } else {
             button
         }
+    }
+}
+
+/// Press feedback for one segment: the label dips to 0.97 while held (feedback on press-down, not release), with a
+/// fade instead of the scale under Reduce Motion.
+private struct SegmentPressStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+            .opacity(configuration.isPressed ? 0.8 : 1)
+            .ddAnimation(Motion.press, value: configuration.isPressed)
     }
 }
 

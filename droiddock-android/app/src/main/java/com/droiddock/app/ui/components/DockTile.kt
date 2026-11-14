@@ -59,12 +59,14 @@ fun DockTile(
     Column(
         modifier
             .heightIn(min = height)
+            // Press first, so the whole tile squashes / tilts / flashes, not just its content.
+            .clip(shape).dockClickable(tilt = true, onClick = onClick)
             .then(
                 if (frostActive()) Modifier.frosted(shape, bg)
                 else Modifier.clip(shape).background(bg)
                     .then(DockTheme.surfaces.cardBorder?.let { Modifier.border(it, shape) } ?: Modifier)
             )
-            .dockClickable(onClick = onClick)
+            .dockCornerTicks()
             .padding(DockTheme.spacing.l),
         verticalArrangement = Arrangement.SpaceBetween,
     ) {

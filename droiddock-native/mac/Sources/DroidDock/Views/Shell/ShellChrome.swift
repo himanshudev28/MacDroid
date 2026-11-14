@@ -3,8 +3,8 @@ import Observation
 import SwiftUI
 
 /// Per-layout "collapse sidebar" / "hide phone" state, persisted as `droiddock.sidebarCollapsed.<layout>` and
-/// `droiddock.phoneHidden.<layout>`. Phone tabs and Minimal use the phone as the sidebar, so for them collapsing
-/// the sidebar and hiding the phone are the same switch (stored under `phoneHidden`).
+/// `droiddock.phoneHidden.<layout>`. Phone tabs uses the phone as the sidebar, so there collapsing the sidebar and
+/// hiding the phone are the same switch (stored under `phoneHidden`). Minimal has no sidebar (phone in a popover).
 @Observable @MainActor
 final class ShellChrome {
     static let shared = ShellChrome()
@@ -29,16 +29,27 @@ final class ShellChrome {
     }
 
     /// Layouts whose sidebar is the phone itself.
-    static func phoneIsSidebar(_ l: AppLayout) -> Bool { l == .phoneTabs || l == .minimal }
+    static func phoneIsSidebar(_ l: AppLayout) -> Bool { l == .phoneTabs }
+    /// Layouts with a list sidebar that collapses to an icon rail (⌃⌘S). Minimal has no sidebar at all.
+    static func hasRail(_ l: AppLayout) -> Bool { l == .classic || l == .grouped }
+
+    /// Minimal keeps the phone card in a popover under the toolbar's device chip. Not persisted: it opens on demand
+    /// (chip click, View › Show Phone, "Pair a phone").
+    var minimalPhoneOpen = false
 
     func isPhoneHidden(_ l: AppLayout) -> Bool { hidden[l.rawValue] ?? false }
 
     /// The phone panel is shown only if the user wants it AND the screen can hold the layout with it. When it can't,
     /// the panel auto-hides instead of the sidebar being clipped (the saved preference is untouched).
     func effectivePhoneHidden(_ l: AppLayout) -> Bool {
-        if isPhoneHidden(l) { return true }
+        isPhoneHidden(l) || !phoneFits(l)
+    }
+
+    /// Can the screen hold `l` with its phone panel shown? (Width only, ignoring the user's preference.) A "show phone"
+    /// control is disabled when this is false: turning the preference on would change nothing on screen.
+    func phoneFits(_ l: AppLayout) -> Bool {
         let rawCollapsed = Self.phoneIsSidebar(l) ? false : (collapsed[l.rawValue] ?? false)
-        return LayoutMetrics.minWidth(l, phoneHidden: false, collapsed: rawCollapsed) > WindowFit.availableWidth()
+        return LayoutMetrics.minWidth(l, phoneHidden: false, collapsed: rawCollapsed) <= WindowFit.availableWidth()
     }
 
     /// Smallest window width at which every column of `l` keeps its text unclipped, in the current panel/sidebar state.
@@ -150,7 +161,7 @@ enum LayoutMetrics {
         case .phoneTabs: return phoneHidden ? 700 : phoneMin + 700
         case .classic: return (collapsed ? railWidth : listMin) + detailMin + (phoneHidden ? 0 : phoneMin)
         case .grouped: return (collapsed ? railWidth : phoneMin) + detailMin
-        case .minimal: return phoneHidden ? 720 : phoneMin + 720
+        case .minimal: return 680   // one full-width column; the dock (~9 icons + More) needs ~460
         }
     }
 }

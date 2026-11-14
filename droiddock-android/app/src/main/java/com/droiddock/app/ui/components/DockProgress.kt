@@ -52,8 +52,15 @@ fun DockProgress(
     progress: Float,
     modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colorScheme.primary,
-    height: Dp = if (DockTheme.style == UiStyle.MINIMAL_MONO) 6.dp else 8.dp,
+    height: Dp = when (DockTheme.signature) {
+        com.droiddock.app.ui.theme.DockSignature.INSTRUMENT -> 6.dp
+        com.droiddock.app.ui.theme.DockSignature.BLOCKS -> 12.dp
+        com.droiddock.app.ui.theme.DockSignature.SHELF -> 5.dp
+        com.droiddock.app.ui.theme.DockSignature.DEPTH -> 8.dp
+    },
 ) {
+    val sig = DockTheme.signature
+    val tertiary = MaterialTheme.colorScheme.tertiary
     val p by animateFloatAsState(progress.coerceIn(0f, 1f), DockTheme.motion.smooth(), label = "progress")
     val track = DockTheme.colors.inset
     val mono = DockTheme.style == UiStyle.MINIMAL_MONO
@@ -73,8 +80,38 @@ fun DockProgress(
                 drawRect(if (on) signal else track, Offset(i * (w + gap), 0f), Size(w, size.height))
             }
         } else {
-            drawRoundRect(track, cornerRadius = CornerRadius(r))
-            if (p > 0f) drawRoundRect(signal, size = Size(maxOf(size.height, size.width * p), size.height), cornerRadius = CornerRadius(r))
+            val rtl = layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl
+            val fillW = if (p > 0f) maxOf(size.height, size.width * p) else 0f
+            val fillX = if (rtl) size.width - fillW else 0f
+            when (sig) {
+                // BLOCKS: the fill is its own block; the remaining track starts after a small gap.
+                com.droiddock.app.ui.theme.DockSignature.BLOCKS -> {
+                    val gap = if (p in 0.001f..0.999f) 4.dp.toPx() else 0f
+                    val restW = (size.width - fillW - gap).coerceAtLeast(0f)
+                    if (restW > 0f) drawRoundRect(track, Offset(if (rtl) 0f else fillW + gap, 0f), Size(restW, size.height), CornerRadius(r))
+                    if (fillW > 0f) drawRoundRect(signal, Offset(fillX, 0f), Size(fillW, size.height), CornerRadius(r))
+                }
+                // DEPTH: a primary → tertiary liquid fill with a thin gloss along its top edge.
+                com.droiddock.app.ui.theme.DockSignature.DEPTH -> {
+                    drawRoundRect(track, cornerRadius = CornerRadius(r))
+                    if (fillW > 0f) {
+                        drawRoundRect(
+                            androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                if (rtl) listOf(tertiary, signal) else listOf(signal, tertiary), startX = fillX, endX = fillX + fillW,
+                            ),
+                            Offset(fillX, 0f), Size(fillW, size.height), CornerRadius(r),
+                        )
+                        drawRoundRect(
+                            Color.White.copy(alpha = 0.32f), Offset(fillX + r * 0.6f, size.height * 0.16f),
+                            Size((fillW - r * 1.2f).coerceAtLeast(0f), size.height * 0.18f), CornerRadius(r),
+                        )
+                    }
+                }
+                else -> {
+                    drawRoundRect(track, cornerRadius = CornerRadius(r))
+                    if (fillW > 0f) drawRoundRect(signal, Offset(fillX, 0f), Size(fillW, size.height), CornerRadius(r))
+                }
+            }
         }
     }
 }

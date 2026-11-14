@@ -150,8 +150,28 @@ struct PhoneHandle {
     /// (imperfect but unchanged) behaviour.
     device_id: Option<String>,
     caps: Vec<String>,
+    /// The phone app's version from its Wi-Fi `hello` (`appVersion`, additive).
+    /// `None` for older phones, and until a Wi-Fi hello has been seen. Display
+    /// and support reports only; never a gate.
+    app_version: Option<String>,
     ws: Option<WsLink>,
     ble: Option<BleLinkTx>,
+}
+
+/// `hello.appVersion`, if present and plausible. Anything else (absent, not a
+/// string, empty, oversized, odd characters) is "not reported", so a broken
+/// phone can't put arbitrary text into the UI or a support report.
+fn hello_app_version(hello: &Value) -> Option<String> {
+    let v = hello.get("appVersion")?.as_str()?.trim();
+    let ok = !v.is_empty()
+        && v.len() <= 32
+        && v.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+' | '_'));
+    ok.then(|| v.to_string())
+}
+
+/// The connected phone's app version, when it reported one.
+pub async fn phone_app_version(state: &SharedState) -> Option<String> {
+    state.phone.lock().await.as_ref().and_then(|p| p.app_version.clone())
 }
 
 /// The connected phone's display name, read synchronously.
@@ -160,7 +180,7 @@ struct PhoneHandle {
 /// async context), so this mirrors the last name onto a plain mutex that
 /// `emit_status` keeps current.
 pub fn last_phone_name(app: &AppHandle) -> Option<String> {
-    app.state::<LastPhoneName>().0.lock().unwrap().clone()
+    app.state::<LastPhoneName>().0.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 /// Sync mirror of the connected phone's name — see `last_phone_name`.
@@ -709,7 +729,7 @@ static LAST_SEC: std::sync::Mutex<&'static str> = std::sync::Mutex::new("none");
 
 fn security_label(transport: Option<&'static str>) -> &'static str {
     match transport {
-        Some("wifi" | "usb") => *WIFI_SEC.lock().unwrap(),
+        Some("wifi" | "usb") => *WIFI_SEC.lock().unwrap_or_else(|e| e.into_inner()),
         Some(_) => "ble",
         None => "none",
     }
@@ -723,10 +743,10 @@ fn emit_status(
     transport: Option<&'static str>,
 ) {
     let state = app.state::<LastPhoneName>();
-    let mut guard = state.0.lock().unwrap();
-    let mut last_t = LAST_TRANSPORT.lock().unwrap();
+    let mut guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
+    let mut last_t = LAST_TRANSPORT.lock().unwrap_or_else(|e| e.into_inner());
     let security = if connected { security_label(transport) } else { "none" };
-    let mut last_s = LAST_SEC.lock().unwrap();
+    let mut last_s = LAST_SEC.lock().unwrap_or_else(|e| e.into_inner());
     if !connected && guard.is_none() {
         return;
     }
@@ -819,6 +839,101 @@ pub async fn run(app: AppHandle, state: SharedState, port: u16) {
     }
 }
 
+/// Bytes (upgrade request included) an unauthenticated socket may deliver to the
+/// WebSocket layer. The 16 MiB message cap is for authenticated phones only.
+const PRE_AUTH_READ_BUDGET: usize = 64 * 1024;
+
+/// Shared switch between a `PreAuthGate` stream and the connection task.
+struct AuthGate {
+    open: std::sync::atomic::AtomicBool,
+    waker: std::sync::Mutex<Option<std::task::Waker>>,
+}
+
+impl AuthGate {
+    /// Lift the read budget (hello accepted) and wake a read parked on it.
+    fn open(&self) {
+        self.open.store(true, Ordering::Release);
+        if let Some(w) = self.waker.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            w.wake();
+        }
+    }
+}
+
+/// Read-budget wrapper: before the gate opens, reads stop (the socket is simply
+/// not polled, so TCP backpressure applies) once `budget` bytes were delivered.
+/// A parked read is resumed by `open()`, or ends with the auth deadline. Nothing
+/// is dropped or errored, so a phone that pipelines a big message right behind
+/// its hello is unaffected.
+struct PreAuthGate<S> {
+    inner: S,
+    gate: Arc<AuthGate>,
+    left: usize,
+}
+
+impl<S> PreAuthGate<S> {
+    fn wrap(inner: S, budget: usize) -> (Self, Arc<AuthGate>) {
+        let gate = Arc::new(AuthGate {
+            open: std::sync::atomic::AtomicBool::new(false),
+            waker: std::sync::Mutex::new(None),
+        });
+        (Self { inner, gate: gate.clone(), left: budget }, gate)
+    }
+}
+
+impl<S: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for PreAuthGate<S> {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        let this = self.get_mut();
+        if this.gate.open.load(Ordering::Acquire) {
+            return std::pin::Pin::new(&mut this.inner).poll_read(cx, buf);
+        }
+        if this.left == 0 {
+            *this.gate.waker.lock().unwrap_or_else(|e| e.into_inner()) = Some(cx.waker().clone());
+            // open() may have run between the check and the waker store.
+            if this.gate.open.load(Ordering::Acquire) {
+                cx.waker().wake_by_ref();
+            }
+            return std::task::Poll::Pending;
+        }
+        let cap = buf.remaining().min(this.left);
+        let mut limited = buf.take(cap);
+        let r = std::pin::Pin::new(&mut this.inner).poll_read(cx, &mut limited);
+        let n = limited.filled().len();
+        if let std::task::Poll::Ready(Ok(())) = r {
+            // `take` shares the same memory: mark those bytes filled on `buf`.
+            unsafe { buf.assume_init(n) };
+            buf.advance(n);
+            this.left -= n;
+        }
+        r
+    }
+}
+
+impl<S: tokio::io::AsyncWrite + Unpin> tokio::io::AsyncWrite for PreAuthGate<S> {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        b: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        std::pin::Pin::new(&mut self.get_mut().inner).poll_write(cx, b)
+    }
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.get_mut().inner).poll_flush(cx)
+    }
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
+    }
+}
+
 /// English template of the blocked-plain-link event; Swift localizes it via `tr(key, params)`.
 const BLOCKED_KEY: &str = "Blocked an unencrypted connection from {name}, which normally connects securely. Update DroidDock on the phone.";
 /// Same, for a hello with no `deviceId` (an old phone, or something pretending to be one).
@@ -834,6 +949,9 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
     };
     let Some(stream) = crate::tls::accept(&app, stream).await else { return };
     let secure = stream.is_tls();
+    // Until `hello` is accepted the socket delivers at most PRE_AUTH_READ_BUDGET
+    // bytes, so a stranger cannot make tungstenite buffer a 16 MiB message.
+    let (stream, auth_gate) = PreAuthGate::wrap(stream, PRE_AUTH_READ_BUDGET);
     // A peer that sends one byte ("G") or goes silent after the TLS handshake
     // must not hold this task and its fd forever.
     let upgraded = tokio::time::timeout(
@@ -1018,6 +1136,7 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                     }
                     eprintln!("[ws] HANDSHAKE OK: {hello_name:?} caps={caps:?} deviceId={device_id:?} tls={secure}");
                     authed = true;
+                    auth_gate.open();
                     pre_auth.release();
                     let phone_tls = caps.iter().any(|c| c == crate::tls::CAP);
 
@@ -1080,6 +1199,9 @@ async fn handle_connection(app: AppHandle, state: SharedState, stream: TcpStream
                         eprintln!("[ws] HANDSHAKE REJECT: token changed during the handshake");
                         break;
                     };
+                    if let Some(p) = state.phone.lock().await.as_mut() {
+                        p.app_version = hello_app_version(&raw);
+                    }
                     // Deliberately sent unsealed: it is the message that tells
                     // the phone encryption is on, so it cannot itself be
                     // encrypted. Everything after it is sealed.
@@ -1195,7 +1317,7 @@ async fn register_link(
                 }
             }
         } else {
-            let mut h = PhoneHandle { name: name.clone(), device_id: device_id.clone(), caps: caps.clone(), ws: None, ble: None };
+            let mut h = PhoneHandle { name: name.clone(), device_id: device_id.clone(), caps: caps.clone(), app_version: None, ws: None, ble: None };
             match link {
                 NewLink::Ws(l, _) => h.ws = Some(l),
                 NewLink::Ble(b) => h.ble = Some(b),
@@ -1253,7 +1375,7 @@ async fn finish_register(app: &AppHandle, state: &SharedState, reg: &Registered,
                 "plain"
             }
         });
-        *WIFI_SEC.lock().unwrap() = sec;
+        *WIFI_SEC.lock().unwrap_or_else(|e| e.into_inner()) = sec;
     }
     if reg.fresh {
         // Wakes every loop parked in `await_connected`, so the first
@@ -1456,7 +1578,7 @@ async fn route_text(app: &AppHandle, state: &SharedState, raw: Value, origin: Li
     // BLE fallback §7: a message the phone resent on the other link after a
     // handover carries the same `mid`; drop the repeat before it is routed.
     if let Some(mid) = raw.get("mid").and_then(Value::as_str) {
-        if state.seen_mids.lock().unwrap().seen(mid) {
+        if state.seen_mids.lock().unwrap_or_else(|e| e.into_inner()).seen(mid) {
             return;
         }
     }
@@ -1518,7 +1640,10 @@ async fn route_text(app: &AppHandle, state: &SharedState, raw: Value, origin: Li
             crate::notifications::on_notification(app, &m);
             // Backfill is a replay of what's already on the phone, not new
             // arrivals — counting it would badge the menu bar on every connect.
-            if m.get("backfill").and_then(Value::as_bool) != Some(true) {
+            // A ride/download/timer ticking is shown live in the panel, not as a new unread item.
+            if m.get("backfill").and_then(Value::as_bool) != Some(true)
+                && !crate::notifications::is_live_update(&m)
+            {
                 crate::statusbar::on_notification(app);
             }
             emit_event(app, "notification", &m);
@@ -2038,7 +2163,7 @@ pub fn is_listening() -> bool {
 }
 
 fn live_config(app: &AppHandle) -> crate::config::Config {
-    app.state::<crate::AppState>().config.lock().unwrap().clone()
+    app.state::<crate::AppState>().config.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 pub fn mac_name(app: &AppHandle) -> String {
@@ -2055,6 +2180,21 @@ pub fn mac_name(app: &AppHandle) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// An older phone's hello has no `appVersion`: it must still parse as a
+    /// hello and simply report no version. Odd values are rejected, not shown.
+    #[test]
+    fn hello_without_app_version_still_parses() {
+        let old = json!({ "type": "hello", "token": "t", "name": "Pixel", "caps": ["health"] });
+        assert!(matches!(serde_json::from_value::<Message>(old.clone()), Ok(Message::Hello { .. })));
+        assert_eq!(hello_app_version(&old), None);
+        let new = json!({ "type": "hello", "token": "t", "name": "Pixel", "appVersion": "3.6.2" });
+        assert!(matches!(serde_json::from_value::<Message>(new.clone()), Ok(Message::Hello { .. })));
+        assert_eq!(hello_app_version(&new).as_deref(), Some("3.6.2"));
+        for bad in [json!(""), json!(7), json!("x y"), json!("<b>"), json!("a".repeat(40))] {
+            assert_eq!(hello_app_version(&json!({ "appVersion": bad })), None);
+        }
+    }
+
     use super::*;
 
     #[test]
@@ -2093,6 +2233,29 @@ mod tests {
     }
 
     use super::{reply_family, reply_matches};
+
+    #[tokio::test]
+    async fn pre_auth_gate_caps_reads_until_opened() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (mut a, b) = tokio::io::duplex(1 << 20);
+        let (mut gated, gate) = super::PreAuthGate::wrap(b, 100);
+        a.write_all(&[7u8; 300]).await.unwrap();
+        let mut got = Vec::new();
+        let mut buf = [0u8; 64];
+        while got.len() < 100 {
+            let n = gated.read(&mut buf).await.unwrap();
+            got.extend_from_slice(&buf[..n]);
+        }
+        assert_eq!(got.len(), 100, "never delivers past the budget");
+        assert!(tokio::time::timeout(Duration::from_millis(100), gated.read(&mut buf)).await.is_err());
+        gate.open();
+        let mut rest = Vec::new();
+        while rest.len() < 200 {
+            let n = tokio::time::timeout(Duration::from_secs(2), gated.read(&mut buf)).await.unwrap().unwrap();
+            rest.extend_from_slice(&buf[..n]);
+        }
+        assert_eq!(rest, vec![7u8; 200]);
+    }
 
     #[test]
     fn push_begin_is_answered_by_the_push_family() {

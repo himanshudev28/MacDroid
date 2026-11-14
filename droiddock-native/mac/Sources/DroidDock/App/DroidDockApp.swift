@@ -62,12 +62,18 @@ struct NavigationCommands: Commands {
         }
         CommandGroup(replacing: .sidebar) {
             let c = ShellChrome.shared
-            if !ShellChrome.phoneIsSidebar(layout) {
+            if ShellChrome.hasRail(layout) {
                 Button(c.isCollapsed(layout) ? tr("Expand sidebar") : tr("Collapse sidebar")) { c.toggleSidebar(layout) }
                     .keyboardShortcut("s", modifiers: [.command, .control])
             }
-            Button(c.isPhoneHidden(layout) ? tr("Show phone") : tr("Hide phone")) { c.togglePhone(layout) }
-                .keyboardShortcut("s", modifiers: [.command, .option])
+            if layout == .minimal {
+                Button(c.minimalPhoneOpen ? tr("Hide phone") : tr("Show phone")) { c.minimalPhoneOpen.toggle() }
+                    .keyboardShortcut("s", modifiers: [.command, .option])
+            } else if !(layout == .grouped && c.isCollapsed(.grouped)) {
+                Button(c.effectivePhoneHidden(layout) ? tr("Show phone") : tr("Hide phone")) { c.togglePhone(layout) }
+                    .keyboardShortcut("s", modifiers: [.command, .option])
+                    .disabled(!c.phoneFits(layout))
+            }
         }
         CommandGroup(after: .help) {
             Button(tr("Welcome to DroidDock…")) { OnboardingState.shared.reopen() }

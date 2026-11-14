@@ -7,13 +7,14 @@
 "30 seconds" = "30秒";
 "60 feels smooth; 30 halves the bandwidth and is fine for reading." = "60 は滑らかで、30 は帯域が半分になり、読む用途なら十分です。";
 "8 hours" = "8 時間";
+"A Finder-style sidebar with your phone at the top. Its card opens in a side panel." = "Finderのようなサイドバーの一番上に電話を表示。カードはサイドパネルで開きます。";
+"A compact phone header, live tiles for your inbox, and folding groups." = "コンパクトな電話ヘッダー、受信箱のライブタイル、折りたためるグループ。";
 "A link or script asked DroidDock to copy your Mac clipboard to your phone." = "リンクまたはスクリプトが、MacのクリップボードをスマートフォンにコピーするようDroidDockに求めました。";
 "A link or script asked DroidDock to do something with your phone." = "リンクまたはスクリプトが、スマートフォンで何かを実行するようDroidDockに求めました。";
 "A link or script asked DroidDock to open {app}." = "リンクまたはスクリプトが、{app}を開くようDroidDockに求めました。";
 "A link or script asked DroidDock to show your phone screen on this Mac." = "リンクまたはスクリプトが、このMacにスマートフォンの画面を表示するようDroidDockに求めました。";
 "A link or script asked DroidDock to start desktop mode on your phone." = "リンクまたはスクリプトが、スマートフォンでデスクトップモードを開始するようDroidDockに求めました。";
 "A number and a message are required" = "番号とメッセージが必要です";
-"A phone card above a sidebar grouped into Inbox, Files and Phone." = "受信、ファイル、スマホにグループ分けされたサイドバーの上に、スマホカードを表示します。";
 "A script is asking DroidDock to make your phone ring." = "スクリプトがDroidDockにスマートフォンを鳴らすよう求めています。";
 "A script wants to send a text from your phone to {number}." = "スクリプトがあなたのスマートフォンから{number}にメッセージを送信しようとしています。";
 "A script wants to send {n} file to your phone's Downloads folder." = "スクリプトがスマートフォンのダウンロードフォルダに{n}個のファイルを送信しようとしています。";
@@ -21,7 +22,6 @@
 "A second, virtual Android display. The phone stays usable. Android 11+ and scrcpy 3.0 or newer." = "2つ目の仮想Androidディスプレイです。スマホはそのまま使えます。Android 11以降とscrcpy 3.0以降が必要です。";
 "A separate phone screen with its own home screen and apps, in a Mac window. Your phone's own screen is never shown or touched, and apps opened there close with the window." = "独自のホーム画面とアプリを持つ、別のスマートフォン画面をMacのウインドウに表示します。スマートフォン本体の画面は表示も操作もされず、そこで開いたアプリはウインドウを閉じると終了します。";
 "A separate phone screen with its own home screen and apps. Your phone's own screen is never shown or touched, and apps opened there close with the window." = "独自のホーム画面とAppを持つ、別のスマホ画面です。スマホ本体の画面は表示も操作もされず、そこで開いたAppはウインドウを閉じると終了します。";
-"A sidebar with every screen. The phone sits in a side panel." = "すべての画面を並べたサイドバーです。スマホはサイドパネルに表示されます。";
 "A small always-on-top panel with battery and now-playing that you can park anywhere. Not a macOS Widget — those need a Swift extension a Tauri app can't ship — but it's the same glanceable readout." = "バッテリーと再生中の曲を表示する小さな常に最前面のパネルで、画面のどこにでも置けます。macOS のウィジェットではありませんが（ウィジェットには Swift の拡張機能が必要で、Tauri アプリでは同梱できません）、ひと目で確認できる点は同じです。";
 "A small always-on-top panel with battery and now-playing." = "バッテリーと再生中の曲を表示する、常に最前面の小さなパネルです。";
 "A virtual display on the phone. “Window layout” decides whether Android serves desktop, tablet or phone layouts." = "スマートフォン上の仮想ディスプレイです。「ウインドウのレイアウト」で、Android がデスクトップ、タブレット、スマートフォンのどのレイアウトで表示するかを決めます。";
@@ -102,6 +102,7 @@
 "App" = "アプリ";
 "App notifications" = "アプリの通知";
 "Appearance" = "外観";
+"AppleScript, Shortcuts and Raycast ask before they act. Sending files and text messages always ask." = "AppleScript、ショートカット、Raycastは実行前に確認します。ファイルとテキストメッセージの送信は常に確認します。";
 "AppleScript, Shortcuts and Raycast can ring your phone, send the clipboard, files and texts without a confirmation. When off, each one asks first." = "AppleScript、ショートカット、Raycastが、確認なしでスマートフォンを鳴らしたり、クリップボード・ファイル・メッセージを送信したりできます。オフの場合は毎回確認します。";
 "AppleScript, Shortcuts and Raycast can ring your phone, start mirroring, and send the clipboard and texts without a confirmation. Sending files always asks. When off, each one asks first." = "AppleScript、ショートカット、Raycastが、確認なしでスマートフォンを鳴らしたり、ミラーリングを開始したり、クリップボードやメッセージを送信したりできます。ファイルの送信は常に確認します。オフの場合は毎回確認します。";
 "Applies to Wi-Fi and ADB. Lower the bit rate if the mirror stutters on a busy network." = "Wi-Fi と ADB に適用されます。混雑したネットワークでミラーリングがカクつく場合は、ビットレートを下げてください。";
@@ -149,11 +150,13 @@
 "Blocked an unencrypted connection from {name}, which normally connects securely. Update DroidDock on the phone." = "通常は安全に接続する {name} からの暗号化されていない接続をブロックしました。スマートフォンの DroidDock をアップデートしてください。";
 "Blocked an unencrypted connection from {name}. If this is your phone, use Reset pairing in Settings and pair it again." = "{name} からの暗号化されていない接続をブロックしました。お使いのスマートフォンの場合は、設定の「ペアリングをリセット」を使って、もう一度ペアリングしてください。";
 "Bluetooth" = "Bluetooth";
+"Bluetooth access is off for DroidDock" = "DroidDockのBluetoothアクセスがオフです";
 "Bluetooth connected" = "Bluetooth 接続済み";
 "Bluetooth fallback" = "Bluetoothフォールバック";
 "Bluetooth is blocked for DroidDock" = "DroidDock の Bluetooth はブロックされています";
 "Bluetooth is forced" = "Bluetooth を固定中";
 "Bluetooth is off" = "Bluetooth がオフです";
+"Bluetooth is turned off on this Mac" = "このMacのBluetoothがオフです";
 "Bluetooth isn't available on this Mac" = "この Mac では Bluetooth を利用できません";
 "Both devices need the same Wi-Fi network." = "両方のデバイスが同じ Wi-Fi ネットワークに接続されている必要があります。";
 "Bring to Front" = "最前面に移動";
@@ -260,6 +263,7 @@
 "Connect via QR" = "QR コードで接続";
 "Connect your phone first" = "先にスマートフォンを接続してください";
 "Connect your phone to list apps" = "アプリ一覧を表示するにはスマホを接続してください";
+"Connected over Bluetooth only" = "Bluetoothのみで接続中";
 "Connected over {t}" = "{t} で接続中";
 "Connected to {name}" = "{name} に接続しました";
 "Connecting over Bluetooth…" = "Bluetooth で接続中…";
@@ -276,12 +280,17 @@
 "Contacts need the Wi-Fi link. Pair your phone from the Dashboard, then come back." = "連絡先には Wi-Fi 接続が必要です。ダッシュボードでスマートフォンをペアリングしてから戻ってください。";
 "Contacts saved on your phone appear here for quick dialling." = "スマートフォンに保存されている連絡先がここに表示され、すばやく発信できます。";
 "Contacts saved on your phone appear here." = "スマートフォンに保存されている連絡先がここに表示されます。";
+"Content hidden by Android" = "Androidによって内容が非表示になっています";
 "Continue" = "続ける";
 "Control Center" = "コントロールセンター";
+"Conversations" = "会話";
 "Copied" = "コピーしました";
+"Copies a plain-text report with no pairing code, notification text or phone numbers." = "ペアリングコード、通知の本文、電話番号を含まないテキストレポートをコピーします。";
 "Copies of phone files you opened on the Mac." = "Macで開いたスマートフォンのファイルのコピー。";
+"Copies versions, link state and recent events. No pairing code, notifications or numbers." = "バージョン、接続状態、最近のイベントをコピーします。ペアリングコード、通知、番号は含みません。";
 "Copies what you copied here" = "ここでコピーした内容を送ります";
 "Copy" = "コピー";
+"Copy Diagnostics" = "診断情報をコピー";
 "Copy Number" = "番号をコピー";
 "Copy Package Name" = "パッケージ名をコピー";
 "Copy Serial" = "シリアルをコピー";
@@ -342,6 +351,8 @@
 "Device" = "デバイス";
 "Device name" = "デバイス名";
 "Devices" = "デバイス";
+"Diagnostics copied" = "診断情報をコピーしました";
+"Diagnostics report" = "診断レポート";
 "Discovery port" = "検出ポート";
 "Dismiss" = "消去";
 "Dismiss this notification" = "この通知を消去";
@@ -385,6 +396,7 @@
 "Encrypted (Bluetooth)" = "暗号化済み (Bluetooth)";
 "Encrypted (TLS)" = "暗号化済み (TLS)";
 "Encrypted (older method)" = "暗号化済み (旧方式)";
+"Encrypted (older sealed link)" = "暗号化済み（旧方式の封印リンク）";
 "End call" = "通話を終了";
 "Enter a number" = "番号を入力してください";
 "Enter code" = "コードを入力";
@@ -392,12 +404,14 @@
 "Everything DroidDock needs is granted" = "DroidDock に必要な権限はすべて付与されています";
 "Everything above" = "上記すべて";
 "Expand sidebar" = "サイドバーを展開";
+"Fair" = "普通";
 "Fair connection" = "接続は普通です";
 "File" = "ファイル";
 "File not found: {name}" = "ファイルが見つかりません: {name}";
 "Files" = "ファイル";
 "Files & Sharing" = "ファイルと共有";
 "Files moving between your phone and this Mac show up here, with live speed and time left." = "スマートフォンとこの Mac の間でやり取りしているファイルが、現在の速度と残り時間とともにここに表示されます。";
+"Files, photos and mirroring need Wi-Fi. Join the same network as the Mac to get them back." = "ファイル、写真、ミラーリングにはWi-Fiが必要です。Macと同じネットワークに接続すると使えるようになります。";
 "Filter by App" = "アプリで絞り込む";
 "Filter by app" = "アプリで絞り込む";
 "Filter this folder" = "このフォルダを絞り込む";
@@ -423,6 +437,7 @@
 "Forgot this phone." = "このスマートフォンを解除しました。";
 "Forward" = "進む";
 "Forward  ⌘]" = "進む  ⌘]";
+"Found" = "あり";
 "Frame rate" = "フレームレート";
 "Freeform windows on the phone" = "スマートフォンでフリーフォームウインドウ";
 "Front" = "前面";
@@ -439,6 +454,7 @@
 "Go" = "移動";
 "Go Wireless" = "ワイヤレスに切り替え";
 "Go wireless" = "ワイヤレスに切り替える";
+"Good" = "良好";
 "Good connection" = "接続は良好です";
 "Got it" = "了解";
 "Granted" = "許可済み";
@@ -457,7 +473,7 @@
 "Hide" = "非表示にする";
 "Hide Dock icon" = "Dock のアイコンを隠す";
 "Hide Widget" = "ウィジェットを隠す";
-"Hide phone" = "スマートフォンを隠す";
+"Hide phone" = "電話を隠す";
 "Hide player" = "プレーヤーを隠す";
 "Hiding the preview shows “New notification” in banners instead of the message." = "プレビューを隠すと、バナーにはメッセージの代わりに「新しい通知」と表示されます。";
 "Hold ⌘Q to quit" = "⌘Q を長押しして終了";
@@ -525,12 +541,12 @@
 "Latency" = "遅延";
 "Later" = "あとで";
 "Launch at login" = "ログイン時に起動";
-"Let scripts send without asking" = "スクリプトに確認なしで送信を許可";
 "Let the phone browse these folders" = "これらのフォルダの閲覧をスマートフォンに許可";
 "Let the phone control this Mac" = "この Mac の操作をスマートフォンに許可";
 "Lets your Mac and phone find each other." = "Mac とスマートフォンがお互いを見つけられるようにします。";
 "Level not reported yet" = "残量はまだ届いていません";
 "Light" = "ライト";
+"Likely causes" = "考えられる原因";
 "Link" = "リンク";
 "Link port" = "リンクポート";
 "Link your phone from the Dashboard to browse and open its apps from here." = "ダッシュボードでスマートフォンをペアリングすると、ここからアプリの一覧表示と起動ができます。";
@@ -547,6 +563,7 @@
 "Links" = "リンク";
 "Liquid opacity" = "リキッド不透明度";
 "List" = "リスト";
+"Live" = "ライブ";
 "Loading" = "読み込み中";
 "Loading apps…" = "アプリを読み込み中…";
 "Loading settings…" = "設定を読み込み中…";
@@ -602,7 +619,9 @@
 "Mirror your phone" = "スマートフォンをミラーリング";
 "Mirroring" = "ミラーリング";
 "Mirroring & Media" = "ミラーリングとメディア";
+"Mirroring needs scrcpy." = "ミラーリングにはscrcpyが必要です。";
 "Mirroring {phone}" = "{phone}をミラーリング中";
+"Mirroring, the second screen and cable features need Android platform tools." = "ミラーリング、セカンドスクリーン、ケーブル機能にはAndroid platform toolsが必要です。";
 "Mirrors a second, virtual Android display instead of the phone's own screen — the phone stays usable. Needs Android 11+ and scrcpy 3.0 or newer." = "スマートフォン自身の画面ではなく、2 つ目の仮想 Android ディスプレイをミラーリングします。スマートフォンはそのまま使えます。Android 11 以降と scrcpy 3.0 以降が必要です。";
 "Mirrors a second, virtual Android display instead of the phone's own screen. The phone stays usable. Needs Android 11+ and scrcpy 3.0 or newer." = "スマートフォン本体の画面ではなく、2 つ目の仮想 Android ディスプレイをミラーリングします。スマートフォンは通常どおり使えます。Android 11 以降と scrcpy 3.0 以降が必要です。";
 "Missed call" = "不在着信";
@@ -612,6 +631,7 @@
 "Mount Phone in Finder" = "スマートフォンを Finder にマウント";
 "Mount in Finder" = "Finder にマウント";
 "Mounting…" = "マウント中…";
+"Move closer to the router, switch the phone to 5 GHz Wi-Fi, or use the cable." = "ルーターに近づくか、電話を5 GHzのWi-Fiに切り替えるか、ケーブルを使ってください。";
 "Mute" = "ミュート";
 "Mute Mac banners" = "Mac のバナーをオフ";
 "Mute phone audio" = "スマートフォンの音声をミュート";
@@ -667,9 +687,11 @@
 "No network" = "ネットワークなし";
 "No notifications yet" = "まだ通知はありません";
 "No phone connected" = "スマートフォンが接続されていません";
+"No phone is linked" = "リンクされた電話がありません";
 "No phone linked" = "スマートフォンが未接続";
 "No photos yet" = "まだ写真はありません";
 "No results" = "結果なし";
+"No sidebar. Your phone sits in the toolbar and a floating dock takes you anywhere." = "サイドバーなし。電話はツールバーに、フローティングDockでどこへでも移動できます。";
 "No transfers yet" = "まだ転送はありません";
 "No {kind} transfers yet." = "{kind}の転送はまだありません。";
 "Not allowed" = "許可されていません";
@@ -677,10 +699,12 @@
 "Not connected" = "未接続";
 "Not delivered" = "未配信";
 "Not encrypted" = "暗号化なし";
+"Not found" = "なし";
 "Not granted" = "未許可";
 "Not installed" = "未インストール";
 "Not linked" = "未接続";
 "Not linked — connect your phone first" = "未接続 — 先にスマートフォンを接続してください";
+"Not reported by the phone" = "電話から報告されていません";
 "Not responding" = "応答なし";
 "Not set" = "未設定";
 "Not shown on your Mac at all" = "Mac にはまったく表示されません";
@@ -729,6 +753,7 @@
 "Open Command Bar" = "コマンドバーを開く";
 "Open Devices…" = "デバイスを開く…";
 "Open DroidDock" = "DroidDock を開く";
+"Open DroidDock on the phone and keep it on the same Wi-Fi as this Mac, or plug it in by cable. If it never connects, pair again from the Connection settings." = "電話でDroidDockを開き、このMacと同じWi-Fiに接続したままにするか、ケーブルでつないでください。接続できない場合は、接続設定からもう一度ペアリングしてください。";
 "Open DroidDock on your Android, on the same Wi-Fi as this Mac." = "Mac と同じ Wi-Fi に接続した Android で DroidDock を開いてください。";
 "Open DroidDock on your Android, tap Pair with Mac, and scan this code. Both devices need the same Wi-Fi network." = "Android で DroidDock を開き、「Mac とペアリング」をタップして、このコードをスキャンしてください。両方のデバイスが同じ Wi-Fi ネットワークに接続されている必要があります。";
 "Open DroidDock on your Android, tap Pair with Mac, and scan this code. Both devices need the same Wi-Fi." = "Android で DroidDock を開き、「Mac とペアリング」をタップして、このコードをスキャンしてください。両方のデバイスが同じ Wi-Fi に接続されている必要があります。";
@@ -837,6 +862,7 @@
 "Phone app link required" = "スマートフォンアプリとの接続が必要です";
 "Phone app not linked" = "スマートフォンアプリがリンクされていません";
 "Phone app not paired" = "スマートフォンアプリが未ペアリング";
+"Phone app version" = "電話アプリのバージョン";
 "Phone apps appear here after they send a notification." = "スマートフォンのアプリは、通知を送信するとここに表示されます。";
 "Phone audio" = "スマートフォンの音声";
 "Phone audio: {e}" = "スマートフォンの音声: {e}";
@@ -847,6 +873,7 @@
 "Phone clock" = "スマートフォンの時計";
 "Phone control is off" = "スマートフォンの操作がオフです";
 "Phone disconnected mid-transfer" = "転送中にスマートフォンの接続が切れました";
+"Phone features" = "電話の機能";
 "Phone forgotten" = "スマートフォンを削除しました";
 "Phone in Finder" = "Finder 内のスマートフォン";
 "Phone media in Control Center" = "コントロールセンターにスマートフォンのメディアを表示";
@@ -941,6 +968,7 @@
 "Reconnect automatically" = "自動的に再接続";
 "Reconnect saved phone" = "保存済みのスマートフォンに再接続";
 "Reconnect saved phone  ⌘R" = "保存済みのスマートフォンに再接続  ⌘R";
+"Reconnecting to the phone" = "電話に再接続しています";
 "Reconnecting to {name}…" = "{name} に再接続中…";
 "Reconnecting…" = "再接続中…";
 "Record" = "録画";
@@ -991,6 +1019,7 @@
 "Ring phone" = "スマートフォンを鳴らす";
 "Ringing your phone — it stops itself after a minute" = "スマートフォンを鳴らしています — 1 分後に自動で止まります";
 "Ringing your phone. It stops by itself after a minute." = "スマートフォンを鳴らしています。1 分後に自動で止まります。";
+"Round trip" = "往復時間";
 "Run Setup Check" = "セットアップチェックを実行";
 "SMS sends through your phone's SIM — carrier rates apply as usual." = "SMS はスマートフォンの SIM から送信されるため、通常どおり通信料金がかかります。";
 "Same scrcpy stream, but it plays in DroidDock instead of a separate scrcpy window, and needs no “Allow screen capture” tap on the phone." = "同じ scrcpy ストリームですが、別の scrcpy ウインドウではなく DroidDock 内で再生され、スマートフォンで「画面のキャプチャを許可」をタップする必要がありません。";
@@ -1031,6 +1060,9 @@
 "Screenshot" = "スクリーンショット";
 "Screenshot saved" = "スクリーンショットを保存しました";
 "Screenshot saved to Downloads" = "スクリーンショットを Downloads に保存しました";
+"Scripts" = "スクリプト";
+"Scripts ask first." = "スクリプトは先に確認します。";
+"Scripts can do this without asking." = "スクリプトは確認なしでこれを実行できます。";
 "Search" = "検索";
 "Search apps" = "アプリを検索";
 "Search apps…" = "アプリを検索…";
@@ -1041,6 +1073,7 @@
 "Second screen" = "セカンドスクリーン";
 "Section" = "セクション";
 "Sections" = "セクション";
+"Security" = "セキュリティ";
 "Seek" = "シーク";
 "Select" = "選択";
 "Select a conversation" = "会話を選択";
@@ -1124,7 +1157,7 @@
 "Show on Mac (native banners)" = "Mac に表示（ネイティブバナー）";
 "Show or hide DroidDock" = "DroidDock の表示/非表示";
 "Show pairing code" = "ペアリングコードを表示";
-"Show phone" = "スマートフォンを表示";
+"Show phone" = "電話を表示";
 "Show player" = "プレーヤーを表示";
 "Show the mirror in" = "ミラーリングの表示先";
 "Show the pairing code for your phone" = "スマートフォン用のペアリングコードを表示します";
@@ -1156,6 +1189,7 @@
 "Something went wrong. Try again." = "問題が発生しました。もう一度お試しください。";
 "Speaker" = "スピーカー";
 "Speaker toggle failed — ensure ADB is connected" = "スピーカーを切り替えられませんでした — ADB が接続されているか確認してください";
+"Stalled" = "停止中";
 "Starred" = "お気に入り";
 "Start Camera" = "カメラを開始";
 "Start Desktop Mode" = "デスクトップモードを開始";
@@ -1191,6 +1225,8 @@
 "Streaming" = "配信中";
 "Streams the phone's back camera into a pop-out window over Wi-Fi. Flip to the front camera once it's running." = "スマートフォンの背面カメラを Wi-Fi 経由でポップアウトウインドウに配信します。開始後にフロントカメラへ切り替えられます。";
 "Streams the phone's back camera over Wi-Fi. Flip to the front camera once it's running." = "Wi-Fi 経由でスマートフォンの背面カメラの映像を配信します。起動後にフロントカメラへ切り替えられます。";
+"Support" = "サポート";
+"Support report" = "サポート用レポート";
 "Switch back automatically" = "自動的に元へ戻す";
 "Switch front/back camera" = "フロント／背面カメラを切り替え";
 "Switch this phone to Wi-Fi ADB so you can unplug it" = "このスマートフォンを Wi-Fi ADB に切り替えて、ケーブルを抜けるようにします";
@@ -1222,15 +1258,18 @@
 "Test" = "テスト";
 "Text a contact…" = "連絡先にメッセージ…";
 "Text messages from your phone appear here." = "スマートフォンのテキストメッセージがここに表示されます。";
+"Text sent to phone" = "テキストを電話に送信しました";
 "That Mac app is no longer installed" = "その Mac アプリはインストールされていません";
 "That didn't take. Right-click DroidDock in the Dock › Options › Assign To › None." = "うまくいきませんでした。Dock の DroidDock を右クリックして「オプション」›「割り当て先」›「なし」を選択してください。";
+"The Bluetooth fallback is unavailable while it's off." = "オフの間はBluetoothフォールバックを使えません。";
 "The Dashboard shows a QR code. In the phone app, tap “Pair with Mac” and scan it. Both devices must be on the same Wi-Fi network — if the code won't scan, there's an IP-and-token fallback on the same screen." = "ダッシュボードに QR コードが表示されます。スマートフォンアプリで「Mac とペアリング」をタップしてスキャンしてください。両方のデバイスが同じ Wi-Fi ネットワークに接続されている必要があります。コードを読み取れない場合は、同じ画面に IP とトークンによる代替手段があります。";
 "The Dock's Assign To setting puts its windows on whichever desktop you switch to." = "Dock の「割り当て先」設定により、ウインドウが切り替えた先のデスクトップに表示されます。";
 "The adapter decides which address DroidDock advertises in the QR code and on Bonjour; the server itself accepts connections on every adapter." = "アダプタは、DroidDock が QR コードと Bonjour で通知するアドレスを決めます。サーバ自体はすべてのアダプタで接続を受け付けます。";
 "The current Mac clipboard would be copied to your phone." = "Macの現在のクリップボードがスマートフォンにコピーされます。";
 "The file has been moved or deleted" = "ファイルは移動または削除されています";
 "The in-app mirror needs scrcpy." = "アプリ内ミラーリングには scrcpy が必要です。";
-"The phone card with a few icon tabs. Everything else is under More." = "いくつかのアイコンタブを備えたスマホカードです。そのほかはすべて「その他」にあります。";
+"The link is slow" = "接続が遅くなっています";
+"The phone dials back in by itself. Give it a few seconds, and keep both on the same network." = "電話は自動で再接続します。数秒待ち、両方を同じネットワークに接続したままにしてください。";
 "The phone didn't answer. Check that it's nearby and try again." = "スマートフォンが応答しませんでした。近くにあることを確認して、もう一度お試しください。";
 "The phone finds this Mac again by itself over Bonjour on most networks. If it doesn't, scan the new QR code once." = "ほとんどのネットワークでは、電話が Bonjour でこの Mac を自動的に見つけ直します。見つからない場合は、新しい QR コードを一度スキャンしてください。";
 "The phone isn't responding. Unplug and reconnect it, or tap Reconnect." = "スマートフォンが応答していません。ケーブルを抜き差しするか、「再接続」をタップしてください。";
@@ -1256,6 +1295,7 @@
 "This folder is empty." = "このフォルダは空です。";
 "This is a system shortcut ({name})." = "これはシステムのショートカット（{name}）です。";
 "This is a test notification. If you can read this, banners work." = "これはテスト通知です。これが読めれば、バナーは動作しています。";
+"This link is not encrypted" = "この接続は暗号化されていません";
 "This screen is being rebuilt in native SwiftUI." = "この画面は、ネイティブの SwiftUI で作り直しています。";
 "This window" = "このウインドウ";
 "Thumbnail" = "サムネール";
@@ -1286,6 +1326,7 @@
 "UHID keyboard" = "UHID キーボード";
 "URL" = "URL";
 "USB" = "USB";
+"USB cable" = "USBケーブル";
 "USB or wireless ADB" = "USBまたはワイヤレスADB";
 "USB or wireless ADB, in this app" = "USBまたはワイヤレスADB（このアプリ内）";
 "Unauthorized" = "未承認";
@@ -1306,6 +1347,7 @@
 "Until resumed" = "再開するまで";
 "Up one level" = "1 つ上の階層へ";
 "Update" = "アップデート";
+"Update DroidDock on the phone so it can use an encrypted link." = "暗号化された接続を使えるよう、電話のDroidDockをアップデートしてください。";
 "Update DroidDock on your phone and it will switch to encryption automatically." = "スマートフォンの DroidDock をアップデートすると、自動的に暗号化に切り替わります。";
 "Update failed" = "アップデートに失敗しました";
 "Update to {v}" = "{v} にアップデート";
@@ -1345,6 +1387,7 @@
 "Waiting for {name} to accept" = "{name} の承認を待っています";
 "Waiting for {name} to accept…" = "{name} の承認を待っています…";
 "Waiting to sync" = "同期待ち";
+"Weak" = "弱い";
 "Weak connection" = "接続は不安定です";
 "Welcome" = "ようこそ";
 "Welcome to DroidDock" = "DroidDock へようこそ";
@@ -1383,6 +1426,7 @@
 "Wireless pairing removed" = "ワイヤレスペアリングを解除しました";
 "Wireless pairing, Android 11+" = "ワイヤレスペアリング、Android 11 以降";
 "With an ADB device connected, Start mirroring uses ADB instead of Wi-Fi, so the phone isn't asked to approve capture." = "ADB デバイスが接続されている場合、「ミラーリングを開始」は Wi-Fi ではなく ADB を使うため、スマートフォン側でキャプチャの承認が不要になります。";
+"Without it the Bluetooth fallback can't find the phone." = "これがないとBluetoothフォールバックで電話を見つけられません。";
 "Work from any app. Nothing is set until you record a shortcut. Esc cancels, ⌫ clears." = "どのアプリからでも使えます。ショートカットを記録するまで何も設定されません。Esc で取り消し、⌫ で消去します。";
 "Worth knowing" = "知っておくと便利";
 "Writable." = "書き込み可能。";
@@ -1402,6 +1446,7 @@
 "Your phone on the left, five tabs along the top." = "左にスマホ、上に5つのタブ。";
 "Your phone will be disconnected and must scan the new QR code to pair again." = "スマートフォンの接続が解除されます。再度ペアリングするには、新しい QR コードをスキャンしてください。";
 "Your phone's camera is streaming in its own window. Flip front/back from there." = "スマートフォンのカメラが専用ウインドウで配信中です。フロントと背面の切り替えはそのウインドウで行えます。";
+"adb was not found" = "adbが見つかりません";
 "adb — installed automatically on first launch" = "adb — 初回起動時に自動でインストールされます";
 "and scan this code" = "このコードをスキャンしてください";
 "and {n} more" = "ほか {n} 件";
@@ -1427,6 +1472,7 @@
 "scrcpy installed" = "scrcpy はインストール済みです";
 "scrcpy installs through Homebrew" = "scrcpy は Homebrew でインストールします";
 "scrcpy not installed" = "scrcpy が未インストール";
+"scrcpy was not found" = "scrcpyが見つかりません";
 "scrcpy {v} can't create virtual displays; this applies from 3.0 onward." = "scrcpy {v} では仮想ディスプレイを作成できません。3.0 以降で利用できます。";
 "scrcpy {v} is too old" = "scrcpy {v} は古すぎます";
 "scrcpy's flex display — dragging the window edge resizes the Android display itself instead of scaling a fixed one. Needs scrcpy 4.0 or newer; ignored on older builds." = "scrcpy のフレックスディスプレイです。ウインドウの端をドラッグすると、固定サイズを拡大縮小するのではなく Android のディスプレイ自体のサイズが変わります。scrcpy 4.0 以降が必要で、古いビルドでは無視されます。";

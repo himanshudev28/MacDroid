@@ -134,7 +134,7 @@ struct ConnectionSettingsPane: View {
                     }
                 }
                 LabeledContent(tr("Forget wireless pairing")) {
-                    Button(tr("Forget"), role: .destructive) { Task { try? await Core.shared.adbUnpair(); model.phoneForgotten(); model.toast(.info, tr("Wireless pairing removed")) } }
+                    Button(tr("Forget"), role: .destructive) { forgetWireless() }
                 }
             }
         }
@@ -148,7 +148,18 @@ struct ConnectionSettingsPane: View {
         if n != (model.config?.deviceName ?? "") { model.setSetting("deviceName", n) }
     }
     private func pause(_ until: Double?) {
-        Task { _ = try? await Core.shared.pauseSet(until: until) }   // the core echoes `config`
+        Task {   // the core echoes `config`
+            do { _ = try await Core.shared.pauseSet(until: until) } catch { model.toast(.bad, error.localizedDescription) }
+        }
+    }
+    private func forgetWireless() {
+        Task {
+            do {
+                try await Core.shared.adbUnpair()
+                model.phoneForgotten()
+                model.toast(.info, tr("Wireless pairing removed"))
+            } catch { model.toast(.bad, error.localizedDescription) }
+        }
     }
     private func reconnect() {
         busy = true

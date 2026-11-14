@@ -464,6 +464,101 @@ pub async fn sms_messages(state: State<'_, SharedState>, thread_id: i64) -> Resu
     }))
 }
 
+/// Which optional SMS features the connected phone advertised: `{paging, search}`.
+pub async fn sms_caps(state: State<'_, SharedState>) -> Result<Value, String> {
+    Ok(json!({
+        "paging": ws_server::phone_has_cap(&state, "smspage").await,
+        "search": ws_server::phone_has_cap(&state, "smssearch").await,
+    }))
+}
+
+/// One page of threads: `{threads, more}`. Without the phone's `smspage` cap this is the old fixed first page
+/// (`more:false`), and `offset > 0` is an empty page rather than a repeat of page one.
+pub async fn sms_threads_page(
+    state: State<'_, SharedState>,
+    offset: Option<u32>,
+    limit: Option<u32>,
+) -> Result<Value, String> {
+    let offset = offset.unwrap_or(0);
+    if !ws_server::phone_has_cap(&state, "smspage").await {
+        let threads = if offset == 0 { sms_threads(state).await? } else { json!([]) };
+        return Ok(json!({ "threads": threads, "more": false }));
+    }
+    let reply = ws_server::request_default(
+        &state,
+        map_of(json!({ "type": "sms-threads", "offset": offset, "limit": limit.unwrap_or(30).clamp(1, 500) })),
+    )
+    .await?;
+    Ok(json!({
+        "threads": reply.get("threads").cloned().unwrap_or_else(|| json!([])),
+        "more": reply.get("more").and_then(Value::as_bool).unwrap_or(false),
+    }))
+}
+
+/// A window of one thread: `{messages, address, moreOlder, moreNewer}`. Cursors are `(date, id)` of a message
+/// the Mac already has: `before` loads older, `after` newer, `around` is a message id to centre on.
+/// Without `smspage` only the old newest-60 call exists, so any cursor is ignored.
+pub async fn sms_messages_page(
+    state: State<'_, SharedState>,
+    thread_id: i64,
+    before: Option<[i64; 2]>,
+    after: Option<[i64; 2]>,
+    around: Option<i64>,
+    limit: Option<u32>,
+) -> Result<Value, String> {
+    if !ws_server::phone_has_cap(&state, "smspage").await {
+        let mut v = sms_messages(state, thread_id).await?;
+        v["moreOlder"] = json!(false);
+        v["moreNewer"] = json!(false);
+        return Ok(v);
+    }
+    let mut req = json!({ "type": "sms-messages", "threadId": thread_id });
+    if let Some(l) = limit {
+        req["limit"] = json!(l.clamp(2, 500));
+    }
+    if let Some([d, id]) = before {
+        req["beforeDate"] = json!(d);
+        req["beforeId"] = json!(id);
+    } else if let Some([d, id]) = after {
+        req["afterDate"] = json!(d);
+        req["afterId"] = json!(id);
+    } else if let Some(id) = around {
+        req["around"] = json!(id);
+    }
+    let reply = ws_server::request_default(&state, map_of(req)).await?;
+    Ok(json!({
+        "messages": reply.get("messages").cloned().unwrap_or_else(|| json!([])),
+        "address": reply.get("address").cloned().unwrap_or_else(|| json!("")),
+        "moreOlder": reply.get("moreOlder").and_then(Value::as_bool).unwrap_or(false),
+        "moreNewer": reply.get("moreNewer").and_then(Value::as_bool).unwrap_or(false),
+    }))
+}
+
+/// Search message text across all conversations: `{results, more}`. Errors if the phone lacks `smssearch`
+/// (the UI hides search-in-text then, so this is a guard, not a flow).
+pub async fn sms_search(
+    state: State<'_, SharedState>,
+    query: String,
+    offset: Option<u32>,
+    limit: Option<u32>,
+) -> Result<Value, String> {
+    if !ws_server::phone_has_cap(&state, "smssearch").await {
+        return Err("Update DroidDock on your phone to search message text.".into());
+    }
+    let reply = ws_server::request_default(
+        &state,
+        map_of(json!({
+            "type": "sms-search", "query": query,
+            "offset": offset.unwrap_or(0), "limit": limit.unwrap_or(30).clamp(1, 100),
+        })),
+    )
+    .await?;
+    Ok(json!({
+        "results": reply.get("results").cloned().unwrap_or_else(|| json!([])),
+        "more": reply.get("more").and_then(Value::as_bool).unwrap_or(false),
+    }))
+}
+
 pub async fn sms_send(state: State<'_, SharedState>, address: String, text: String) -> Result<(), String> {
     let reply = ws_server::request(
         &state,
@@ -627,6 +722,11 @@ pub async fn health_check(
 /// those into "done" would leave someone waiting for a screen that never came.
 pub async fn health_fix(state: State<'_, SharedState>, id: String) -> Result<String, String> {
     health::fix(&state, &id).await
+}
+
+/// Tool and core versions for the link-health view and Copy Diagnostics.
+pub async fn tool_versions(app: AppHandle) -> Result<health::ToolVersions, String> {
+    Ok(health::tool_versions(&app).await)
 }
 
 // ── Phase 10: media remote ───────────────────────────────────────────────

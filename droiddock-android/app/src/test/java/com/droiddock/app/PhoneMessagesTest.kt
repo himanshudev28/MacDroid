@@ -112,8 +112,13 @@ class VideoPauseGateTest {
 class FileRepoMkdirTest {
     private lateinit var root: java.io.File
 
-    @org.junit.Before fun setUp() { root = java.nio.file.Files.createTempDirectory("mk").toFile() }
-    @org.junit.After fun tearDown() { root.deleteRecursively() }
+    // Canonical, because FileRepo now resolves paths (macOS temp dirs sit behind a /var symlink), and
+    // registered as the storage root, because FileRepo refuses anything outside shared storage.
+    @org.junit.Before fun setUp() {
+        root = java.nio.file.Files.createTempDirectory("mk").toFile().canonicalFile
+        StoragePaths.rootsForTest = listOf(root)
+    }
+    @org.junit.After fun tearDown() { StoragePaths.rootsForTest = null; root.deleteRecursively() }
 
     private fun rejects(name: String) {
         val e = runCatching { FileRepo.mkdir(root.path, name) }.exceptionOrNull()

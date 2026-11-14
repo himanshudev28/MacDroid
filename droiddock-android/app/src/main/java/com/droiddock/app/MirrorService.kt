@@ -162,6 +162,7 @@ class MirrorService : Service() {
         enc.start()
         encoder = enc
         running = true
+        startedAt = android.os.SystemClock.elapsedRealtime()
         streaming = true
         videoGate.reset()
         this.source = source
@@ -552,7 +553,7 @@ class MirrorService : Service() {
     }
 
     override fun onDestroy() {
-        if (instance === this) instance = null
+        if (instance === this) { instance = null; startedAt = 0L }
         DockWidget.refresh(applicationContext)
         startedJson = null
         releaseStream()
@@ -626,6 +627,9 @@ class MirrorService : Service() {
         private const val VIDEO_BACKLOG_BYTES = 1_500_000L
 
         @Volatile var instance: MirrorService? = null
+
+        /** [android.os.SystemClock.elapsedRealtime] when the encoder started; 0 while no stream is running. UI read-only. */
+        @Volatile var startedAt: Long = 0L
 
         /**
          * Encoder settings the Mac asked for on `mirror-start` / `camera-start`.

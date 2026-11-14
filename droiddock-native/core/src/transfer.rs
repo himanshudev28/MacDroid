@@ -21,6 +21,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use crate::host::{AppHandle, Emitter, Manager};
 use tokio::fs::File;
@@ -49,6 +50,23 @@ const EARLY_MAX_IDS: usize = 16;
 const EARLY_TTL: Duration = Duration::from_secs(15);
 /// A receive that hears nothing for this long is dead (dropped `Done`, wedged phone).
 const RECV_IDLE: Duration = Duration::from_secs(60);
+/// Chunks (about 256 KiB each, so ~8 MiB) the WS read loop may have queued for
+/// one receiver before it waits for the disk to catch up.
+const RECV_QUEUE: usize = 32;
+/// How long the read loop waits for a full receiver queue before giving that
+/// transfer up. Past this the disk is not keeping up at all.
+const RECV_STALL: Duration = Duration::from_secs(10);
+/// At most this many phone-initiated pushes at once.
+const MAX_PHONE_PUSHES: usize = 4;
+/// Free space always left on the volume (a push needing more than the rest is refused).
+const FREE_MARGIN: u64 = 512 * 1024 * 1024;
+/// Re-check free space this often while receiving with no usable announced size.
+const FREE_RECHECK: u64 = 64 * 1024 * 1024;
+/// A share's announced size can be off (content providers), but not by more than
+/// this much: `max(16 MiB, size / 4)`.
+fn phone_push_tolerance(size: u64) -> u64 {
+    (16 * 1024 * 1024).max(size / 4)
+}
 
 struct Early {
     at: Instant,
@@ -78,7 +96,8 @@ enum SendEvent {
 /// because they live in different maps.
 #[derive(Default)]
 pub struct TransferRegistry {
-    recv: Mutex<HashMap<u32, mpsc::UnboundedSender<RecvEvent>>>,
+    recv: Mutex<HashMap<u32, mpsc::Sender<RecvEvent>>>,
+    phone_pushes: Arc<std::sync::atomic::AtomicUsize>,
     send: Mutex<HashMap<u32, mpsc::UnboundedSender<SendEvent>>>,
     early: std::sync::Mutex<HashMap<u32, Early>>,
     next_mac_id: AtomicU32,
@@ -95,19 +114,34 @@ impl TransferRegistry {
     /// Register a receiver and replay anything that arrived before it existed.
     /// Holds the `recv` lock throughout so a chunk can't slip between the drain
     /// and the insert (`buffer_early` is called under the same lock).
-    async fn register_recv(&self, id: u32, tx: mpsc::UnboundedSender<RecvEvent>) {
+    async fn register_recv(&self, id: u32) -> mpsc::Receiver<RecvEvent> {
         let mut recv = self.recv.lock().await;
         let early = self.early.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+        // The replay is queued before anyone is reading, so the channel is sized
+        // to hold it on top of the normal window (try_send cannot then fail).
+        let backlog = early.as_ref().map_or(0, |e| e.events.len() + 1);
+        let (tx, rx) = mpsc::channel(RECV_QUEUE + backlog);
         if let Some(e) = early {
             if e.poisoned || e.at.elapsed() >= EARLY_TTL {
-                let _ = tx.send(RecvEvent::Error("early data was lost".into()));
+                let _ = tx.try_send(RecvEvent::Error("early data was lost".into()));
             } else {
                 for ev in e.events {
-                    let _ = tx.send(ev);
+                    let _ = tx.try_send(ev);
                 }
             }
         }
         recv.insert(id, tx);
+        rx
+    }
+
+    /// Reserve one of the `MAX_PHONE_PUSHES` slots; dropping the guard frees it.
+    fn take_push_slot(&self) -> Option<PushSlot> {
+        let prev = self.phone_pushes.fetch_add(1, Ordering::AcqRel);
+        if prev >= MAX_PHONE_PUSHES {
+            self.phone_pushes.fetch_sub(1, Ordering::AcqRel);
+            return None;
+        }
+        Some(PushSlot(self.phone_pushes.clone()))
     }
 
     /// Hold an event for a receiver that isn't registered yet. Caller holds the `recv` lock.
@@ -148,12 +182,21 @@ impl TransferRegistry {
     /// binary transfers have no such timeout, hence this).
     pub async fn abort_all(&self) {
         for (_, tx) in self.recv.lock().await.drain() {
-            let _ = tx.send(RecvEvent::Cancel);
+            // A full queue just drops the sender: the receiver drains, then sees
+            // the channel close and ends as "aborted".
+            let _ = tx.try_send(RecvEvent::Cancel);
         }
         for (_, tx) in self.send.lock().await.drain() {
             let _ = tx.send(SendEvent::Cancel);
         }
         self.early.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+}
+
+struct PushSlot(Arc<std::sync::atomic::AtomicUsize>);
+impl Drop for PushSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -213,11 +256,34 @@ pub async fn on_chunk(state: &SharedState, transfer_id: u32, buf: &[u8]) {
         return;
     }
     let payload = buf[HEADER..].to_vec();
-    let recv = state.transfers.recv.lock().await;
-    if let Some(tx) = recv.get(&transfer_id) {
-        let _ = tx.send(RecvEvent::Chunk(payload));
-    } else {
-        state.transfers.buffer_early(transfer_id, RecvEvent::Chunk(payload));
+    let tx = {
+        let recv = state.transfers.recv.lock().await;
+        match recv.get(&transfer_id) {
+            Some(tx) => tx.clone(),
+            None => {
+                state.transfers.buffer_early(transfer_id, RecvEvent::Chunk(payload));
+                return;
+            }
+        }
+    };
+    deliver(state, transfer_id, &tx, RecvEvent::Chunk(payload)).await;
+}
+
+/// Hand an event to a receiver, waiting while its queue is full. This is the
+/// backpressure: the WS read loop is the only producer, so waiting here stops it
+/// reading the socket and TCP flow control slows the phone to the disk's speed.
+/// It is bounded (`RECV_STALL`) so one wedged disk cannot freeze the phone's
+/// other traffic for good; past that the transfer is dropped (the registry
+/// entry goes, the receiver drains and reports "aborted"). The recv lock is
+/// never held across the wait, so cancels and other transfers still get through
+/// once the wait ends.
+async fn deliver(state: &SharedState, id: u32, tx: &mpsc::Sender<RecvEvent>, ev: RecvEvent) {
+    match tokio::time::timeout(RECV_STALL, tx.send(ev)).await {
+        Ok(_) => {}
+        Err(_) => {
+            eprintln!("[transfer] receiver {id} is not draining; dropping the transfer");
+            state.transfers.recv.lock().await.remove(&id);
+        }
     }
 }
 
@@ -289,13 +355,20 @@ fn err_str(raw: &Value) -> String {
 
 async fn send_recv(state: &SharedState, tid: Option<u32>, ev: RecvEvent) {
     if let Some(tid) = tid {
-        let recv = state.transfers.recv.lock().await;
-        if let Some(tx) = recv.get(&tid) {
-            let _ = tx.send(ev);
-        } else if matches!(ev, RecvEvent::Done | RecvEvent::Error(_)) {
-            // `fs-pull-done` can beat the receiver's registration too.
-            state.transfers.buffer_early(tid, ev);
-        }
+        let tx = {
+            let recv = state.transfers.recv.lock().await;
+            match recv.get(&tid) {
+                Some(tx) => tx.clone(),
+                None => {
+                    if matches!(ev, RecvEvent::Done | RecvEvent::Error(_)) {
+                        // `fs-pull-done` can beat the receiver's registration too.
+                        state.transfers.buffer_early(tid, ev);
+                    }
+                    return;
+                }
+            }
+        };
+        deliver(state, tid, &tx, ev).await;
     }
 }
 
@@ -502,8 +575,7 @@ pub async fn pull(
         .ok_or("phone did not return a transferId")? as u32;
     let size = begin.get("size").and_then(Value::as_u64).unwrap_or(0);
 
-    let (tx, rx) = mpsc::unbounded_channel::<RecvEvent>();
-    state.transfers.register_recv(transfer_id, tx).await;
+    let rx = state.transfers.register_recv(transfer_id).await;
 
     let tracked = track.map(|source| {
         transfer_log::start(
@@ -543,22 +615,32 @@ async fn start_phone_push(app: &AppHandle, state: &SharedState, raw: &Value) {
         .unwrap_or("download")
         .to_string();
     let size = raw.get("size").and_then(Value::as_u64).unwrap_or(0);
+    let Some(slot) = state.transfers.take_push_slot() else {
+        ws_server::push(state, json!({ "type": "phone-push-error", "reqId": req_id, "error": "too many transfers in progress" })).await;
+        return;
+    };
     let transfer_id = state
         .transfers
         .next_mac_id
         .fetch_add(1, Ordering::Relaxed)
         + MAC_ID_BASE;
 
-    let Some(dest) = download_dir(app).map(|d| unique_dest(&d, &sanitize(&name))) else {
+    let Some(dir) = download_dir(app) else {
         ws_server::push(state, json!({ "type": "phone-push-error", "reqId": req_id, "error": "no downloads dir" })).await;
         return;
     };
+    if let Some(free) = free_space(&dir) {
+        if !fits_free_space(size, free) {
+            ws_server::push(state, json!({ "type": "phone-push-error", "reqId": req_id, "error": "not enough free disk space" })).await;
+            return;
+        }
+    }
+    let dest = unique_dest(&dir, &sanitize(&name));
 
     // Ack so the phone starts streaming chunks against this transferId.
     ws_server::push(state, json!({ "type": "phone-push", "reqId": req_id, "transferId": transfer_id })).await;
 
-    let (tx, rx) = mpsc::unbounded_channel::<RecvEvent>();
-    state.transfers.register_recv(transfer_id, tx).await;
+    let rx = state.transfers.register_recv(transfer_id).await;
 
     let tracked = transfer_log::start(
         app,
@@ -574,6 +656,7 @@ async fn start_phone_push(app: &AppHandle, state: &SharedState, raw: &Value) {
     let app = app.clone();
     let state2 = state.clone();
     tokio::spawn(async move {
+        let _slot = slot; // held until the transfer ends, however it ends
         let result = receive_to_file(false, &app, &dest, transfer_id, &name, size, "phone", Some(tracked.key()), rx).await;
         tracked.finish(result.clone().map(|()| Some(dest.clone())).into());
         let ok = result.is_ok();
@@ -599,7 +682,7 @@ async fn receive_to_file(
     size: u64,
     dir: &'static str,
     log_key: Option<u64>,
-    rx: mpsc::UnboundedReceiver<RecvEvent>,
+    rx: mpsc::Receiver<RecvEvent>,
 ) -> Result<(), String> {
     let mut last_progress: Option<Instant> = None;
     let outcome = receive_core(dest, size, strict_size, RECV_IDLE, rx, |received| {
@@ -640,7 +723,7 @@ async fn receive_core(
     size: u64,
     strict_size: bool,
     idle: Duration,
-    mut rx: mpsc::UnboundedReceiver<RecvEvent>,
+    mut rx: mpsc::Receiver<RecvEvent>,
     mut on_progress: impl FnMut(u64),
 ) -> Result<u64, (u64, String)> {
     if let Some(parent) = dest.parent() {
@@ -651,16 +734,36 @@ async fn receive_core(
         .await
         .map_err(|e| (0, format!("cannot create file: {e}")))?;
     let mut received: u64 = 0;
+    // Strict (pull): the phone told us the exact size, so one byte more is an error.
+    // Lenient (share sheet): the announced size can be wrong, so allow slack; with
+    // no size at all (0) the free-space re-check below is the only bound.
+    let limit = match (size, strict_size) {
+        (0, _) => u64::MAX,
+        (n, true) => n,
+        (n, false) => n.saturating_add(phone_push_tolerance(n)),
+    };
+    let mut next_free_check = FREE_RECHECK;
 
     let outcome = loop {
         match tokio::time::timeout(idle, rx.recv()).await {
             Err(_) => break Err("transfer stalled".to_string()),
             Ok(Some(RecvEvent::Chunk(bytes))) => {
+                if received.saturating_add(bytes.len() as u64) > limit {
+                    break Err(format!("received more than the announced {size} bytes"));
+                }
                 if file.write_all(&bytes).await.is_err() {
                     break Err("write error".to_string());
                 }
                 received += bytes.len() as u64;
                 on_progress(received);
+                if !strict_size && received >= next_free_check {
+                    next_free_check = received + FREE_RECHECK;
+                    if let Some(free) = dest.parent().and_then(free_space) {
+                        if free < FREE_MARGIN / 2 {
+                            break Err("not enough free disk space".to_string());
+                        }
+                    }
+                }
             }
             Ok(Some(RecvEvent::Done)) => break Ok(()),
             // Channel closed without a Done: the registry entry was dropped
@@ -694,7 +797,10 @@ async fn receive_core(
     });
     match outcome {
         Ok(()) => match tokio::fs::rename(&part, dest).await {
-            Ok(()) => Ok(received),
+            Ok(()) => {
+                mark_quarantined(dest);
+                Ok(received)
+            }
             Err(e) => {
                 let _ = tokio::fs::remove_file(&part).await;
                 Err((received, format!("cannot save file: {e}")))
@@ -722,6 +828,60 @@ fn json_map(v: Value) -> serde_json::Map<String, Value> {
         Value::Object(m) => m,
         _ => serde_json::Map::new(),
     }
+}
+
+/// Free bytes on the volume holding `path`, or None when it cannot be read.
+#[cfg(target_os = "macos")]
+pub(crate) fn free_space(path: &Path) -> Option<u64> {
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
+        return None;
+    }
+    Some((st.f_bavail as u64).saturating_mul(st.f_frsize as u64))
+}
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn free_space(_path: &Path) -> Option<u64> {
+    None
+}
+
+/// Whether an announced `size` fits in `free` bytes while leaving `FREE_MARGIN`.
+fn fits_free_space(size: u64, free: u64) -> bool {
+    size == 0 || size.saturating_add(FREE_MARGIN) <= free
+}
+
+/// Mark a completed received file the way a browser download is marked
+/// (`com.apple.quarantine`, `0081;<hex unix time>;DroidDock;`), so Gatekeeper
+/// treats it like any other download. Best effort: a failure is only logged.
+pub(crate) fn mark_quarantined(path: &Path) {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if let Err(e) = set_quarantine(path, &quarantine_value(secs)) {
+        eprintln!("[transfer] could not set quarantine flag on {}: {e}", path.display());
+    }
+}
+
+fn quarantine_value(unix_secs: u64) -> String {
+    format!("0081;{unix_secs:x};DroidDock;")
+}
+
+#[cfg(target_os = "macos")]
+fn set_quarantine(path: &Path, value: &str) -> std::io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let p = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+    let name = std::ffi::CString::new("com.apple.quarantine").expect("no NUL");
+    let rc = unsafe {
+        libc::setxattr(p.as_ptr(), name.as_ptr(), value.as_ptr().cast(), value.len(), 0, 0)
+    };
+    if rc == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) }
+}
+#[cfg(not(target_os = "macos"))]
+fn set_quarantine(_path: &Path, _value: &str) -> std::io::Result<()> {
+    Ok(())
 }
 
 fn with_part_ext(dest: &Path) -> PathBuf {
@@ -782,9 +942,9 @@ mod tests {
     }
 
     async fn run(dest: &Path, size: u64, idle: Duration, evs: Vec<RecvEvent>, keep_open: bool) -> Result<u64, (u64, String)> {
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::channel(1024);
         for e in evs {
-            tx.send(e).unwrap();
+            tx.try_send(e).unwrap();
         }
         let r = receive_core(dest, size, true, idle, rx, |_| {}).await;
         drop(tx);
@@ -831,8 +991,8 @@ mod tests {
     async fn a_silent_phone_times_out_instead_of_hanging() {
         let d = tmp("idle");
         let dest = d.join("a.bin");
-        let (tx, rx) = mpsc::unbounded_channel::<RecvEvent>();
-        tx.send(RecvEvent::Chunk(vec![1])).unwrap();
+        let (tx, rx) = mpsc::channel::<RecvEvent>(1024);
+        tx.try_send(RecvEvent::Chunk(vec![1])).unwrap();
         let r = receive_core(&dest, 5, true, Duration::from_millis(80), rx, |_| {}).await;
         assert!(r.unwrap_err().1.contains("stalled"));
         assert!(!with_part_ext(&dest).exists());
@@ -851,8 +1011,7 @@ mod tests {
             reg.buffer_early(8, RecvEvent::Chunk(vec![0; EARLY_MAX_BYTES]));
             reg.buffer_early(8, RecvEvent::Chunk(vec![0; 1]));
         }
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        reg.register_recv(7, tx).await;
+        let mut rx = reg.register_recv(7).await;
         let mut bytes = Vec::new();
         let mut done = false;
         while let Ok(ev) = rx.try_recv() {
@@ -883,8 +1042,7 @@ mod tests {
             reg.buffer_early(9, RecvEvent::Chunk(vec![1])); // over the cap -> poisoned
             reg.buffer_early(9, RecvEvent::Done); // ignored once poisoned
         }
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        reg.register_recv(9, tx).await;
+        let mut rx = reg.register_recv(9).await;
         assert!(matches!(rx.try_recv(), Ok(RecvEvent::Error(_))));
         assert!(rx.try_recv().is_err(), "no data or Done is replayed after a hole");
     }
@@ -893,17 +1051,90 @@ mod tests {
     async fn phone_push_accepts_a_wrong_announced_size_but_pull_does_not() {
         let d = tmp("lenient");
         let dest = d.join("p.bin");
-        let (tx, rx) = mpsc::unbounded_channel();
-        tx.send(RecvEvent::Chunk(vec![1, 2, 3])).unwrap();
-        tx.send(RecvEvent::Done).unwrap();
+        let (tx, rx) = mpsc::channel(1024);
+        tx.try_send(RecvEvent::Chunk(vec![1, 2, 3])).unwrap();
+        tx.try_send(RecvEvent::Done).unwrap();
         let r = receive_core(&dest, 99, false, Duration::from_secs(5), rx, |_| {}).await;
         assert_eq!(r.unwrap(), 3);
         assert_eq!(std::fs::read(&dest).unwrap(), vec![1, 2, 3]);
         let dest2 = d.join("q.bin");
-        let (tx, rx) = mpsc::unbounded_channel();
-        tx.send(RecvEvent::Chunk(vec![1, 2, 3])).unwrap();
-        tx.send(RecvEvent::Done).unwrap();
+        let (tx, rx) = mpsc::channel(1024);
+        tx.try_send(RecvEvent::Chunk(vec![1, 2, 3])).unwrap();
+        tx.try_send(RecvEvent::Done).unwrap();
         assert!(receive_core(&dest2, 99, true, Duration::from_secs(5), rx, |_| {}).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn phone_push_stops_at_announced_size_plus_tolerance() {
+        let d = tmp("cap");
+        let dest = d.join("c.bin");
+        let size = 1024u64;
+        let big = vec![0u8; (size + phone_push_tolerance(size) + 1) as usize];
+        let (tx, rx) = mpsc::channel(8);
+        tx.try_send(RecvEvent::Chunk(big)).unwrap();
+        tx.try_send(RecvEvent::Done).unwrap();
+        let r = receive_core(&dest, size, false, Duration::from_secs(5), rx, |_| {}).await;
+        assert!(r.unwrap_err().1.contains("more than"));
+        assert!(!dest.exists() && !with_part_ext(&dest).exists());
+        // Within the tolerance a wrong estimate still works.
+        let (tx, rx) = mpsc::channel(8);
+        tx.try_send(RecvEvent::Chunk(vec![1; 2000])).unwrap();
+        tx.try_send(RecvEvent::Done).unwrap();
+        assert_eq!(receive_core(&dest, size, false, Duration::from_secs(5), rx, |_| {}).await.unwrap(), 2000);
+        // Unannounced size (0) is not capped by the size check.
+        let dest2 = d.join("z.bin");
+        let (tx, rx) = mpsc::channel(8);
+        tx.try_send(RecvEvent::Chunk(vec![1; 5000])).unwrap();
+        tx.try_send(RecvEvent::Done).unwrap();
+        assert_eq!(receive_core(&dest2, 0, false, Duration::from_secs(5), rx, |_| {}).await.unwrap(), 5000);
+        // A strict pull allows no excess at all.
+        let dest3 = d.join("s.bin");
+        let (tx, rx) = mpsc::channel(8);
+        tx.try_send(RecvEvent::Chunk(vec![1; 11])).unwrap();
+        tx.try_send(RecvEvent::Done).unwrap();
+        assert!(receive_core(&dest3, 10, true, Duration::from_secs(5), rx, |_| {}).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_full_queue_applies_backpressure_instead_of_growing() {
+        let (tx, mut rx) = mpsc::channel::<RecvEvent>(2);
+        tx.try_send(RecvEvent::Chunk(vec![1])).unwrap();
+        tx.try_send(RecvEvent::Chunk(vec![2])).unwrap();
+        let tx2 = tx.clone();
+        let blocked = tokio::spawn(async move { tx2.send(RecvEvent::Chunk(vec![3])).await.is_ok() });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!blocked.is_finished(), "producer waits while the queue is full");
+        let _ = rx.recv().await;
+        assert!(blocked.await.unwrap(), "and resumes once the consumer drains");
+    }
+
+    #[test]
+    fn push_slots_are_capped_and_released() {
+        let reg = TransferRegistry::default();
+        let slots: Vec<_> = (0..MAX_PHONE_PUSHES).map(|_| reg.take_push_slot().unwrap()).collect();
+        assert!(reg.take_push_slot().is_none());
+        drop(slots);
+        assert!(reg.take_push_slot().is_some());
+    }
+
+    #[test]
+    fn free_space_gate_keeps_a_margin() {
+        assert!(fits_free_space(0, 0), "unknown size is not refused up front");
+        assert!(!fits_free_space(1000, 1000 + FREE_MARGIN - 1));
+        assert!(fits_free_space(1000, 1000 + FREE_MARGIN));
+        assert!(free_space(&std::env::temp_dir()).is_some_and(|f| f > 0));
+    }
+
+    #[tokio::test]
+    async fn completed_file_gets_a_quarantine_flag_that_matches_the_browser_format() {
+        assert_eq!(quarantine_value(0x6000_0000), "0081;60000000;DroidDock;");
+        let d = tmp("q");
+        let dest = d.join("q.bin");
+        let r = run(&dest, 1, Duration::from_secs(5), vec![RecvEvent::Chunk(vec![1]), RecvEvent::Done], false).await;
+        assert!(r.is_ok());
+        let out = std::process::Command::new("xattr").arg("-p").arg("com.apple.quarantine").arg(&dest).output().unwrap();
+        let v = String::from_utf8_lossy(&out.stdout);
+        assert!(v.starts_with("0081;") && v.trim_end().ends_with(";DroidDock;"), "got {v:?}");
     }
 
     #[test]

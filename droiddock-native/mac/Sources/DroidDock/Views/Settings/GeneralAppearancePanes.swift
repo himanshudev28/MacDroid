@@ -282,23 +282,43 @@ private struct LayoutTile: View {
             VStack(spacing: 0) {
                 switch layout {
                 case .phoneTabs:
+                    // Live tabs: a knob on the first (with its count dot), a progress ring on Files, a green "live" dot on
+                    // Screen; under the card, the extras as a small segmented track.
                     HStack(spacing: 0) {
                         toolbarStrip.frame(width: W * 0.30)
-                        HStack(spacing: 2) {
+                        HStack(spacing: 1.5) {
                             ForEach(0..<5, id: \.self) { i in
-                                Capsule().fill(i == 0 ? accent.opacity(0.75) : ink.opacity(0.4)).frame(width: 8, height: 4) }
-                        }.frame(maxWidth: .infinity)
+                                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                                    .fill(i == 0 ? accent.opacity(0.75) : ink.opacity(0.35))
+                                    .frame(width: 9, height: 4.5)
+                                    .overlay(alignment: .topTrailing) {
+                                        if i == 0 { Circle().fill(accent).frame(width: 3, height: 3).offset(x: 1.5, y: -1.5) }
+                                        if i == 1 { Circle().trim(from: 0, to: 0.65).stroke(accent, lineWidth: 0.8).rotationEffect(.degrees(-90))
+                                                .frame(width: 3.5, height: 3.5).offset(x: 2, y: -2) }
+                                        if i == 4 { Circle().fill(Color(nsColor: .systemGreen)).frame(width: 2.5, height: 2.5).offset(x: 1.5, y: -1.5) }
+                                    }
+                            }
+                        }
+                        .padding(1).background(RoundedRectangle(cornerRadius: 2.5, style: .continuous).fill(ink.opacity(0.15)))
+                        .frame(maxWidth: .infinity)
                     }.frame(height: 10)
                     HStack(spacing: 0) {
                         ZStack(alignment: .bottom) {
                             sideFill
                             VStack(spacing: 3) {
                                 card.padding(.horizontal, 4).padding(.top, 2)
-                                HStack(spacing: 3) { ForEach(0..<5, id: \.self) { _ in Circle().fill(ink.opacity(0.6)).frame(width: 3, height: 3) } }
-                                    .padding(.bottom, 3)
+                                HStack(spacing: 0) {
+                                    ForEach(0..<5, id: \.self) { _ in Circle().fill(ink.opacity(0.6)).frame(width: 3, height: 3).frame(maxWidth: .infinity) }
+                                }
+                                .padding(.vertical, 2)
+                                .background(RoundedRectangle(cornerRadius: 2.5, style: .continuous).fill(ink.opacity(0.15)))
+                                .padding(.horizontal, 4).padding(.bottom, 3)
                             }
                         }.frame(width: W * 0.30)
-                        contentBars
+                        VStack(spacing: 0) {
+                            Capsule().fill(ink.opacity(0.3)).frame(width: 26, height: 4).padding(.top, 4)
+                            contentBars
+                        }
                     }
                 case .classic:
                     HStack(spacing: 0) {
@@ -306,11 +326,19 @@ private struct LayoutTile: View {
                         Spacer(minLength: 0)
                     }.frame(height: 10)
                     HStack(spacing: 0) {
+                        // Finder-style: the phone as one device row on top, then foldable sections; card only in the inspector.
                         VStack(alignment: .leading, spacing: 3) {
-                            bar(12, 2.5, 0.6)
-                            row(true); row(); row()
-                            bar(12, 2.5, 0.6)
-                            row(); row(); row()
+                            HStack(spacing: 2) {
+                                RoundedRectangle(cornerRadius: 1.5, style: .continuous).fill(ink.opacity(0.55)).frame(width: 5, height: 6)
+                                VStack(alignment: .leading, spacing: 1.5) { bar(14, 2.5, 0.7); bar(9, 2, 0.4) }
+                            }
+                            .padding(.bottom, 1)
+                            row(true)
+                            HStack(spacing: 1.5) { bar(10, 2.5, 0.6); Image(systemName: "chevron.down").font(.system(size: 3, weight: .bold)).foregroundStyle(ink.opacity(0.5)) }
+                            row(); row()
+                            HStack(spacing: 1.5) { bar(10, 2.5, 0.6); Image(systemName: "chevron.right").font(.system(size: 3, weight: .bold)).foregroundStyle(ink.opacity(0.5)) }
+                            HStack(spacing: 1.5) { bar(10, 2.5, 0.6); Image(systemName: "chevron.down").font(.system(size: 3, weight: .bold)).foregroundStyle(ink.opacity(0.5)) }
+                            row()
                             Spacer(minLength: 0)
                         }.padding(4).frame(width: W * 0.22).background(sideFill)
                         contentBars
@@ -320,32 +348,54 @@ private struct LayoutTile: View {
                 case .grouped:
                     HStack(spacing: 0) { toolbarStrip.frame(width: W * 0.30); Spacer(minLength: 0) }.frame(height: 10)
                     HStack(spacing: 0) {
+                        // Compact phone header, 2×2 glance tiles (one selected), then folding groups.
                         VStack(alignment: .leading, spacing: 3) {
-                            card.frame(height: (H - 10) * 0.36)
-                            bar(12, 2.5, 0.6); row(true); row(); row()
+                            HStack(spacing: 3) {
+                                RoundedRectangle(cornerRadius: 2, style: .continuous).fill(ink.opacity(0.55)).frame(width: 8, height: 8)
+                                VStack(alignment: .leading, spacing: 1.5) { bar(18, 2.5, 0.7); bar(11, 2, 0.4) }
+                            }
+                            Grid(horizontalSpacing: 2.5, verticalSpacing: 2.5) {
+                                ForEach(0..<2, id: \.self) { r in
+                                    GridRow {
+                                        ForEach(0..<2, id: \.self) { c in
+                                            RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                                                .fill(r == 0 && c == 0 ? accent.opacity(0.85) : ink.opacity(0.22))
+                                                .frame(height: 10)
+                                                .overlay(alignment: .topLeading) {
+                                                    Circle().fill(r == 0 && c == 0 ? Color.white.opacity(0.9) : ink.opacity(0.55))
+                                                        .frame(width: 3.5, height: 3.5).padding(2)
+                                                }
+                                        }
+                                    }
+                                }
+                            }
+                            bar(12, 2.5, 0.6); row(); row()
                             bar(12, 2.5, 0.6); row(); row()
                             Spacer(minLength: 0)
                         }.padding(4).frame(width: W * 0.30).background(sideFill)
                         contentBars
                     }
                 case .minimal:
-                    HStack(spacing: 0) {
-                        toolbarStrip.frame(width: W * 0.34)
-                        HStack(spacing: 3) {
-                            ForEach(0..<5, id: \.self) { i in Circle().fill(i == 0 ? accent.opacity(0.75) : ink.opacity(0.4)).frame(width: 4.5, height: 4.5) }
-                            Capsule().fill(ink.opacity(0.4)).frame(width: 6, height: 3)
-                        }.frame(maxWidth: .infinity)
+                    // No sidebar: device chip in the toolbar, full-width content, a floating dock at the bottom.
+                    HStack(spacing: 4) {
+                        toolbarStrip.frame(width: W * 0.16)
+                        Capsule().fill(selected ? accent.opacity(0.55) : ink.opacity(0.55)).frame(width: W * 0.20, height: 5)
+                        Spacer(minLength: 0)
                     }.frame(height: 10)
-                    HStack(spacing: 0) {
-                        VStack(spacing: 3) {
-                            card.frame(height: (H - 10) * 0.62)
-                            HStack(spacing: 2) { ForEach(0..<6, id: \.self) { _ in Circle().fill(ink.opacity(0.6)).frame(width: 3.5, height: 3.5) } }
-                            Spacer(minLength: 0)
-                        }.padding(4).frame(width: W * 0.34).background(sideFill)
+                    ZStack(alignment: .bottom) {
                         VStack(alignment: .leading, spacing: 5) {
-                            ForEach(0..<3, id: \.self) { _ in bar(50, 6, 0.2) }
+                            bar(W * 0.30, 5, 0.35)
+                            ForEach(0..<3, id: \.self) { i in bar(W * (0.78 - CGFloat(i) * 0.12), 5, 0.2) }
                             Spacer(minLength: 0)
-                        }.padding(6).frame(maxWidth: .infinity, alignment: .leading)
+                        }.padding(8).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        HStack(spacing: 3) {
+                            ForEach(0..<7, id: \.self) { i in
+                                Circle().fill(i == 1 ? accent.opacity(0.8) : ink.opacity(0.55)).frame(width: 4.5, height: 4.5)
+                            }
+                        }
+                        .padding(.horizontal, 6).padding(.vertical, 4)
+                        .background(Capsule(style: .continuous).fill(ink.opacity(0.9)))
+                        .padding(.bottom, 6)
                     }
                 }
             }

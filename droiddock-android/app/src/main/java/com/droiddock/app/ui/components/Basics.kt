@@ -24,6 +24,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -80,11 +81,13 @@ fun Modifier.dockClickable(
     enabled: Boolean = true,
     role: Role = Role.Button,
     onClickLabel: String? = null,
+    /** Lean toward the finger in DEPTH (Liquid Glass). Cards and tiles only; never list rows. */
+    tilt: Boolean = false,
     onClick: () -> Unit,
 ): Modifier {
     val interaction = remember { MutableInteractionSource() }
     return this
-        .dockPress(interaction, enabled)
+        .dockPress(interaction, enabled, tilt = tilt)
         .clickable(
             interactionSource = interaction,
             indication = ripple(),
@@ -179,6 +182,31 @@ fun DockDivider(modifier: Modifier = Modifier, inset: Dp = 0.dp) {
 }
 
 /** A shape's surface as the style draws it: tonal fill, or hairline outline on the page. */
+private val TICK_DX = floatArrayOf(1f, -1f, 1f, -1f)
+private val TICK_DY = floatArrayOf(1f, 1f, -1f, -1f)
+
+/**
+ * INSTRUMENT (Minimal Mono) only: four small L-shaped ticks at the corners, like a machined panel or a viewfinder.
+ * No-op in the other signatures. Draw phase only.
+ */
+@Composable
+fun Modifier.dockCornerTicks(): Modifier {
+    if (DockTheme.signature != com.droiddock.app.ui.theme.DockSignature.INSTRUMENT) return this
+    val ink = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+    return this.drawWithContent {
+        drawContent()
+        val l = 7.dp.toPx(); val t = 1.dp.toPx(); val w = size.width; val h = size.height
+        // No allocations per draw: the four corners as fixed (x, y, dx, dy) sign pairs.
+        for (i in 0 until 4) {
+            val dx = TICK_DX[i]; val dy = TICK_DY[i]
+            val x = if (dx > 0f) 0f else w
+            val y = if (dy > 0f) 0f else h
+            drawLine(ink, androidx.compose.ui.geometry.Offset(x, y + dy * t / 2), androidx.compose.ui.geometry.Offset(x + dx * l, y + dy * t / 2), t)
+            drawLine(ink, androidx.compose.ui.geometry.Offset(x + dx * t / 2, y), androidx.compose.ui.geometry.Offset(x + dx * t / 2, y + dy * l), t)
+        }
+    }
+}
+
 @Composable
 fun Modifier.dockSurface(shape: Shape, color: Color = DockTheme.colors.card): Modifier {
     if (frostActive()) return this.frosted(shape, color)

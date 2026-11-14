@@ -42,13 +42,19 @@ object MediaRemote {
         }
     }
 
+    /** The one registered sessions listener, so a second [init] (listener reconnect) replaces it, not stacks. */
+    private var sessionsListener: MediaSessionManager.OnActiveSessionsChangedListener? = null
+
     /** Called from NotifListener.onCreate — notification access is what unlocks media sessions. */
-    fun init(ctx: Context) {
+    @Synchronized fun init(ctx: Context) {
         appCtx = ctx.applicationContext
         val component = ComponentName(ctx, NotifListener::class.java)
         val msm = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
         runCatching {
-            msm.addOnActiveSessionsChangedListener({ list -> pick(list) }, component)
+            sessionsListener?.let { runCatching { msm.removeOnActiveSessionsChangedListener(it) } }
+            val l = MediaSessionManager.OnActiveSessionsChangedListener { list -> pick(list) }
+            sessionsListener = l
+            msm.addOnActiveSessionsChangedListener(l, component)
             pick(msm.getActiveSessions(component))
         }
     }
