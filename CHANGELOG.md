@@ -8,6 +8,45 @@ to a generic body.
 
 ---
 
+## v3.7.0
+
+A redesign of both apps. Update both: link health, SMS search and the new phone styles need 3.7.0 on the Mac and on the phone.
+
+**Mac: four layouts that each feel different** (Settings › Appearance › Window layout)
+- **Phone tabs** (default) now has live tabs: Files shows a progress ring while transfers run, and Screen shows a live dot while mirroring.
+- **Classic** is a Finder-style sidebar with your phone at the top and sections you can fold. The phone card opens in a side panel.
+- **Grouped** has a compact phone header, live tiles for notifications, messages, calls and transfers, and folding groups.
+- **Minimal** has no sidebar. Your phone sits in the toolbar and a floating dock takes you anywhere.
+
+**Mac: a new mirror window**
+- The window is the phone: a thin frame, and controls that float below it and hide when you're not using them.
+- ⌘+ and ⌘− resize in steps, ⌘0 returns to natural size, and ⌘W closes.
+- Rotating the phone no longer freezes the Mac for a moment.
+
+**Mac: new features**
+- **Link health:** see why the link is slow or offline, and copy a diagnostics report (no pairing code, notifications or numbers).
+- **Messages:** load older texts and search conversations.
+- **Send to Phone** in the Services menu of any app.
+- Notifications that Android hides show "Content hidden by Android" instead of an empty row.
+- **Settings › Privacy › Scripts:** choose which AppleScript, Shortcuts and Raycast actions run without asking.
+
+**Phone: a redesign called "Docking"**
+- Each style has its own look and motion:
+  - Liquid Glass floats over a slowly moving aurora.
+  - Material You uses bold colour blocks.
+  - Minimal Mono is ink on paper with dot-matrix numbers.
+  - Reach stacks everything within thumb reach.
+- A live line between your phone and Mac shows the connection on Home, during pairing, during transfers and while mirroring.
+- New first-run setup, plus a guide for the "Allow restricted settings" step that sideloaded installs need.
+- Files, Clipboard, Mac Remote, Mirror and Settings are redesigned, with animation that follows your phone's "Remove animations" setting.
+
+**Fixes**
+- `get battery` in AppleScript no longer crashes DroidDock.
+- A link from a web page can no longer start screen mirroring without asking.
+- The D-pad on the phone's Mac remote now shows a press.
+- Mirror uptime no longer resets when you come back to the tab.
+- Several screens that showed English in other languages are now translated.
+
 ## v3.6.2
 
 Update both apps: the new trackpad gestures need 3.6.2 on the Mac and on the phone.
