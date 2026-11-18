@@ -16,6 +16,11 @@ enum DebugWindowProbe {
             for step in seq {
                 switch step {
                 case let t where t.hasPrefix("go:"): AppModel.shared.selection = Destination(rawValue: String(t.dropFirst(3))) ?? .dashboard
+                // Same as a pointer click: the destination change runs inside the screen animation (QA for toolbar churn).
+                case "throwlayout": ThrowInLayout.show(appKitReason: true)
+                case "throwother": ThrowInLayout.show(appKitReason: false)
+                case let t where t.hasPrefix("goanim:"):
+                    withDDAnimation(Motion.screen) { AppModel.shared.selection = Destination(rawValue: String(t.dropFirst(7))) ?? .dashboard }
                 case let t where t.hasPrefix("pane:"): UserDefaults.standard.set(String(t.dropFirst(5)), forKey: SettingsPane.defaultsKey)
                 case let t where t.hasPrefix("layout:"): UserDefaults.standard.set(String(t.dropFirst(7)), forKey: AppLayout.defaultsKey)
                 case let t where t.hasPrefix("theme:"): AppearanceSettings.shared.theme = ThemeChoice(rawValue: String(t.dropFirst(6))) ?? .system
@@ -114,6 +119,36 @@ enum DebugWindowProbe {
                         if n > 0 { captureAsync(n, "\(p[0])-\(i).png") }
                         try? await Task.sleep(for: .milliseconds(gap))
                     }
+                case let t where t.hasPrefix("navkick:"):
+                    // navkick:<dest>|<delay ms>|<what>[|<what>…]: animated navigation, then model changes mid-transition.
+                    let a = t.dropFirst(8).split(separator: "|").map(String.init)
+                    withDDAnimation(Motion.screen) { AppModel.shared.selection = Destination(rawValue: a[0]) ?? .dashboard }
+                    try? await Task.sleep(for: .milliseconds(Int(a[1]) ?? 50))
+                    for w in a.dropFirst(2) { AppModel.shared.debugKick(w) }
+                case let t where t.hasPrefix("click:"):
+                    // click:<x>;<y> in window points from the top-left: a real mouse-down/up through the app's own event
+                    // queue (NSApp.currentEvent is a mouse event, so pointer-only animations run as for a user's click).
+                    let p = t.dropFirst(6).split(separator: ";").compactMap { Double($0) }
+                    if p.count == 2, let w = window {
+                        let loc = NSPoint(x: p[0], y: w.frame.height - p[1])
+                        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                            if let e = NSEvent.mouseEvent(with: type, location: loc, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                          windowNumber: w.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) {
+                                NSApp.postEvent(e, atStart: false)
+                            }
+                            try? await Task.sleep(for: .milliseconds(70))
+                        }
+                    }
+                case "waitvisible":
+                    // QA sync point: test copies open on an inactive Space, and an occluded window never renders animations.
+                    for _ in 0..<1200 where !(window?.occlusionState.contains(.visible) ?? false) { try? await Task.sleep(for: .milliseconds(500)) }
+                    dlog("probe visible now")
+                case "front":
+                    // On-screen (unoccluded) without activating: occluded windows skip display-link rendering entirely.
+                    window?.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+                    window?.level = .statusBar; window?.orderFrontRegardless()
+                    dlog("probe front: windowNumber=\(window?.windowNumber ?? -1) behaviour=\(window?.collectionBehavior.rawValue ?? 0)")
+                case let t where t.hasPrefix("kick:"): AppModel.shared.debugKick(String(t.dropFirst(5)))
                 case "fake:on": AppModel.shared.debugFakeConnected()
                 case "fake:rtt": AppModel.shared.debugFakeConnected(rtt: 23)
                 case "layoutlive:classic", "layoutlive:phoneTabs", "layoutlive:grouped", "layoutlive:minimal":
@@ -234,7 +269,7 @@ enum DebugWindowProbe {
     private static func report(_ tag: String) {
         guard let w = window else { dlog("probe[\(tag)] no window"); return }
         dlog("probe[\(tag)] opaque=\(w.isOpaque) bgAlpha=\(w.backgroundColor.alphaComponent) glass=\(AppearanceSettings.shared.effectiveGlassOpacity)")
-        dlog("probe[\(tag)] frame=\(NSStringFromRect(w.frame)) content=\(NSStringFromSize(w.contentLayoutRect.size)) mini=\(w.isMiniaturized)")
+        dlog("probe[\(tag)] frame=\(NSStringFromRect(w.frame)) content=\(NSStringFromSize(w.contentLayoutRect.size)) mini=\(w.isMiniaturized) occl-visible=\(w.occlusionState.contains(.visible)) onActiveSpace=\(w.isOnActiveSpace) key=\(w.isKeyWindow)")
         for b in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] { hitTest(b) }
     }
 
@@ -279,6 +314,96 @@ enum DebugWindowProbe {
             e?.post(tap: .cgSessionEventTap)
         }
         dlog("probe mouse now \(NSEvent.mouseLocation) trusted=\(AXIsProcessTrusted())")
+    }
+}
+
+
+/// QA only: raises an ObjC exception from inside a display-cycle layout pass (the path the "Update Constraints"
+/// exception takes), to check whether NSApplicationCrashOnExceptions=NO lets the app survive it.
+@MainActor
+enum ThrowInLayout {
+    static var window: NSWindow?
+    final class V: NSView {
+        var fired = false
+        var reason = ""
+        override func layout() {
+            super.layout()
+            if !fired { fired = true; NSException(name: .genericException, reason: reason, userInfo: nil).raise() }
+        }
+    }
+    static func show(appKitReason: Bool) {
+        let w = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 200, height: 120), styleMask: [.titled], backing: .buffered, defer: false)
+        let v = V()
+        v.reason = appKitReason
+            ? "The window has been marked as needing another Update Constraints in Window pass, but it has already had more Update Constraints in Window passes than there are views in the window."
+            : "QA: some other exception"
+        w.contentView = v; w.makeKeyAndOrderFront(nil); v.needsLayout = true
+        window = w
+    }
+}
+#endif
+
+#if DEBUG
+/// QA: `DD_PASS_WATCH=1` counts `setNeedsUpdateConstraints:` on the main window's views per run-loop turn (one display
+/// cycle). A settled window marks a handful; the 3.7.0 crash needed ~240 in one turn. Logs which view keeps marking.
+@MainActor
+enum PassWatch {
+    nonisolated(unsafe) static var count = 0
+    nonisolated(unsafe) static var turn = 0
+    nonisolated(unsafe) static var byView: [ObjectIdentifier: (String, Int)] = [:]
+    nonisolated(unsafe) static var passes = 0
+
+    static func installIfRequested() {
+        guard ProcessInfo.processInfo.environment["DD_PASS_WATCH"] == "1" else { return }
+        let sel = NSSelectorFromString("setNeedsUpdateConstraints:")
+        guard let m = class_getInstanceMethod(NSView.self, sel) else { return }
+        typealias Orig = @convention(c) (NSView, Selector, Bool) -> Void
+        let orig = unsafeBitCast(method_getImplementation(m), to: Orig.self)
+        let block: @convention(block) (NSView, Bool) -> Void = { v, flag in
+            orig(v, sel, flag)
+            guard flag, let w = v.window, w === WindowControl.mainWindow else { return }
+            PassWatch.count += 1
+            let k = ObjectIdentifier(v)
+            let name = PassWatch.byView[k]?.0 ?? MainActor.assumeIsolated { PassWatch.describe(v) }
+            PassWatch.byView[k] = (name, (PassWatch.byView[k]?.1 ?? 0) + 1)
+            if PassWatch.passes == 120, PassWatch.byView[k]?.1 == 100 {
+                dlog("PASSWATCH turn \(PassWatch.turn): runaway marker=\(name)")
+                dlog("PASSWATCH stack:\n" + Thread.callStackSymbols.prefix(60).joined(separator: "\n"))
+            }
+        }
+        method_setImplementation(m, imp_implementationWithBlock(block))
+        // Window "Update Constraints" passes: what AppKit's per-cycle limit counts.
+        let wsel = NSSelectorFromString("updateConstraintsIfNeeded")
+        if let wm = class_getInstanceMethod(NSWindow.self, wsel) {
+            typealias WOrig = @convention(c) (NSWindow, Selector) -> Void
+            let worig = unsafeBitCast(method_getImplementation(wm), to: WOrig.self)
+            let wblock: @convention(block) (NSWindow) -> Void = { w in
+                if w === WindowControl.mainWindow {
+                    PassWatch.passes += 1
+                    if PassWatch.passes == 100 { dlog("PASSWATCH turn \(PassWatch.turn): 100 window passes in one turn") }
+                }
+                worig(w, wsel)
+            }
+            method_setImplementation(wm, imp_implementationWithBlock(wblock))
+        }
+        let obs = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.afterWaiting.rawValue, true, 0) { _, _ in
+            if PassWatch.passes >= 15 {
+                let top = PassWatch.byView.values.sorted { $0.1 > $1.1 }.prefix(4).map { "\($0.1)x \($0.0)" }
+                dlog("PASSWATCH turn \(PassWatch.turn) passes=\(PassWatch.passes) marks=\(PassWatch.count) top=\(top)")
+            }
+            PassWatch.count = 0; PassWatch.passes = 0; PassWatch.byView.removeAll(keepingCapacity: true); PassWatch.turn += 1
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), obs, .commonModes)
+        dlog("PASSWATCH installed")
+    }
+
+    static func describe(_ v: NSView) -> String {
+        var t = String(describing: type(of: v))
+        if t.count > 260 { t = String(t.prefix(260)) + "…" }
+        var chain: [String] = []
+        var s = v.superview
+        while let x = s, chain.count < 8 { chain.append(String(String(describing: type(of: x)).prefix(40))); s = x.superview }
+        return "\(t) w=\(Int(v.frame.width))x\(Int(v.frame.height)) in \(chain.joined(separator: "<"))"
     }
 }
 #endif

@@ -37,6 +37,14 @@ final class ShellChrome {
     /// (chip click, View › Show Phone, "Pair a phone").
     var minimalPhoneOpen = false
 
+    /// When the layout last changed. Not observed by views.
+    @ObservationIgnored var layoutSwitchedAt = Date.distantPast
+    /// A visibility write from NavigationSplitView is the user's only if it comes from a pointer click (the toolbar's
+    /// sidebar toggle) and not from the split view re-syncing after a layout switch.
+    var acceptsSplitWrite: Bool {
+        Date().timeIntervalSince(layoutSwitchedAt) > 1.0 && Motion.isPointerEvent
+    }
+
     func isPhoneHidden(_ l: AppLayout) -> Bool { hidden[l.rawValue] ?? false }
 
     /// The phone panel is shown only if the user wants it AND the screen can hold the layout with it. When it can't,

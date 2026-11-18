@@ -73,7 +73,11 @@ struct SegmentedTabBar<ID: Hashable>: View {
                     .font(.system(size: 12, weight: .regular))
                     .symbolRenderingMode(.hierarchical)
                 if !iconOnly {
-                    Text(tab.title).font(.system(size: 13, weight: selected ? .medium : .regular)).lineLimit(1)
+                    // Width is always the medium-weight width, so selecting a tab never resizes the bar. A bar whose width
+                    // changes while the knob glides resizes its NSToolbar item on every animation frame, and the window
+                    // re-ran Update Constraints ~300+ times in one display cycle (3.7.0 crash, phone panel hidden).
+                    Text(tab.title).font(.system(size: 13, weight: .medium)).lineLimit(1).hidden()
+                        .overlay { Text(tab.title).font(.system(size: 13, weight: selected ? .medium : .regular)).lineLimit(1) }
                 }
                 if tab.badge > 0 {
                     Text(verbatim: tab.badge > 99 ? "99+" : "\(tab.badge)")
@@ -81,36 +85,41 @@ struct SegmentedTabBar<ID: Hashable>: View {
                         .foregroundStyle(DD.accentInk)
                         .padding(.horizontal, 5).frame(minWidth: 16, minHeight: 15)
                         .background(Capsule().fill(activeState == .inactive ? DD.faint : Color.accentColor))
-                        .contentTransition(.numericText(value: Double(tab.badge)))
-                        .ddTransition(.scale(scale: 0.6).combined(with: .opacity))
                 }
                 if let accessory = tab.accessory { accessory }
             }
-            .ddAnimation(Motion.select, value: tab.badge)
+            // No animation on the badge or the accessory: this bar lives in an NSToolbar item, and every animation frame
+            // there re-runs the window's Update Constraints pass. A notification burst on reconnect (dozens of count
+            // changes a second) kept the badge animating until AppKit threw "more Update Constraints passes than views"
+            // and the app crash-looped (3.7.0, 2026-11-15). Count changes swap instantly; the knob slide is unaffected.
+            .transaction { $0.animation = nil }
             .foregroundStyle(selected ? DD.fg : DD.fg.opacity(hovered == tab.id ? 0.95 : 0.78))
             .padding(.horizontal, iconOnly ? 12 : 11)
             .frame(maxHeight: .infinity)
-            .background {
-                if !selected && hovered == tab.id {
-                    RoundedRectangle(cornerRadius: Self.trackRadius - Self.inset, style: .continuous)
-                        .fill(DD.hover)
-                }
-                if selected {
-                    let knob = RoundedRectangle(cornerRadius: Self.trackRadius - Self.inset, style: .continuous)
-                    knob.fill(Color(nsColor: .controlColor))
-                        .shadow(color: .black.opacity(scheme == .dark ? 0.25 : 0.12), radius: 0.5, y: 0.5)
-                        .shadow(color: .black.opacity(scheme == .dark ? 0.0 : 0.06), radius: 2, y: 1)
-                        .ddHairline(knob, scheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
-                        .matchedGeometryEffect(id: "knob", in: ns)
-                }
-            }
             .contentShape(Rectangle())
         }
         .buttonStyle(SegmentPressStyle())
-        .onHover { h in
-            withDDAnimation(Motion.hover) {
-                if h { hovered = tab.id } else if hovered == tab.id { hovered = nil }
+        // The knob (a matchedGeometryEffect source) stays outside the press style's scaleEffect: a scale that changes while
+        // the knob glides moves its matched frame every frame and loops the window's Update Constraints pass (3.7.0 crash).
+        .background {
+            if !selected && hovered == tab.id {
+                RoundedRectangle(cornerRadius: Self.trackRadius - Self.inset, style: .continuous)
+                    .fill(DD.hover)
             }
+            if selected {
+                let knob = RoundedRectangle(cornerRadius: Self.trackRadius - Self.inset, style: .continuous)
+                knob.fill(Color(nsColor: .controlColor))
+                    .shadow(color: .black.opacity(scheme == .dark ? 0.25 : 0.12), radius: 0.5, y: 0.5)
+                    .shadow(color: .black.opacity(scheme == .dark ? 0.0 : 0.06), radius: 2, y: 1)
+                    .ddHairline(knob, scheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                    .matchedGeometryEffect(id: "knob", in: ns)
+            }
+        }
+        .onHover { h in
+            // Instant (no animation): this bar is an NSToolbar item, and every animation frame there re-runs the window's
+            // Update Constraints pass. Sweeping the pointer across the tabs chained hover animations until AppKit threw
+            // and the app crashed on tab switches (3.7.0). Same for the press style below.
+            if h { hovered = tab.id } else if hovered == tab.id { hovered = nil }
         }
         .help(tab.shortcut.map { "\(tab.title)  \($0)" } ?? tab.title)
         .accessibilityLabel(tab.badge > 0 ? "\(tab.title), \(tab.badge)" : tab.title)
@@ -132,7 +141,6 @@ private struct SegmentPressStyle: ButtonStyle {
         configuration.label
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
             .opacity(configuration.isPressed ? 0.8 : 1)
-            .ddAnimation(Motion.press, value: configuration.isPressed)
     }
 }
 

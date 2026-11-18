@@ -8,6 +8,9 @@ import SwiftUI
 struct TransferProgressRing: View {
     @Environment(AppModel.self) private var model
     var diameter: CGFloat = 13
+    /// False inside a toolbar item: animating there re-runs the window's constraint pass every frame and, with progress
+    /// ticking several times a second, can exhaust AppKit's pass limit and crash (see SegmentedTabBar).
+    var animated: Bool = true
 
     private var fraction: Double? {
         var sum = 0.0, n = 0
@@ -30,7 +33,7 @@ struct TransferProgressRing: View {
                             Circle().trim(from: 0, to: max(0.02, f))
                                 .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                                 .rotationEffect(.degrees(-90))
-                                .ddAnimation(Motion.progress, value: f)
+                                .ddAnimation(Motion.progress, value: animated ? f : 0)
                         }
                         .frame(width: diameter, height: diameter)
                         // No `.help` here: it would replace the host's tooltip (the tab's title + ⌘ shortcut, the row's title).
@@ -39,10 +42,10 @@ struct TransferProgressRing: View {
                         ProgressView().controlSize(.mini)
                     }
                 }
-                .ddTransition(.scale(scale: 0.7).combined(with: .opacity))
+                .ddTransition(animated ? .scale(scale: 0.7).combined(with: .opacity) : .identity)
             }
         }
-        .ddAnimation(Motion.expand, value: active)
+        .ddAnimation(Motion.expand, value: animated ? active : false)
     }
 }
 
@@ -51,15 +54,17 @@ struct TransferProgressRing: View {
 struct MirrorLiveDot: View {
     @State private var session = MirrorSession.shared
     var size: CGFloat = 6
+    /// False inside a toolbar item (see TransferProgressRing.animated).
+    var animated: Bool = true
 
     var body: some View {
         ZStack {
             if session.isLive {
                 Circle().fill(DD.ok).frame(width: size, height: size)
                     .accessibilityLabel(tr("Live"))
-                    .ddTransition(.scale(scale: 0.5).combined(with: .opacity))
+                    .ddTransition(animated ? .scale(scale: 0.5).combined(with: .opacity) : .identity)
             }
         }
-        .ddAnimation(Motion.select, value: session.isLive)
+        .ddAnimation(Motion.select, value: animated ? session.isLive : false)
     }
 }

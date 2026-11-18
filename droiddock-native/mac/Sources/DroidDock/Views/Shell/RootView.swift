@@ -24,6 +24,7 @@ struct RootView: View {
         // `setFrame` runs a nested run loop on the main thread and re-lays-out the half-built split view every frame (measured:
         // 0.6 to 3.4 s stalls when switching layouts from a narrow window).
         .onChange(of: required, initial: true) { _, w in WindowFit.grow(to: w) }
+        .onChange(of: layoutRaw) { old, new in NavTrail.log("layout \(old) → \(new)") }
         .overlay(alignment: .bottom) { ToastStack() }
         .sheet(isPresented: $onboarding.isShowing) {
             OnboardingView().environment(model).ddAppearance(AppearanceSettings.shared)

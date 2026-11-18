@@ -1,15 +1,16 @@
 import SwiftUI
 
-/// Default layout. Sidebar = the live phone card; detail = five toolbar tabs, each with an optional sub-picker. The tabs
-/// are live: Inbox counts, Files shows a progress ring while transfers run, Screen a green dot while streaming.
-/// Home, Contacts, Devices, Now playing and Settings sit in a small segmented track under the card (and the Go menu).
+/// Default layout. Sidebar = the live phone card; detail = six toolbar tabs (Home first), each with an optional
+/// sub-picker. The tabs are live: Inbox counts, Files shows a progress ring while transfers run, Screen a green dot while
+/// streaming. Contacts, Devices, Now playing and Settings sit in a capsule pill under the card (and the Go menu).
 /// The split view itself is `MainShell`'s; this layout supplies its columns (`PhoneTabsSidebar`, `PhoneTabsDetail`).
 enum PhoneTabsShell {
     enum Tab: String, CaseIterable, Identifiable, Hashable {
-        case inbox, files, apps, clipboard, screen
+        case home, inbox, files, apps, clipboard, screen
         var id: String { rawValue }
         var title: String {
             switch self {
+            case .home: tr("Home")
             case .inbox: tr("Inbox")
             case .files: tr("Files")
             case .apps: tr("Apps")
@@ -19,6 +20,7 @@ enum PhoneTabsShell {
         }
         var symbol: String {
             switch self {
+            case .home: "house"
             case .inbox: "tray"
             case .files: "folder"
             case .apps: "square.grid.2x2"
@@ -28,6 +30,7 @@ enum PhoneTabsShell {
         }
         var items: [Destination] {
             switch self {
+            case .home: [.dashboard]
             case .inbox: [.notifications, .messages, .calls]
             case .files: [.files, .photos, .transfers]
             case .apps: [.apps]
@@ -38,7 +41,8 @@ enum PhoneTabsShell {
         static func containing(_ d: Destination) -> Tab? { allCases.first { $0.items.contains(d) } }
     }
 
-    static let extras: [Destination] = [.dashboard, .contacts, .devices, .media, .settings]
+    /// Not tabs: the capsule pill under the phone card, and the toolbar's More menu while the phone is hidden.
+    static let extras: [Destination] = [.contacts, .devices, .media, .settings]
 }
 
 struct PhoneTabsSidebar: View {
@@ -50,8 +54,8 @@ struct PhoneTabsSidebar: View {
     }
 }
 
-/// The screens that aren't tabs (Home, Contacts, Devices, Now playing, Settings), as a small segmented track under the
-/// card. It shares the tab bar's knob language: exactly one knob is on screen, either in the toolbar tabs or here, and it
+/// The screens that aren't tabs (Contacts, Devices, Now playing, Settings), as a capsule pill under the card, in easy
+/// reach at the bottom of the sidebar. It shares the tab bar's knob language: exactly one knob is on screen, either in the toolbar tabs or here, and it
 /// glides between neighbours on a click (keys switch instantly). No "Hide phone" row: the phone IS the sidebar, so the
 /// toolbar's sidebar toggle already does that (user feedback: two controls for one action). ⌥⌘S / View menu still work.
 private struct PhoneTabsExtrasBar: View {
@@ -67,14 +71,15 @@ private struct PhoneTabsExtrasBar: View {
             ForEach(PhoneTabsShell.extras) { d in item(d) }
         }
         .padding(Self.inset)
-        .background(RoundedRectangle(cornerRadius: Self.track, style: .continuous).fill(DD.panel2))
+        .background(Capsule(style: .continuous).fill(DD.panel2))
+        .overlay(Capsule(style: .continuous).strokeBorder(DD.line.opacity(0.6), lineWidth: 0.5))
         .padding(.horizontal, LayoutMetrics.cardInset).padding(.top, DD.Space.xs).padding(.bottom, DD.Space.sm)
         .accessibilityElement(children: .contain)
     }
 
     private func item(_ d: Destination) -> some View {
         let on = model.selection == d
-        let knob = RoundedRectangle(cornerRadius: Self.track - Self.inset, style: .continuous)
+        let knob = Capsule(style: .continuous)
         return Button { withDDPointerAnimation(Motion.screen) { model.selection = d } } label: {
             Image(systemName: d.symbol)
                 .font(.system(size: 14, weight: .regular))
@@ -82,19 +87,23 @@ private struct PhoneTabsExtrasBar: View {
                 .symbolVariant(on ? .fill : .none)
                 .contentTransition(.symbolEffect(.replace))
                 .foregroundStyle(on ? Color.accentColor : (hovered == d ? DD.fg : DD.dim))
-                .frame(maxWidth: .infinity).frame(height: 28)
-                .background {
-                    if on {
-                        knob.fill(Color(nsColor: .controlColor))
-                            .shadow(color: .black.opacity(scheme == .dark ? 0.25 : 0.12), radius: 0.5, y: 0.5)
-                            .matchedGeometryEffect(id: "extrasKnob", in: ns)
-                    } else if hovered == d {
-                        knob.fill(DD.hover)
-                    }
-                }
+                .frame(maxWidth: .infinity).frame(height: 30)
                 .contentShape(Rectangle())
         }
         .buttonStyle(PressableButtonStyle())
+        // The knob sits OUTSIDE the button style: PressableButtonStyle springs a scaleEffect on press, and a
+        // matchedGeometryEffect source under an animating scale changes its frame on every frame of that spring. The
+        // window then re-ran Update Constraints synchronously, ~500 times inside one display cycle, until AppKit threw
+        // (the 3.7.0 crash on contacts → devices and other pill clicks; reproduced with DD_PASS_WATCH=1 + `click:`).
+        .background {
+            if on {
+                knob.fill(Color(nsColor: .controlColor))
+                    .shadow(color: .black.opacity(scheme == .dark ? 0.25 : 0.12), radius: 0.5, y: 0.5)
+                    .matchedGeometryEffect(id: "extrasKnob", in: ns)
+            } else if hovered == d {
+                knob.fill(DD.hover)
+            }
+        }
         .onHover { h in
             withDDAnimation(Motion.hover) {
                 if h { hovered = d } else if hovered == d { hovered = nil }
@@ -130,8 +139,8 @@ struct PhoneTabsDetail: View {
     /// itself reads the fast-changing values (progress), so ticks don't rebuild the toolbar.
     private func accessory(_ t: Tab) -> AnyView? {
         switch t {
-        case .files where model.activeTransferCount > 0: AnyView(TransferProgressRing(diameter: 11))
-        case .screen where mirror.isLive: AnyView(MirrorLiveDot())
+        case .files where model.activeTransferCount > 0: AnyView(TransferProgressRing(diameter: 11, animated: false))
+        case .screen where mirror.isLive: AnyView(MirrorLiveDot(animated: false))
         default: nil
         }
     }
@@ -141,18 +150,25 @@ struct PhoneTabsDetail: View {
         CGFloat((model.activeTransferCount > 0 ? 1 : 0) + (mirror.isLive ? 1 : 0)) * 22
     }
 
-    @State private var detailWidth: CGFloat = 700   // small until measured: icons can't overflow into the `»` menu, labels can
+    /// Icons until measured (icons can't overflow into the `»` menu, labels can). Hysteresis + async: the bar's own width
+    /// change must never flip this back inside the same layout pass.
+    @State private var iconOnly = true
     private var textDirection: LayoutDirection { L10n.shared.isRTL ? .rightToLeft : .leftToRight }
     /// The extras live in the sidebar footer; the toolbar's More menu only stands in for it while the phone is hidden.
-    private var phoneHidden: Bool { chrome.effectivePhoneHidden(.phoneTabs) }
 
     var body: some View {
         content
             .environment(\.layoutDirection, textDirection)
-            .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { detailWidth = $0 }
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { w in
+                let limit = 900 + accessoryReserve   // six labelled tabs
+                let want = iconOnly ? w < limit + 40 : w < limit
+                guard want != iconOnly else { return }
+                DispatchQueue.main.async { if iconOnly != want { iconOnly = want } }
+            }
             .hidesWindowTitle(model.selection.title)
             .toolbar {
-                if phoneHidden {
+                // Only while the phone (and with it the pill) is hidden; otherwise the pill already holds these.
+                if chrome.effectivePhoneHidden(.phoneTabs) {
                     ToolbarItem(placement: .primaryAction) { ShellMoreMenu(destinations: PhoneTabsShell.extras) }
                 }
                 ToolbarItem(placement: .principal) {
@@ -160,7 +176,7 @@ struct PhoneTabsDetail: View {
                     // pushes everything into the `»` overflow menu, so drop to icons (titles stay in the tooltips).
                     // Each live accessory (ring, dot) widens its segment by about 20 pt: reserve it, so starting a transfer or a
                     // stream in a borderline window drops to icons instead of pushing the tabs into `»`.
-                    SegmentedTabBar(tabs: tabs, selection: tabBinding, iconOnly: detailWidth < 820 + accessoryReserve,
+                    SegmentedTabBar(tabs: tabs, selection: tabBinding, iconOnly: iconOnly,
                                     numberShortcuts: false).fixedSize()
                 }
             }
@@ -180,8 +196,9 @@ struct PhoneTabsDetail: View {
             default: ScreenView(destination: model.selection)
             }
         }
-        .id(tab)
-        .ddTransition(.ddScreen)
+        // No per-tab `.id` + transition here: during the fade both tabs' screens were live and both contributed toolbar
+        // items, re-laying out the NSToolbar every frame (crash on tab switch, 3.7.0). ScreenView keeps its own
+        // per-destination cross-fade, as in 3.6.2.
     }
 }
 

@@ -38,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         CrashReporter.shared.install()
+        LayoutPassGuard.install()
         installSignalHandlers()
         NSAppleEventManager.shared().setEventHandler(
             self, andSelector: #selector(handleGetURL(_:withReplyEvent:)),
@@ -60,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
         #if DEBUG
         DebugWindowProbe.runIfRequested()
+        PassWatch.installIfRequested()
         CommandBarSelfTest.demoIfRequested()
         #endif
         DockPolicy.apply()

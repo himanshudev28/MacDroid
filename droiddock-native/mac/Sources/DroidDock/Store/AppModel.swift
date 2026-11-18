@@ -128,9 +128,13 @@ final class AppModel {
     private(set) var toasts: [Toast] = []
     /// DEBUG builds only: `DD_START_DEST=<destination>` overrides the first screen (QA).
     #if DEBUG
-    var selection: Destination = Destination(rawValue: ProcessInfo.processInfo.environment["DD_START_DEST"] ?? "") ?? .dashboard
+    var selection: Destination = Destination(rawValue: ProcessInfo.processInfo.environment["DD_START_DEST"] ?? "") ?? .dashboard {
+        didSet { if oldValue != selection { NavTrail.log("screen \(oldValue.rawValue) → \(selection.rawValue)") } }
+    }
     #else
-    var selection: Destination = .dashboard
+    var selection: Destination = .dashboard {
+        didSet { if oldValue != selection { NavTrail.log("screen \(oldValue.rawValue) → \(selection.rawValue)") } }
+    }
     #endif
     private(set) var lastAutomation: AutomationEvent?
     /// Hook for the screen that handles `droiddock://` routes (mirror, desktop, app, clipboard-push).
@@ -209,6 +213,23 @@ final class AppModel {
         if st == "idle" { set(\.activeCall, nil); return }
         set(\.activeCall, IncomingCall(state: st, number: "+14155550134", name: "Ada Lovelace", key: "dbg",
                                        canAnswer: st == "ringing", canEnd: true, canAudio: true, muted: false, speaker: false))
+    }
+
+    /// QA (probe step `kick:<what>`): one model change of the kind a real phone streams.
+    func debugKick(_ what: String) {
+        switch what {
+        case "devices":
+            let d = AdbDevice(id: "dbg\(Int.random(in: 0...9))", serial: "adb-DBG._adb-tls-connect._tcp", model: "Pixel 8 Pro",
+                              state: "device", transport: "wifi", usbSerial: nil, wifiSerial: "adb-DBG._adb-tls-connect._tcp")
+            set(\.devices, devices.isEmpty ? [d] : [])
+        case "rtt": set(\.linkQuality, LinkQuality(rttMs: Double(Int.random(in: 2...40) * 5), grade: "good"))
+        case "battery": set(\.deviceInfo, AppDeviceInfo(model: "Pixel 8 Pro", android: "15", battery: Double(Int.random(in: 20...99)), charging: false))
+        case "notif": debugFakeNotifications()
+        case "media":
+            var m = media ?? MediaState(); m.pos = (m.pos ?? 0) + 1000; applyMedia(m)
+        case "sms": smsRevision += 1
+        default: break
+        }
     }
 
     func debugFakeConnected(rtt: Double? = nil) {
@@ -835,4 +856,13 @@ final class AppModel {
         if !m.active { set(\.mediaArt, nil) }
         set(\.media, m)
     }
+}
+
+/// Breadcrumbs in the unified log (`log show --predicate 'subsystem == "com.droiddock.mac" AND category == "nav"'`):
+/// screen changes, layout switches and window resizes, so a crash report can be matched to what the user just did.
+/// Never logs content, only destination/layout names and sizes.
+import OSLog
+enum NavTrail {
+    private static let logger = Logger(subsystem: "com.droiddock.mac", category: "nav")
+    static func log(_ message: String) { logger.notice("\(message, privacy: .public)") }
 }

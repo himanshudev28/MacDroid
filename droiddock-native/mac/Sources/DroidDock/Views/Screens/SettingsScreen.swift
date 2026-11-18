@@ -8,7 +8,11 @@ struct SettingsScreen: View {
 
     /// Below this width the pane list no longer fits beside the pane itself, so it becomes a menu header.
     static let compactBelow: CGFloat = 660
-    @State private var width: CGFloat = 1000
+    /// Hysteresis: once compact, the pane list comes back only above this width. The two modes have different minimum
+    /// widths, so a single threshold let them push the split view's columns back and forth around 660 pt; AppKit then
+    /// ran out of constraint passes and crashed (3.7.0).
+    static let wideAbove: CGFloat = 720
+    @State private var compact = false
 
     private var selection: Binding<SettingsPane> {
         Binding(get: { pane }, set: { paneRaw = $0.rawValue })
@@ -16,7 +20,7 @@ struct SettingsScreen: View {
 
     var body: some View {
         Group {
-            if width < Self.compactBelow {
+            if compact {
                 VStack(spacing: 0) {
                     HStack(spacing: DD.Space.md) {
                         MyMacCard(compact: true).frame(width: 52)
@@ -43,6 +47,11 @@ struct SettingsScreen: View {
                 }
             }
         }
-        .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { width = $0 }
+        .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { w in
+            let want = compact ? w < Self.wideAbove : w < Self.compactBelow
+            guard want != compact else { return }
+            // Next run-loop turn, not inside the layout pass that measured it.
+            DispatchQueue.main.async { if compact != want { compact = want; NavTrail.log("settings compact=\(want) w=\(Int(w))") } }
+        }
     }
 }

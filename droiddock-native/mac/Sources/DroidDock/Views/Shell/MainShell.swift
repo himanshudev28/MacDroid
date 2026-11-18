@@ -17,11 +17,14 @@ struct MainShell: View {
     private var visibility: Binding<NavigationSplitViewVisibility> {
         let l = layout
         if l == .minimal { return .constant(.detailOnly) }
+        // Writes from the split view count only when the user clicked its sidebar toggle. Right after a layout switch it
+        // reports the previous layout's state (Minimal is always .detailOnly), which silently saved "phone hidden" for
+        // Phone tabs and "rail collapsed" for Classic/Grouped (3.7.0).
         if ShellChrome.phoneIsSidebar(l) {
             return Binding(get: { chrome.effectivePhoneHidden(l) ? .detailOnly : .all },
-                           set: { chrome.setPhoneHidden(l, $0 == .detailOnly) })
+                           set: { v in if chrome.acceptsSplitWrite { chrome.setPhoneHidden(l, v == .detailOnly) } })
         }
-        return Binding(get: { .all }, set: { if $0 == .detailOnly { chrome.toggleSidebar(l) } })
+        return Binding(get: { .all }, set: { v in if v == .detailOnly, chrome.acceptsSplitWrite { chrome.toggleSidebar(l) } })
     }
 
     var body: some View {
@@ -44,6 +47,7 @@ struct MainShell: View {
         // still LTR, a mirrored split view pushes the principal tab bar into the `»` menu. Content columns mirror themselves.
         .environment(\.layoutDirection, ShellChrome.phoneIsSidebar(layout) ? .leftToRight : inheritedDirection)
         .onChange(of: layout) { old, new in
+            chrome.layoutSwitchedAt = Date()
             chrome.minimalPhoneOpen = false
             SplitWidth.applyIdeal(new, chrome: chrome)
             // Leaving Minimal the column is still hidden/1 pt on this pass, so applyIdeal bails; retry once it is shown.

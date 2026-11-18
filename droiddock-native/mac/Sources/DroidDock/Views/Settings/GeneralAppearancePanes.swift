@@ -287,7 +287,7 @@ private struct LayoutTile: View {
                     HStack(spacing: 0) {
                         toolbarStrip.frame(width: W * 0.30)
                         HStack(spacing: 1.5) {
-                            ForEach(0..<5, id: \.self) { i in
+                            ForEach(0..<6, id: \.self) { i in
                                 RoundedRectangle(cornerRadius: 1.5, style: .continuous)
                                     .fill(i == 0 ? accent.opacity(0.75) : ink.opacity(0.35))
                                     .frame(width: 9, height: 4.5)

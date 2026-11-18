@@ -8,6 +8,28 @@ to a generic body.
 
 ---
 
+## v4.0.0
+
+DroidDock 4.0: the redesigned Mac and phone apps from 3.7, now stable. Update both apps.
+
+**Fixed: the Mac app could crash or freeze**
+- Clicking items in the Phone tabs pill, the Minimal dock or Grouped's tiles could crash DroidDock (sometimes on every launch). Fixed at the cause, and the app now survives this kind of layout problem instead of quitting.
+- Opening Messages while texts were still loading could crash it. Loading placeholders are now still.
+- Switching window layouts no longer hides the phone in Phone tabs or collapses Classic's sidebar on its own. If your phone vanished from Phone tabs, press ⌥⌘S once.
+
+**Phone tabs, reworked**
+- **Home** is now the first tab.
+- Contacts, Devices, Now playing and Settings sit in a pill at the bottom of the phone sidebar, in easy reach.
+- The ⋯ menu only appears while the phone is hidden.
+- The tab bar no longer jumps in width when you switch tabs.
+
+**Notification banners**
+- DroidDock's banners slide in from the right edge and slide back out, like macOS notifications.
+- Two-finger swipe right on a banner to dismiss it.
+- With Reduce Motion on, banners just fade.
+
+Everything from 3.7.0 is included: the four Mac layouts, the new mirror window, link health, SMS search, Send to Phone, and the phone's "Docking" redesign.
+
 ## v3.7.0
 
 A redesign of both apps. Update both: link health, SMS search and the new phone styles need 3.7.0 on the Mac and on the phone.

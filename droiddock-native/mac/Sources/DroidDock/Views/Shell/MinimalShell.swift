@@ -62,18 +62,14 @@ struct MinimalDeviceChip: View {
             HStack(spacing: DD.Space.sm) {
                 Image(systemName: model.isConnected ? "iphone" : "iphone.slash")
                     .symbolRenderingMode(.hierarchical)
-                    .contentTransition(.symbolEffect(.replace))
                     .frame(width: 14)
                 Text(model.phoneName ?? tr("Not connected"))
                     .font(DD.Font.bodyEmphasis)
                     .lineLimit(1)
-                    .contentTransition(.opacity)
                 if model.isConnected, let b = model.batteryPercent {
                     Text("\(b)%")
                         .font(DD.Font.callout).monospacedDigit()
                         .foregroundStyle(b <= 20 && !model.isCharging ? DD.bad : (model.isCharging ? DD.ok : DD.dim))
-                        .contentTransition(.numericText(value: Double(b)))
-                        .ddAnimation(Motion.select, value: b)
                 }
                 Circle().fill(dotColor).frame(width: 7, height: 7)
                     .accessibilityHidden(true)
@@ -83,10 +79,10 @@ struct MinimalDeviceChip: View {
             .background(Capsule(style: .continuous).fill(Color.primary.opacity(chrome.minimalPhoneOpen ? 0.12 : (hovering ? 0.08 : 0))))
             .contentShape(Capsule(style: .continuous))
         }
-        .buttonStyle(MinimalPressStyle())
-        .onHover { h in withDDAnimation(Motion.hover) { hovering = h } }
-        .ddAnimation(Motion.state, value: model.isConnected)
-        .ddAnimation(Motion.hover, value: chrome.minimalPhoneOpen)
+        .buttonStyle(.plain)
+        // Toolbar item: everything here changes instantly. Animation frames in a toolbar item re-run the window's
+        // constraint pass and can exhaust AppKit's limit (see SegmentedTabBar).
+        .onHover { h in hovering = h }
         .help("\(tr("Phone panel"))  ⌥⌘S")
         .accessibilityLabel(model.phoneName ?? tr("Not connected"))
         .accessibilityValue(model.batteryPercent.map { "\($0)%" } ?? "")
@@ -172,12 +168,6 @@ struct MinimalDock: View {
                 .foregroundStyle(selected ? Color.accentColor : (isHovered ? DD.fg : DD.dim))
                 .symbolEffect(.bounce.down, options: .speed(1.4), value: bounce[d, default: 0])
                 .frame(width: 40, height: 34)
-                .background {
-                    ZStack {
-                        if isHovered && !selected { Capsule(style: .continuous).fill(Color.primary.opacity(0.07)) }
-                        selectionPill(selected)
-                    }
-                }
                 .overlay(alignment: .topTrailing) {
                     if count > 0 {
                         Text(count > 99 ? "99+" : "\(count)")
@@ -194,6 +184,15 @@ struct MinimalDock: View {
                 .contentShape(Capsule(style: .continuous))
         }
         .buttonStyle(MinimalPressStyle())
+        // Selection pill and hover wash OUTSIDE the press style: a matchedGeometryEffect source under MinimalPressStyle's
+        // springing scaleEffect moves on every frame of the spring, and the window re-ran Update Constraints ~470 times in
+        // one display cycle until AppKit threw (3.7.0 crash on dock clicks; see PhoneTabsExtrasBar).
+        .background {
+            ZStack {
+                if isHovered && !selected { Capsule(style: .continuous).fill(Color.primary.opacity(0.07)) }
+                selectionPill(selected)
+            }
+        }
         .onHover { h in withDDAnimation(Motion.hover) { hovered = h ? d : (hovered == d ? nil : hovered) } }
         .overlay(alignment: .top) {
             if isHovered { MinimalDockLabel(text: d.title).offset(y: -38).allowsHitTesting(false) }

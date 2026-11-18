@@ -320,10 +320,13 @@ private struct GroupedGlanceTile: View {
             }
             .padding(.horizontal, DD.Space.sm + 2).padding(.vertical, DD.Space.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background { background }
             .contentShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         }
         .buttonStyle(PressableButtonStyle())
+        // Outside the press style: the selection fill is a matchedGeometryEffect source, and under PressableButtonStyle's
+        // springing scaleEffect it moves on every spring frame, which re-runs the window's Update Constraints pass inside one
+        // display cycle until AppKit throws (the 3.7.0 crash; see PhoneTabsExtrasBar).
+        .background { background }
         .onHover { hovering = $0 }
         .ddAnimation(Motion.hover, value: hovering)
         // No implicit animation on `isSelected`: the Go menu's ⌘0–⌘7 changes selection without a pointer transaction and

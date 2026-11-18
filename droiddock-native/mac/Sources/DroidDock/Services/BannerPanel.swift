@@ -10,6 +10,8 @@ final class BannerCenter {
     static let shared = BannerCenter()
     private var panels: [(id: String, panel: BannerPanel)] = []
     private let width: CGFloat = 360
+    /// How far past the screen edge a banner starts and leaves (its width plus the margin).
+    static let slide: CGFloat = 384
     private init() {
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.layout() }
@@ -51,19 +53,41 @@ final class BannerCenter {
         }
         panels.append((n.id, p))
         layout(newest: p)
+        p.onSwipeDismiss = { [weak self] in self?.dismiss(id: n.id, swiped: true) }
         p.alphaValue = 0
-        p.orderFrontRegardless()
-        NSAnimationContext.runAnimationGroup { $0.duration = 0.2; p.animator().alphaValue = 1 }
+        if Motion.systemReduceMotion {
+            p.orderFrontRegardless()
+            NSAnimationContext.runAnimationGroup { $0.duration = 0.15; p.animator().alphaValue = 1 }
+        } else {
+            // Like a macOS notification: slide in from just past the right edge while fading in, settling without bounce.
+            let home = p.frame.origin
+            p.setFrameOrigin(NSPoint(x: home.x + Self.slide, y: home.y))
+            p.orderFrontRegardless()
+            NSAnimationContext.runAnimationGroup { c in
+                c.duration = 0.38
+                c.timingFunction = CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1)
+                p.animator().setFrame(NSRect(origin: home, size: p.frame.size), display: true)
+                p.animator().alphaValue = 1
+            }
+        }
         model.armTimer { [weak self] in self?.dismiss(id: n.id) }
         while panels.count > 4 { dismiss(id: panels[0].id, animated: false) }
     }
 
-    func dismiss(id: String, animated: Bool = true) {
+    func dismiss(id: String, animated: Bool = true, swiped: Bool = false) {
         guard let i = panels.firstIndex(where: { $0.id == id }) else { return }
         let p = panels.remove(at: i).panel
         (p.contentView as? NSHostingView<BannerView>)?.rootView.model.cancelTimer()
+        p.onSwipeDismiss = nil
         if animated {
-            NSAnimationContext.runAnimationGroup({ $0.duration = 0.18; p.animator().alphaValue = 0 }, completionHandler: { p.orderOut(nil) })
+            let reduce = Motion.systemReduceMotion
+            NSAnimationContext.runAnimationGroup({ c in
+                // Exit is quicker than entry and accelerates away to the right (a swipe keeps going the way it was thrown).
+                c.duration = reduce ? 0.15 : (swiped ? 0.2 : 0.26)
+                c.timingFunction = CAMediaTimingFunction(controlPoints: 0.4, 0, 1, 1)
+                if !reduce { p.animator().setFrame(p.frame.offsetBy(dx: Self.slide, dy: 0), display: true) }
+                p.animator().alphaValue = 0
+            }, completionHandler: { p.orderOut(nil) })
         } else { p.orderOut(nil) }
         layout()
     }
@@ -96,6 +120,43 @@ final class BannerPanel: NSPanel {
     }
     override var canBecomeKey: Bool { true }   // the reply field needs the keyboard
     override var canBecomeMain: Bool { false }
+
+    /// Two-finger swipe to the right dismisses, like macOS notifications: the banner follows the fingers (rubber-banding
+    /// if pulled left), and on release either flies off (past 70 pt or a quick flick) or springs back.
+    var onSwipeDismiss: (() -> Void)?
+    private var swipeDX: CGFloat = 0
+    private var restX: CGFloat?
+
+    override func scrollWheel(with e: NSEvent) {
+        guard onSwipeDismiss != nil, e.hasPreciseScrollingDeltas, abs(e.scrollingDeltaX) >= abs(e.scrollingDeltaY) || swipeDX != 0
+        else { super.scrollWheel(with: e); return }
+        switch e.phase {
+        case .began:
+            restX = frame.minX; swipeDX = 0
+        case .changed:
+            guard let rest = restX else { return }
+            swipeDX += e.isDirectionInvertedFromDevice ? e.scrollingDeltaX : -e.scrollingDeltaX
+            let shown = swipeDX >= 0 ? swipeDX : swipeDX * 0.25          // rubber band when pulled left
+            setFrameOrigin(NSPoint(x: rest + shown, y: frame.minY))
+            alphaValue = max(0.35, 1 - max(0, swipeDX) / 300)
+        case .ended, .cancelled:
+            guard let rest = restX else { return }
+            let flick = abs(e.scrollingDeltaX) > 12
+            if swipeDX > 70 || (flick && swipeDX > 20) {
+                onSwipeDismiss?()
+            } else {
+                NSAnimationContext.runAnimationGroup { c in
+                    c.duration = Motion.systemReduceMotion ? 0 : 0.28
+                    c.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.25, 1)
+                    animator().setFrame(NSRect(x: rest, y: frame.minY, width: frame.width, height: frame.height), display: true)
+                    animator().alphaValue = 1
+                }
+            }
+            restX = nil; swipeDX = 0
+        default:
+            super.scrollWheel(with: e)
+        }
+    }
 }
 
 @MainActor @Observable

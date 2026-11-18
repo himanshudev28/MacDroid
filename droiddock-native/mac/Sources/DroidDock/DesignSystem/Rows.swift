@@ -459,39 +459,12 @@ struct SkeletonRow: View {
     }
 }
 
-/// A light band sweeping across. 1.4 s period; paused entirely under Reduce Motion.
+/// Placeholder treatment for skeleton rows: static, slightly dimmed. Deliberately NOT animated.
+///
+/// It used to sweep a gradient forever (`repeatForever` + GeometryReader offset). While that ran, the main window's
+/// display cycle never settled, every frame counted as another Update Constraints pass, and once AppKit's per-window
+/// limit (~240) was hit it threw and crashed the app. A slow phone could keep Messages loading for 20+ s, so opening
+/// Messages crash-looped 3.7.0 (2026-11-18). Nothing in a main-window hosting view may animate continuously.
 struct Shimmer: ViewModifier {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var phase: CGFloat = -1
-    /// Nothing on screen (window closed/occluded): don't keep a render loop alive.
-    private var visible: Bool { UIActivity.shared.visible }
-
-    private func start() {
-        withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) { phase = 1 }
-    }
-    private func stop() {
-        withAnimation(.linear(duration: 0.01)) { phase = -1 }   // replaces the repeating animation
-    }
-
-    func body(content: Content) -> some View {
-        if reduceMotion {
-            content.opacity(0.8)
-        } else {
-            content
-                .overlay {
-                    GeometryReader { geo in
-                        LinearGradient(colors: [.clear, Color.white.opacity(0.28), .clear],
-                                       startPoint: .leading, endPoint: .trailing)
-                            .frame(width: geo.size.width * 0.5)
-                            .offset(x: phase * geo.size.width * 1.5)
-                            .blendMode(.plusLighter)
-                    }
-                    .mask(content)
-                    .allowsHitTesting(false)
-                }
-                .onAppear { if visible { start() } }
-                .onDisappear { stop() }
-                .onChange(of: visible) { _, v in if v { start() } else { stop() } }
-        }
-    }
+    func body(content: Content) -> some View { content.opacity(0.8) }
 }
