@@ -76,6 +76,7 @@ final class NotificationClickActions {
     /// Default-click handler used by the banners. Order: a Mac app/URL the user mapped, then the per-app choice
     /// (open on the phone in a pop-up by default, DroidDock's Notifications page, or nothing).
     func handleBannerClick(key: String) {
+        if key.hasPrefix(Self.infoPrefix) { WindowControl.showMain(); return }   // a status banner from `notify`: just show the window
         if key == AppModel.allowPlainBannerID { AppModel.shared.blockedPlainBannerClicked(); return }   // the "Allow without encryption?" banner
         NotificationService.shared.remove(id: key)   // handled: drop its Notification Center copy, as macOS does
         guard NotifPrefs.openOnClick else { return }
@@ -87,6 +88,26 @@ final class NotificationClickActions {
         case "window" where canOpenOnPhone(key: key): openInOwnWindow(key: key)
         default:
             if canOpenOnPhone(key: key) { openOnPhone(key: key) } else { openNotificationsScreen() }
+        }
+    }
+
+    static let infoPrefix = "dd-info-"
+
+    /// Outcome message the user can actually see. Toasts exist only inside the main window, and DroidDock usually runs
+    /// with it closed, so without a visible window the message becomes a floating DroidDock banner (click: open window).
+    /// `windowOnly`: pure progress/confirmation text that needs no banner when the window is closed.
+    func notify(_ kind: Toast.Kind, _ text: String, windowOnly: Bool = false) {
+        let w = WindowControl.mainWindow
+        // A message that must be seen needs a window the user is actually looking at: frontmost app and key window.
+        // Plain progress text only needs the window to be on screen.
+        let seen = w.map { $0.isVisible && !$0.isMiniaturized && $0.occlusionState.contains(.visible)
+                           && (windowOnly || (NSApp.isActive && $0.isKeyWindow)) } ?? false
+        if seen {
+            AppModel.shared.toast(kind, text)
+        } else if !windowOnly {
+            // Stable id per message, so a repeat replaces and re-arms the banner instead of stacking.
+            BannerCenter.shared.show(NativeNotification(id: Self.infoPrefix + "\(kind)-\(text.hashValue)", title: "DroidDock",
+                                                        body: text, replyKey: nil, sound: false))
         }
     }
 
@@ -104,28 +125,77 @@ final class NotificationClickActions {
     /// "Open" buttons (banner, menu bar, Notifications list, Notification Center): the app in its own Mac window on a
     /// virtual display whenever that is possible, so the phone's screen stays free. Only an app set to "Open on
     /// phone", or a Mac without ADB + a capable scrcpy, gets the whole-phone mirror.
-    func open(key: String) {
-        if windowSerial != nil, mode(for: package(forNotificationKey: key)) != "phone" { openInOwnWindow(key: key) }
-        else { openOnPhone(key: key) }
+    func open(key: String, pkg: String? = nil, app: String? = nil) {
+        if windowSerial != nil, mode(for: package(forNotificationKey: key) ?? pkg) != "phone" { openInOwnWindow(key: key, pkg: pkg, app: app) }
+        else { openOnPhone(key: key, pkg: pkg, app: app) }
+    }
+
+    /// The "Open" action button of a Notification Center copy. It never obeys the banner-click choices
+    /// ("do nothing", "open on click" off) and always ends in something visible. `pkg`/`app` come from the
+    /// notification itself, for when the phone no longer lists it.
+    func explicitOpen(key: String, pkg: String?, app: String?) {
+        Task { @MainActor in
+            let model = AppModel.shared
+            guard model.wifi.connected else {
+                openNotificationsScreen()
+                AppModel.shared.toast(.bad, tr("Your phone isn't connected"))   // the window is opening: toast, not a banner
+                return
+            }
+            if model.notifications.contains(where: { $0.key == key }) { open(key: key, pkg: pkg, app: app); return }
+            guard let pkg = package(forNotificationKey: key) ?? pkg else {
+                openNotificationsScreen()
+                AppModel.shared.toast(.bad, tr("That notification is gone"))
+                return
+            }
+            await launchGone(pkg: pkg, name: app ?? pkg, preferWindow: windowSerial != nil && mode(for: pkg) != "phone")
+        }
+    }
+
+    /// The notification is gone but the app is known: start the app instead and say so.
+    private func launchGone(pkg: String, name: String, preferWindow: Bool) async {
+        let model = AppModel.shared
+        guard model.wifi.connected else {
+            openNotificationsScreen(); AppModel.shared.toast(.bad, tr("Your phone isn't connected")); return
+        }
+        if preferWindow, let serial = windowSerial {
+            do {
+                let win = try await Core.shared.adbAppWindowOpen(serial: serial, package: pkg, title: name)
+                _ = try await Core.shared.adbAppWindowPlace(serial: serial, package: pkg, displayId: win.displayId, fired: false)
+                notify(.info, tr("That notification is gone — opened {app}", ["app": name]))
+                return
+            } catch {
+                // The core has no command to tear the empty virtual-display window down, so this is terminal:
+                // falling back to the phone mirror would leave both on screen.
+                dlog("notif-open: own window for gone notification failed: \(error)")
+                notify(.bad, tr("Couldn't open {app} on your phone", ["app": name]))
+                return
+            }
+        }
+        do { try await Core.shared.appLaunch(pkg: pkg) }
+        catch { notify(.bad, tr("Couldn't open {app} on your phone", ["app": name])); return }
+        notify(.info, tr("That notification is gone — opened {app}", ["app": name]))
+        await showPhone()
     }
 
     /// Opens the notification's own screen on the phone, then shows the phone in the framed mirror window.
-    func openOnPhone(key: String) {
-        Task { @MainActor in await runOpenOnPhone(key: key) }
+    func openOnPhone(key: String, pkg: String? = nil, app: String? = nil) {
+        Task { @MainActor in await runOpenOnPhone(key: key, fallbackPkg: pkg, fallbackApp: app) }
     }
 
     /// Opens the notification's app in its own Mac window on a virtual display, so the phone's screen stays free.
     /// Tier 1: the phone fires the tap action straight onto the display. Tier 2: it opened on the phone, so its task is
     /// moved. Tier 3: neither worked, so the app's launcher is started there and the user taps the chat. The working
     /// tier is remembered per phone.
-    func openInOwnWindow(key: String) {
-        Task { @MainActor in await runOpenInOwnWindow(key: key) }
+    func openInOwnWindow(key: String, pkg: String? = nil, app: String? = nil) {
+        Task { @MainActor in await runOpenInOwnWindow(key: key, fallbackPkg: pkg, fallbackApp: app) }
     }
 
-    private func runOpenInOwnWindow(key: String) async {
+    private func runOpenInOwnWindow(key: String, fallbackPkg: String? = nil, fallbackApp: String? = nil) async {
         let model = AppModel.shared
-        guard let pkg = package(forNotificationKey: key), let serial = windowSerial else { await runOpenOnPhone(key: key); return }
-        let name = model.notifications.first { $0.key == key }?.app ?? pkg
+        guard let pkg = package(forNotificationKey: key) ?? fallbackPkg, let serial = windowSerial else {
+            await runOpenOnPhone(key: key, fallbackPkg: fallbackPkg, fallbackApp: fallbackApp); return
+        }
+        let name = model.notifications.first { $0.key == key }?.app ?? fallbackApp ?? pkg
         let tierKey = "\(Self.windowTierKey).\(serial)"
         let cached = UserDefaults.standard.string(forKey: tierKey)
         do {
@@ -136,36 +206,44 @@ final class NotificationClickActions {
                 let target = model.wifi.supports("notifopendisplay") && cached != "move" ? win.displayId : nil
                 if let r = try? await Core.shared.notifOpen(key: key, displayId: target), r.ok {
                     fired = true
-                    if r.locked == true { model.toast(.info, tr("Unlock your phone to see it")) }
+                    if r.locked == true { notify(.info, tr("Unlock your phone to see it")) }
                 }
             }
             let placed = try await Core.shared.adbAppWindowPlace(serial: serial, package: pkg, displayId: win.displayId, fired: fired)
             if placed.tier != "launch" { UserDefaults.standard.set(placed.tier, forKey: tierKey) }
-            model.toast(placed.tier == "launch" ? .info : .ok,
-                        placed.tier == "launch" ? tr("Opened {app}: tap the chat", ["app": name])
-                                                : tr("Opened {app} in its own window", ["app": name]))
+            notify(placed.tier == "launch" ? .info : .ok,
+                   placed.tier == "launch" ? tr("Opened {app}: tap the chat", ["app": name])
+                                           : tr("Opened {app} in its own window", ["app": name]),
+                   windowOnly: placed.tier != "launch")
         } catch {
             dlog("notif-open: own window failed, mirroring the phone instead: \(error)")
-            await runOpenOnPhone(key: key)
+            await runOpenOnPhone(key: key, fallbackPkg: fallbackPkg, fallbackApp: fallbackApp)
         }
     }
 
-    private func runOpenOnPhone(key: String) async {
+    private func runOpenOnPhone(key: String, fallbackPkg: String? = nil, fallbackApp: String? = nil) async {
         let model = AppModel.shared
-        guard model.wifi.connected else { model.toast(.bad, tr("Your phone isn't connected")); return }
-        let pkg = package(forNotificationKey: key)
-        model.toast(.info, tr("Opening on your phone…"))
+        guard model.wifi.connected else { notify(.bad, tr("Your phone isn't connected")); return }
+        let pkg = package(forNotificationKey: key) ?? fallbackPkg
+        let name = model.notifications.first { $0.key == key }?.app ?? fallbackApp ?? pkg ?? ""
+        notify(.info, tr("Opening on your phone…"), windowOnly: true)
         if model.wifi.supports("notifopen") {
+            var opened = false
             do {
                 let r = try await Core.shared.notifOpen(key: key)
-                if !r.ok { model.toast(.bad, tr("Couldn't open — the notification is gone")); return }
-                if r.locked == true { model.toast(.info, tr("Unlock your phone to see it")) }
-            } catch {
-                model.toast(.bad, tr("Couldn't open — the notification is gone")); return
+                opened = r.ok
+                if r.ok, r.locked == true { notify(.info, tr("Unlock your phone to see it")) }
+            } catch { dlog("notif-open failed: \(error)") }
+            if !opened {
+                // The phone no longer has it: start the app instead when we know which one it was.
+                guard let pkg else { notify(.bad, tr("Couldn't open — the notification is gone")); return }
+                await launchGone(pkg: pkg, name: name, preferWindow: false)
+                return
             }
         } else if let pkg {
             // Older phone app: no tap action to fire, so launch the app itself.
-            try? await Core.shared.appLaunch(pkg: pkg)
+            do { try await Core.shared.appLaunch(pkg: pkg) }
+            catch { notify(.bad, tr("Couldn't open {app} on your phone", ["app": name])); return }
         }
         await showPhone()
     }
@@ -185,6 +263,7 @@ final class NotificationClickActions {
             catch { dlog("notif-open: embedded scrcpy failed, trying Wi-Fi mirror: \(error)") }
         }
         if model.wifiFeaturesAvailable { await session.start(source: "screen") }
+        else { notify(.info, tr("Opened on your phone — Wi-Fi is off, so it can't be shown here")) }
     }
 }
 

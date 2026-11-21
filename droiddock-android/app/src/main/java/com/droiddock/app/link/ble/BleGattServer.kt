@@ -70,7 +70,17 @@ internal class BleGattServer(private val ctx: Context, private val host: Host) {
         @Volatile var closed = false
         @Volatile private var welcomed = false
         private val openedAt = System.currentTimeMillis()
-        private val deadline = Runnable { if (!welcomed) disconnect("handshake timeout") }
+        /** Set on the CCCD write: only then is this the DroidDock Mac and not another GATT client. */
+        @Volatile var subscribedOnce = false
+        private val deadline = Runnable {
+            when {
+                welcomed -> {}
+                // macOS opens GATT (often over the Classic link) for its own services on a bonded phone.
+                // Release our slot quietly: cancelling would cut a link the Mac's DroidDock may reuse next.
+                !subscribedOnce -> { BleLog.i("idle-link", "${BleLog.who(device.address)} never subscribed; slot released, link kept"); disconnectQuietly() }
+                else -> disconnect("handshake timeout")
+            }
+        }
 
         fun armHandshakeTimer() { main.postDelayed(deadline, HANDSHAKE_MS) }
 
@@ -115,9 +125,25 @@ internal class BleGattServer(private val ctx: Context, private val host: Host) {
                 else if (closeWhenDrained) finish = true
             }
             if (finish) { disconnect("auth failed"); return }
-            if (next != null && !notify(this, next)) {
+            if (next != null) send(next, 0)
+        }
+
+        /**
+         * Hand one ATT value to the stack. A refusal is usually transient (Samsung answers "busy" while a
+         * previous notification or a connection-parameter update is in progress), so retry the SAME value
+         * with a short backoff; only a refusal that persists ends the session. Dropping it would break the
+         * L1 sequence, so the value is never skipped.
+         */
+        private fun send(value: ByteArray, attempt: Int) {
+            if (closed) return
+            val code = notify(this, value)
+            if (code == 0) return
+            if (attempt < NOTIFY_RETRIES) {
+                BleLog.i("notify-retry", "${BleLog.who(device.address)} code=$code attempt=${attempt + 1}")
+                main.postDelayed({ send(value, attempt + 1) }, NOTIFY_BACKOFF_MS shl attempt)
+            } else {
                 synchronized(this) { inFlight = false }
-                disconnect("notify rejected")
+                disconnect("notify rejected code=$code after ${attempt + 1} tries")
             }
         }
 
@@ -184,17 +210,18 @@ internal class BleGattServer(private val ctx: Context, private val host: Host) {
         service = null
     }
 
-    private fun notify(c: Conn, value: ByteArray): Boolean {
-        val s = server ?: return false
-        val ch = service?.getCharacteristic(BleIds.P2M) ?: return false
+    /** 0 on success, else the stack's status code (-1: no server/characteristic, -2: threw). */
+    private fun notify(c: Conn, value: ByteArray): Int {
+        val s = server ?: return -1
+        val ch = service?.getCharacteristic(BleIds.P2M) ?: return -1
         return runCatching {
             if (Build.VERSION.SDK_INT >= 33) {
-                s.notifyCharacteristicChanged(c.device, ch, false, value) == 0 // BluetoothStatusCodes.SUCCESS
+                s.notifyCharacteristicChanged(c.device, ch, false, value) // BluetoothStatusCodes, 0 = SUCCESS
             } else {
                 @Suppress("DEPRECATION")
-                run { ch.value = value.copyOf(); s.notifyCharacteristicChanged(c.device, ch, false) }
+                run { ch.value = value.copyOf(); if (s.notifyCharacteristicChanged(c.device, ch, false)) 0 else 1 }
             }
-        }.getOrDefault(false)
+        }.getOrDefault(-2)
     }
 
     private val callback = object : BluetoothGattServerCallback() {
@@ -289,12 +316,17 @@ internal class BleGattServer(private val ctx: Context, private val host: Host) {
             if (responseNeeded) runCatching {
                 server?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value)
             }
-            val c = current ?: return
+            val enable = d.uuid == BleIds.CCCD && value != null && value.contentEquals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+            val c = (if (enable) connFor(device) else current) ?: run {
+                if (enable) BleLog.i("subscribe-refused", "${BleLog.who(device.address)} ready=$ready token=${tokenProvider() != null} busy=${current != null}")
+                return
+            }
             BleLog.i("cccd-write", "${BleLog.who(device.address)} value=${value?.joinToString("") { "%02x".format(it) }} hasCurrent=${current != null}")
             if (d.uuid == BleIds.CCCD && value != null && c.device.address == device.address &&
                 value.contentEquals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
             ) {
                 subscribed[c] = true
+                c.subscribedOnce = true
                 c.session.onSubscribed() // sends P_HELLO
             }
         }
@@ -306,8 +338,25 @@ internal class BleGattServer(private val ctx: Context, private val host: Host) {
 
     private val subscribed = java.util.WeakHashMap<Conn, Boolean>()
 
+    /**
+     * The connection for a subscribing Mac. Usually made in onConnectionStateChange, but a GATT link can
+     * reach us without that callback: on a bonded dual-mode phone macOS reuses a GATT channel (often over
+     * the Classic link) that one of its own services opened earlier, so the first we hear of the Mac's
+     * DroidDock is this CCCD write. Admit it here rather than drop the subscribe and time out.
+     */
+    private fun connFor(device: BluetoothDevice): Conn? {
+        current?.let { return it.takeIf { c -> c.device.address == device.address && !c.closed } }
+        val token = tokenProvider() ?: return null
+        if (!BleAdmission.accept(ready, true, false)) return null
+        BleLog.i("late-admit", "${BleLog.who(device.address)} first seen on its subscribe (reused GATT link)")
+        return Conn(device, token).also { current = it; it.armHandshakeTimer() }
+    }
+
     companion object {
         const val HANDSHAKE_MS = 5_000L
+        /** Retries for a refused notification: 25, 50, 100, 200, 400 ms (~0.8 s in all). */
+        const val NOTIFY_RETRIES = 5
+        const val NOTIFY_BACKOFF_MS = 25L
         /** How long after a replace-stale a DISCONNECTED for that address is taken as the old link's. */
         const val LATE_DISCONNECT_MS = 2_000L
     }

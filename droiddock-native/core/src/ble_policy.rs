@@ -56,14 +56,15 @@ impl LogLimiter {
 
 static LOG_LIMITER: OnceLock<Mutex<LogLimiter>> = OnceLock::new();
 
-/// Release-safe, rate-limited `[ble]` diagnostic (stderr), one line per `key` per 30 s.
+/// Release-safe, rate-limited `[ble]` diagnostic (stderr + the Mac's unified log), one line per `key` per 30 s.
 pub(crate) fn ble_log(key: &str, msg: &str) {
     let n = LOG_LIMITER.get_or_init(Default::default).lock().unwrap().admit(key, now_ms());
     if let Some(n) = n {
-        if n > 0 {
-            eprintln!("[ble] {key}: {msg} (+{n} similar suppressed)");
-        } else {
-            eprintln!("[ble] {key}: {msg}");
+        let line = if n > 0 { format!("{key}: {msg} (+{n} similar suppressed)") } else { format!("{key}: {msg}") };
+        eprintln!("[ble] {line}");
+        // stderr is lost for the installed app: Swift writes this to the unified log (category "ble").
+        if let Some(app) = APP.get() {
+            let _ = app.emit("ble-control", json!({ "op": "log", "line": line }));
         }
     }
 }
@@ -454,6 +455,8 @@ struct HubInner {
     conns: HashMap<String, Arc<Conn>>,
     radio: String,
     auth: String,
+    /// Swift saw CBError 14/15: the Mac's bond for the phone is stale; only re-pairing helps.
+    pairing_stale: bool,
     rssi: Option<i64>,
     scanning: bool,
     powered: Option<bool>,
@@ -472,6 +475,7 @@ impl Default for BleHub {
             conns: HashMap::new(),
             radio: "unknown".into(),
             auth: "notDetermined".into(),
+            pairing_stale: false,
             rssi: None,
             scanning: false,
             powered: None,
@@ -507,6 +511,9 @@ pub fn cmd_radio(app: &AppHandle, args: &Value) -> Result<Value, String> {
         let mut g = h.0.lock().unwrap();
         g.radio = s(args, "radio")?;
         g.auth = s(args, "auth")?;
+        if let Some(b) = args.get("pairingStale").and_then(Value::as_bool) {
+            g.pairing_stale = b;
+        }
     }
     poke();
     Ok(Value::Null)
@@ -715,6 +722,7 @@ fn status_json(app: &AppHandle) -> Value {
         "mode": cfg.connection_mode,
         "radio": g.radio,
         "auth": g.auth,
+        "pairingStale": g.pairing_stale,
         "state": state,
         "rssi": if live { g.rssi.map(Value::from).unwrap_or(Value::Null) } else { Value::Null },
         "autoReturn": cfg.ble_auto_return,

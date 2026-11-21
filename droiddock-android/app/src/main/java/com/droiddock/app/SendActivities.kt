@@ -45,7 +45,7 @@ class SendClipboardActivity : Activity() {
             val ok = ConnectionManager.sendClipboardImage(image)
             Toast.makeText(
                 this,
-                if (ok) t("Image sent to Mac") else t("Not connected to Mac"),
+                if (ok) t("Image sent to Mac") else ConnectionManager.notSentText(wifiOnly = true),
                 Toast.LENGTH_SHORT
             ).show()
             finish()
@@ -62,7 +62,7 @@ class SendClipboardActivity : Activity() {
             when {
                 text.isEmpty() -> t("Clipboard is empty")
                 sent -> t("Sent to Mac")
-                else -> t("Not connected to Mac")
+                else -> ConnectionManager.notSentText(wifiOnly = false, text = text)
             },
             Toast.LENGTH_SHORT
         ).show()
@@ -78,7 +78,7 @@ class ProcessTextActivity : Activity() {
         ConnectionManager.wake(applicationContext)
         val text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString().orEmpty()
         val sent = text.isNotEmpty() && ConnectionManager.sendClipboardText(text)
-        Toast.makeText(this, if (sent) t("Sent to Mac") else t("Not connected to Mac"), Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, if (sent) t("Sent to Mac") else ConnectionManager.notSentText(wifiOnly = false, text = text), Toast.LENGTH_SHORT).show()
         finish()
     }
 }
@@ -91,7 +91,7 @@ class ShareTextActivity : Activity() {
         ConnectionManager.wake(applicationContext)
         val text = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
         val sent = text.isNotEmpty() && ConnectionManager.sendClipboardText(text)
-        Toast.makeText(this, if (sent) t("Sent to Mac") else t("Not connected to Mac"), Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, if (sent) t("Sent to Mac") else ConnectionManager.notSentText(wifiOnly = false, text = text), Toast.LENGTH_SHORT).show()
         finish()
     }
 }

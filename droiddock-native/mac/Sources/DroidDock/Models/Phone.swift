@@ -134,6 +134,7 @@ struct BleStatus: Codable, Sendable, Equatable {
     var prefer: String = "auto"         // auto|wifi|ble
     var wifiAvailable: Bool = false
     var bleLive: Bool = false
+    var pairingStale: Bool? = nil      // CBError 14/15 on the last connect: re-pair in System Settings › Bluetooth
 }
 
 struct LinkQuality: Codable, Sendable, Equatable {

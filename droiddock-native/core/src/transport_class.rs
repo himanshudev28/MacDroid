@@ -31,7 +31,7 @@ const P2M_ANY: &[&str] = &[
 
 const M2P_ANY: &[&str] = &[
     "welcome", "caps", "ping", "pong", "mac-info", "mac-media", "reply", "dismiss", "notif-action", "notif-open",
-    "action-call", "call-action", "ring", "health", "health-fix", "media-cmd",
+    "action-call", "call-action", "call-arm", "ring", "health", "health-fix", "media-cmd",
     "sms-threads", "sms-messages", "sms-send", "app-launch", "link-mode", "link-prefer",
 ];
 
@@ -89,7 +89,8 @@ mod tests {
             "photos-changed", "remote-button", "fs-list", "fs-pull", "phone-push", "phone-push-begin",
             "photos-list", "photo-thumb", "app-icon", "apps-list", "wallpaper", "screenshot",
             "mirror-started", "audio-started", "camera-start", "control-unavailable", "mac-fs-list",
-            "mac-apps-list", "mac-app-launch", "contacts", "nonsense",
+            "mac-apps-list", "mac-app-launch", "contacts", "nonsense", "camera-lens", "camera-photo",
+            "camera-orientation", "camera-orient-watch", "camera-zoom", "camera-zoom-state", "camera-photo-data", "camera-photo-error", "camera-lens-failed",
         ] {
             assert_eq!(c(json!({"type": ty}), Dir::PhoneToMac), Class::Wifi, "{ty}");
             assert_eq!(c(json!({"type": ty}), Dir::MacToPhone), Class::Wifi, "{ty}");

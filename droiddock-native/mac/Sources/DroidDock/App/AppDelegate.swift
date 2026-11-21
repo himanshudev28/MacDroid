@@ -119,6 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !cleanedUp else { return }
         cleanedUp = true
         NowPlayingBridge.shared.shutdown()
+        MirrorSession.shared.recorder.stopAndWait()
         Core.shared.shutdown()
     }
 

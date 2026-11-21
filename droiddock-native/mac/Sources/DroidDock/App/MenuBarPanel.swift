@@ -9,6 +9,7 @@ import SwiftUI
 struct MenuBarPanel: View {
     @Environment(AppModel.self) private var model
     @State private var shell = ShellState.shared
+    @State private var confirmingClear = false
     @State private var replyKey: String?
     @State private var replyText = ""
     @FocusState private var replyFocused: Bool
@@ -126,12 +127,12 @@ struct MenuBarPanel: View {
                 Spacer(minLength: 0)
                 if ringing {
                     circle("phone.down.fill", tr("Decline"), DD.bad) { callAction("end") }
-                    circle("phone.fill", tr("Answer"), DD.ok) { callAction("answer") }
+                    circle("phone.fill", tr("Answer"), DD.ok) { CallControls.shared.answer() }
                 } else {
                     IconButton(systemImage: call.muted == true ? "mic.slash.fill" : "mic.fill", label: tr("Mute"),
                                isOn: call.muted == true) { callAction("mute", on: !(call.muted ?? false)) }
                     IconButton(systemImage: "speaker.wave.2.fill", label: tr("Speaker"),
-                               isOn: call.speaker == true) { callAction("speaker", on: !(call.speaker ?? false)) }
+                               isOn: call.speaker == true) { CallControls.shared.toggleSpeaker() }
                     circle("phone.down.fill", tr("End call"), DD.bad) { callAction("end") }
                 }
             }
@@ -177,6 +178,14 @@ struct MenuBarPanel: View {
                 HStack {
                     Text(tr("Notifications")).font(DD.Font.label.weight(.semibold)).foregroundStyle(DD.dim)
                     Spacer()
+                    Button { requestClear() } label: {
+                        Text(confirmingClear ? tr("Confirm") : tr("Clear All"))
+                            .font(DD.Font.label).foregroundStyle(confirmingClear ? Color(nsColor: .systemRed) : DD.dim)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(visible.isEmpty)
+                    .padding(.trailing, DD.Space.sm)
+                    .accessibilityLabel(confirmingClear ? tr("Confirm clearing {n} notifications", ["n": visible.count]) : tr("Clear All"))
                     if model.notifications.count > rows.count || model.notifications.count > 3 {
                         Button { WindowControl.showMain(); model.selection = .notifications; MenuBarController.shared.close() } label: {
                             Text(tr("Show all ({n})", ["n": model.notifications.count]))
@@ -207,6 +216,17 @@ struct MenuBarPanel: View {
                 .padding(.bottom, DD.Space.xs)
             }
         }
+    }
+
+    /// Above the threshold the first click arms the button ("Confirm"); it disarms after 3 s.
+    private func requestClear() {
+        if visible.count > AppModel.clearConfirmThreshold && !confirmingClear {
+            confirmingClear = true
+            Task { @MainActor in try? await Task.sleep(for: .seconds(3)); confirmingClear = false }
+            return
+        }
+        confirmingClear = false
+        withAnimation { model.clearNotifications(visible) }
     }
 
     private func toggleReply(_ n: PhoneNotification) {

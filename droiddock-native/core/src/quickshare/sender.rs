@@ -198,7 +198,7 @@ pub async fn quickshare_send(app: AppHandle, device_id: String, paths: Vec<Strin
         let peer_name = device.name.clone();
         let pump = tokio::spawn(async move {
             let mut tracked: Option<crate::transfer_log::Tracked> = None;
-            // The sender reports once per 64 KiB chunk; the UI needs ~10 updates a second, not thousands.
+            // The sender reports once per chunk (512 KiB); the UI needs ~10 updates a second, not thousands.
             let mut last_emit: Option<std::time::Instant> = None;
             while let Some(ev) = rx.recv().await {
                 match ev {

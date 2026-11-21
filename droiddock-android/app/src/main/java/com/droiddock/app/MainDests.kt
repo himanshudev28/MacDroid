@@ -211,7 +211,7 @@ internal fun FilesDest(sending: Boolean, onSendFile: () -> Unit) {
                     when {
                         text.isEmpty() -> t("Clipboard is empty")
                         sent -> t("Sent to Mac")
-                        else -> t("Not connected to Mac")
+                        else -> ConnectionManager.notSentText(wifiOnly = false, text = text)
                     },
                     Toast.LENGTH_SHORT
                 ).show()

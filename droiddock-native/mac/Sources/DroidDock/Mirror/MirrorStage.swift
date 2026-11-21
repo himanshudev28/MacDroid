@@ -25,9 +25,10 @@ struct MirrorStage: View {
             RoundedRectangle(cornerRadius: r, style: .continuous).fill(.black)
             MirrorLayerView(renderer: s.renderer, input: s.input,
                             inputEnabled: live && !s.isCamera,
-                            mirrored: s.isCamera && s.facing == "front",
+                            mirrored: s.isCamera && s.facing == "front", rotation: s.rotation, cropScale: s.cropScale,
                             cornerRadius: r, hidden: !live)
             overlay
+            if live && s.isCamera { CameraPictureOverlay(); ZoomDial() }
         }
     }
 
@@ -86,7 +87,8 @@ struct MirrorStage: View {
     /// Width / height of the phone picture; a plain phone shape until the first size is known.
     private var pictureAspect: CGFloat {
         guard let i = s.info, i.width > 0, i.height > 0 else { return 9.0 / 19.5 }
-        return CGFloat(i.width) / CGFloat(i.height)
+        let d = s.displaySize(width: i.width, height: i.height)
+        return CGFloat(d.width) / CGFloat(d.height)
     }
 
     /// Inside the main window: same arrangement as the pop-out. Nothing sits on the picture: any note or
@@ -156,16 +158,7 @@ struct MirrorControlBar: View {
                 btn("square.on.square", tr("Recents")) { s.input.key("recents") }
                 divider
             }
-            if live && s.isCamera {
-                Button { s.flipCamera(); MirrorSurfaceView.refocus() } label: {
-                    Label(s.facing == "front" ? tr("Front") : tr("Back"), systemImage: "arrow.triangle.2.circlepath.camera")
-                        .font(DD.Font.label).foregroundStyle(DD.OnCard.primary)
-                        .padding(.horizontal, DD.Space.sm).frame(height: 28)
-                }
-                .buttonStyle(.plain).focusable(false)
-                .help(tr("Switch front/back camera"))
-                divider
-            }
+            if live && s.isCamera { cameraControls }
             if live && !s.isCamera && s.controlHint {
                 hintButton
             }
@@ -191,6 +184,104 @@ struct MirrorControlBar: View {
         .environment(\.colorScheme, .dark)
         .ddAnimation(Motion.select, value: live)
         .onChange(of: showHint) { _, open in chrome?.hold(open) }
+    }
+
+    // MARK: Camera controls
+
+    @ViewBuilder private var cameraControls: some View {
+        if s.hasLenses {
+            if s.backLenses.count > 1 {
+                HStack(spacing: 2) {
+                    ForEach(s.backLenses) { l in lensChip(l) }
+                }
+                .padding(2)
+                .background(Capsule().fill(.black.opacity(0.28)))
+            } else if let l = s.backLenses.first, s.facing != "front" { lensChip(l) }
+            btn("arrow.triangle.2.circlepath.camera", tr("Switch front/back camera")) { s.flipCamera() }
+                .disabled(s.switchingLens || s.frontLens == nil)
+            btn("rotate.right", tr("Rotate the picture")) { s.rotateManually() }
+            divider
+            modeSwitch
+            shutterButton
+            divider
+        } else {
+            Button { s.flipCamera(); MirrorSurfaceView.refocus() } label: {
+                Label(s.facing == "front" ? tr("Front") : tr("Back"), systemImage: "arrow.triangle.2.circlepath.camera")
+                    .font(DD.Font.label).foregroundStyle(DD.OnCard.primary)
+                    .padding(.horizontal, DD.Space.sm).frame(height: 28)
+            }
+            .buttonStyle(.plain).focusable(false)
+            .help(tr("Switch front/back camera"))
+            btn("rotate.right", tr("Rotate the picture")) { s.rotateManually() }
+            divider
+            modeSwitch
+            shutterButton
+            divider
+        }
+    }
+
+    private func lensChip(_ l: MirrorLens) -> some View {
+        let on = l.id == s.lens
+        let text = on ? l.label : l.label.replacingOccurrences(of: "×", with: "")
+        return Button {
+            if on, s.zoomRange != nil { s.zoomDialOpen.toggle() } else { s.selectLens(l.id) }
+            MirrorSurfaceView.refocus()
+        } label: {
+            Text(text)
+                .font(.system(size: 11, weight: .semibold, design: .rounded)).monospacedDigit()
+                .foregroundStyle(on ? Color(nsColor: .systemYellow) : DD.OnCard.secondary)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(on ? DD.OnCard.fillActive : .clear))
+                .contentShape(Circle())
+        }
+        .buttonStyle(PressableButtonStyle()).focusable(false)
+        .disabled(s.switchingLens)
+        .ddAnimation(Motion.select, value: on)
+        .help(tr("Lens {name}", ["name": l.label]))
+        .accessibilityLabel(tr("Lens {name}", ["name": l.label]))
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    private var modeSwitch: some View {
+        HStack(spacing: DD.Space.xs) {
+            modeText(tr("PHOTO"), .photo)
+            modeText(tr("VIDEO"), .video)
+        }
+        .padding(.horizontal, DD.Space.xs)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(tr("Capture mode"))
+    }
+
+    private func modeText(_ t: String, _ m: MirrorSession.CaptureMode) -> some View {
+        let on = s.captureMode == m
+        return Button { if !s.recording { s.captureMode = m }; MirrorSurfaceView.refocus() } label: {
+            Text(t).font(.system(size: 10, weight: .semibold)).tracking(0.8)
+                .foregroundStyle(on ? Color(nsColor: .systemYellow) : DD.OnCard.secondary)
+                .frame(height: 28)
+        }
+        .buttonStyle(.plain).focusable(false)
+        .ddAnimation(Motion.select, value: on)
+        .accessibilityLabel(t.capitalized)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    private var shutterButton: some View {
+        let video = s.captureMode == .video
+        return Button { s.shutter(); MirrorSurfaceView.refocus() } label: {
+            ZStack {
+                Circle().strokeBorder(.white, lineWidth: 2).frame(width: 30, height: 30)
+                RoundedRectangle(cornerRadius: video && s.recording ? 3 : 11, style: .continuous)
+                    .fill(video ? Color(nsColor: .systemRed) : .white)
+                    .frame(width: video && s.recording ? 12 : 22, height: video && s.recording ? 12 : 22)
+            }
+            .frame(width: 32, height: 32)
+            .contentShape(Circle())
+        }
+        .buttonStyle(PressableButtonStyle()).focusable(false)
+        .ddAnimation(Motion.select, value: s.recording)
+        .ddAnimation(Motion.select, value: video)
+        .help(video ? (s.recording ? tr("Stop recording") : tr("Start recording")) : tr("Take photo"))
+        .accessibilityLabel(video ? (s.recording ? tr("Stop recording") : tr("Start recording")) : tr("Take photo"))
     }
 
     /// HUD glass over whatever is behind the capsule; a solid dark fill under Reduce Transparency.
@@ -268,5 +359,105 @@ private struct ControlHintRow: View {
                 .buttonStyle(.link)
         }
         .font(DD.Font.callout)
+    }
+}
+
+/// On the camera picture: the shutter flash, the recording pill (top centre) and the "Switching…" state.
+private struct CameraPictureOverlay: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var flash = false
+    private var s: MirrorSession { MirrorSession.shared }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            Rectangle().fill(.white).opacity(flash ? 0.7 : 0).allowsHitTesting(false)
+            if s.zoomPillVisible {
+                Text(String(format: "%.1f×", s.requestedZoom)).font(DD.Font.label).monospacedDigit()
+                    .foregroundStyle(Color(nsColor: .systemYellow))
+                    .padding(.horizontal, DD.Space.sm).padding(.vertical, DD.Space.xs)
+                    .background(Capsule().fill(.black.opacity(0.55)))
+                    .frame(maxHeight: .infinity, alignment: .bottom).padding(.bottom, DD.Space.xl)
+                    .ddTransition(.opacity)
+                    .accessibilityHidden(true)
+            }
+            if s.recording { recordingPill.padding(.top, DD.Space.sm).ddTransition(.opacity) }
+            if s.switchingLens {
+                HStack(spacing: DD.Space.xs) {
+                    ProgressView().controlSize(.small).tint(.white)
+                    Text(tr("Switching…")).font(DD.Font.label).foregroundStyle(DD.OnCard.primary)
+                }
+                .padding(.horizontal, DD.Space.sm).padding(.vertical, DD.Space.xs)
+                .background(Capsule().fill(.black.opacity(0.55)))
+                .frame(maxHeight: .infinity, alignment: .center)
+                .ddTransition(.opacity)
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .allowsHitTesting(false)
+        .ddAnimation(Motion.content, value: s.recording)
+        .ddAnimation(Motion.content, value: s.switchingLens)
+        .ddAnimation(Motion.content, value: s.zoomPillVisible)
+        .onChange(of: s.shutterTick) { _, _ in
+            guard !reduceMotion, !Motion.systemReduceMotion else { return }
+            flash = true
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(30))
+                withAnimation(.easeOut(duration: 0.25)) { flash = false }
+            }
+        }
+    }
+
+    private var recordingPill: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { ctx in
+            HStack(spacing: DD.Space.xs) {
+                Circle().fill(Color(nsColor: .systemRed)).frame(width: 8, height: 8)
+                if let start = s.recordStart {
+                    let t = max(0, Int(ctx.date.timeIntervalSince(start)))
+                    Text(String(format: "%02d:%02d", t / 60, t % 60)).monospacedDigit()
+                } else {
+                    Text(tr("Waiting for keyframe…"))
+                }
+            }
+            .font(DD.Font.label).foregroundStyle(DD.OnCard.primary)
+            .padding(.horizontal, DD.Space.sm).padding(.vertical, DD.Space.xs)
+            .background(Capsule().fill(.black.opacity(0.55)))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(tr("Recording"))
+        }
+    }
+}
+
+/// Compact zoom dial over the picture's lower edge: log-scale slider with ticks at the lens multipliers. Shown when the
+/// active lens chip was clicked and the stream reports a zoom range.
+private struct ZoomDial: View {
+    private var s: MirrorSession { MirrorSession.shared }
+    var body: some View {
+        if s.zoomDialOpen, let r = s.zoomRange {
+            let lo = log(r.lowerBound), hi = log(max(r.upperBound, r.lowerBound * 1.01))
+            VStack {
+                Spacer()
+                VStack(spacing: 2) {
+                    GeometryReader { g in
+                        ZStack(alignment: .leading) {
+                            ForEach(s.backLenses.compactMap { $0.zoom }, id: \.self) { z in
+                                Rectangle().fill(DD.OnCard.secondary).frame(width: 1, height: 8)
+                                    .offset(x: g.size.width * CGFloat((log(z) - lo) / (hi - lo)))
+                            }
+                        }.frame(maxHeight: .infinity, alignment: .bottom)
+                    }.frame(height: 8).padding(.horizontal, 8)
+                    Slider(value: Binding(get: { log(min(max(s.requestedZoom, r.lowerBound), r.upperBound)) },
+                                          set: { s.setZoom(exp($0)) }), in: lo...hi)
+                        .controlSize(.small).tint(Color(nsColor: .systemYellow))
+                        .accessibilityLabel(tr("Zoom"))
+                        .accessibilityValue(String(format: "%.1f×", s.requestedZoom))
+                        .accessibilityAdjustableAction { d in _ = s.zoomKey(d == .increment ? 1 : -1) }
+                }
+                .padding(.horizontal, DD.Space.sm).padding(.vertical, DD.Space.xs)
+                .frame(maxWidth: 280)
+                .background(Capsule().fill(.black.opacity(0.55)))
+                .padding(.bottom, DD.Space.md)
+                .ddTransition(.opacity)
+            }
+        }
     }
 }

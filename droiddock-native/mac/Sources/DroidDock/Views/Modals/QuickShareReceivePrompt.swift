@@ -6,7 +6,8 @@ import SwiftUI
 struct QuickShareReceivePrompt: View {
     @Environment(AppModel.self) private var model
     let request: QuickShareRequest
-    @State private var accepted = false
+    @State private var acceptedHere = false
+    private var accepted: Bool { acceptedHere || model.quickShareAcceptedId == request.id }
 
     private var total: Double { request.files.reduce(0) { $0 + max(0, $1.size) } }
 
@@ -76,8 +77,17 @@ struct QuickShareReceivePrompt: View {
 
     private func respond(_ accept: Bool) {
         let id = request.id
-        Task { try? await Core.shared.quickshareRespond(id: id, accept: accept) }
-        if accept { accepted = true } else { model.quickShare = nil }
+        if accept { acceptedHere = true; model.quickShareAcceptedId = id }
+        else { NotificationService.shared.noteDeclined(peer: request.peer); model.quickShare = nil }
+        NotificationService.shared.quickShareResolved(id: id)
+        Task {
+            do { try await Core.shared.quickshareRespond(id: id, accept: accept) }
+            catch {
+                acceptedHere = false
+                model.quickShareEnded(id: id)
+                model.toast(.bad, tr("Quick Share request expired"))
+            }
+        }
     }
 
     static func size(_ bytes: Double) -> String {

@@ -140,8 +140,17 @@ internal object CallHandlers {
                     runCatching { ctx.startActivity(intent) }
                 }
             }
+            // The Mac dialled over adb (`am start CALL`), which this app never sees: arm the call
+            // receiver so the call's OFFHOOK/IDLE reach the Mac's call pop-up with working controls.
+            "call-arm" -> {
+                val number = msg.optString("number")
+                if (msg.optBoolean("cancel")) CallReceiver.disarmOutgoing(number)
+                else if (number.isNotEmpty()) CallReceiver.armOutgoing(ctx, number)
+            }
             // Answer / hang up / mute / speaker. Replies with the audio state the device really ended up in.
-            "call-action" -> cm.respond(link, msg, "call-action-result") {
+            // Async: the speaker/mute fallback taps the dialer's screen and waits up to ~2.5 s,
+            // which must not stall the link's reader thread.
+            "call-action" -> cm.respondAsync(link, msg, "call-action-result") {
                 val action = msg.optString("action")
                 require(action in CallControl.ACTIONS) { "unknown call action" }
                 val on = if (msg.has("on")) msg.optBoolean("on") else null
@@ -250,6 +259,21 @@ internal object MirrorHandlers {
                 cm.launchMirror("camera", facingOf(msg))
             }
             "camera-flip" -> MirrorService.instance?.flip(facingOf(msg))
+            // Lens ids are opaque to the Mac ("<cameraId>@<zoom>"); the service owns what they mean.
+            "camera-lens" -> MirrorService.instance?.selectLens(msg.optString("lens"))
+                ?: ConnectionManager.send(
+                    JSONObject().put("type", "camera-lens-failed")
+                        .put("lens", msg.optString("lens")).put("error", "camera is not running")
+                )
+            // Mac asks for orientation updates during a USB camera session the app isn't streaming.
+            "camera-orient-watch" -> if (msg.optBoolean("on")) {
+                OrientationWatcher.enable(ctx, "watch"); OrientationWatcher.sendCurrent()
+            } else OrientationWatcher.disable("watch")
+            "camera-zoom" -> MirrorService.instance?.setZoom(msg.optDouble("ratio", 1.0))
+            "camera-photo" -> MirrorService.instance?.takePhoto()
+                ?: ConnectionManager.send(
+                    JSONObject().put("type", "camera-photo-error").put("error", "camera is not running")
+                )
             // Screen control. All four need the accessibility service; without it they no-op, so tell the Mac once.
             "mirror-tap", "mirror-swipe", "mirror-key", "mirror-text" -> control(link, msg, type)
             else -> return false

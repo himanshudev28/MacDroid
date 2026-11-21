@@ -127,8 +127,10 @@ object CallControl {
         return when (action) {
             "answer" -> answer(ctx)
             "end" -> end(ctx)
-            "mute" -> setMuted(ctx, on == true)
-            "speaker" -> setSpeaker(ctx, on == true)
+            // Serialised: call-action now runs off the reader thread, and two overlapping
+            // fallbacks would both bring the in-call screen forward and tap over each other.
+            "mute" -> synchronized(audioLock) { setMuted(ctx, on == true) }
+            "speaker" -> synchronized(audioLock) { setSpeaker(ctx, on == true) }
             else -> Outcome(false, "unknown call action")
         }
     }
@@ -157,7 +159,10 @@ object CallControl {
         val am = audio(ctx) ?: return Outcome(false, "Audio is unavailable on this device")
         runCatching { am.isMicrophoneMute = on }
             .onFailure { return Outcome(false, it.message ?: "Could not change the microphone") }
-        val now = am.isMicrophoneMute
+        var now = am.isMicrophoneMute
+        if (now != on && InCallUiTap.press(ctx, InCallUiTap.Button.MUTE, on) { am.isMicrophoneMute }) {
+            now = InCallUiTap.awaitState(on) { am.isMicrophoneMute } ?: now
+        }
         return if (now == on) {
             Outcome(true, muted = now, speaker = isSpeaker(ctx))
         } else {
@@ -185,7 +190,13 @@ object CallControl {
         }.exceptionOrNull()
         if (failure != null) return Outcome(false, failure.message ?: "Could not change the speaker")
 
-        val now = isSpeaker(ctx)
+        var now = isSpeaker(ctx)
+        // A cellular call's route belongs to Telecom and the dialer: setCommunicationDevice only
+        // routes this app's own audio, so Samsung's dialer keeps the earpiece. Press the dialer's
+        // own Speaker button instead, then trust only the read-back.
+        if (now != on && InCallUiTap.press(ctx, InCallUiTap.Button.SPEAKER, on) { isSpeaker(ctx) }) {
+            now = InCallUiTap.awaitState(on) { isSpeaker(ctx) } ?: now
+        }
         return if (now == on) {
             Outcome(true, muted = isMuted(ctx), speaker = now)
         } else {
@@ -194,6 +205,82 @@ object CallControl {
         }
     }
 
+    private val audioLock = Any()
+
     private const val PERM_HINT =
         "Grant the Phone permissions (Calls) to DroidDock on your phone"
+}
+
+/**
+ * Presses a button on the dialer's own in-call screen through DroidDock's accessibility service.
+ *
+ * The public audio APIs cannot move a cellular call: Telecom owns its route and the OEM dialer
+ * re-asserts it (tested on a Galaxy S21 FE: the speaker request read back as "earpiece"). A tap
+ * on the dialer's button is the user's own action as far as the dialer is concerned, so it sticks.
+ *
+ * Needs the accessibility service on (it already drives screen control and WhatsApp Answer).
+ * Brings the in-call screen forward first, because the button must be on screen to be tapped.
+ * Blocks the caller for up to ~2.5 s: never call it on the main thread or the link reader.
+ */
+object InCallUiTap {
+    enum class Button(val resNames: List<String>, val english: List<String>) {
+        SPEAKER(
+            // secOnscreenSpeaker = Samsung InCallUI (One UI), read from its APK; the rest are AOSP/Google.
+            listOf("secOnscreenSpeaker", "speaker", "audio_mode_speaker", "incall_label_speaker", "call_button_speaker"),
+            listOf("Speaker", "Speakerphone", "Speaker phone"),
+        ),
+        MUTE(
+            listOf("onscreenMuteText", "secOnscreenMenuMuteText", "mute", "incall_label_mute", "call_button_mute"),
+            listOf("Mute"),
+        ),
+    }
+
+    private val DIALER_UI = listOf(
+        "com.samsung.android.incallui", "com.samsung.android.dialer",
+        "com.android.incallui", "com.google.android.dialer", "com.android.dialer",
+    )
+
+    /**
+     * Tap [b] so it ends up [want]. The button is a toggle, so [current] is re-read right before the
+     * tap: the API request made just before may have landed late, and a blind tap would undo it.
+     * Returns true when a tap was made or none was needed (the caller then confirms by read-back).
+     */
+    fun press(ctx: Context, b: Button, want: Boolean, current: () -> Boolean?): Boolean {
+        if (AccessibilityControl.service == null) return false
+        val tm = ctx.getSystemService(TelecomManager::class.java)
+        // READ_PHONE_STATE is held for the call receiver; without it this just does nothing.
+        runCatching { tm?.showInCallScreen(false) }
+        Thread.sleep(600)
+        if (current() == want) return true
+        return AccessibilityControl.clickLabel(labels(ctx, b), openShade = false, packages = dialerPackages(ctx).toSet())
+    }
+
+    private fun dialerPackages(ctx: Context): List<String> {
+        val dialer = runCatching { ctx.getSystemService(TelecomManager::class.java)?.defaultDialerPackage }.getOrNull()
+        return (listOfNotNull(dialer) + DIALER_UI).distinct()
+    }
+
+    /** Polls [read] until it equals [want] (up to ~1.2 s); the last value read, or null if unreadable. */
+    fun awaitState(want: Boolean, read: () -> Boolean?): Boolean? {
+        var last: Boolean? = null
+        repeat(6) {
+            Thread.sleep(200)
+            last = read()
+            if (last == want) return last
+        }
+        return last
+    }
+
+    /** The button's label in the phone's language, from the dialer's own strings, plus English. */
+    private fun labels(ctx: Context, b: Button): List<String> {
+        val pm = ctx.packageManager
+        val local = dialerPackages(ctx).flatMap { pkg ->
+            val res = runCatching { pm.getResourcesForApplication(pkg) }.getOrNull() ?: return@flatMap emptyList()
+            b.resNames.mapNotNull { name ->
+                val id = res.getIdentifier(name, "string", pkg)
+                if (id == 0) null else runCatching { res.getString(id) }.getOrNull()
+            }
+        }
+        return (local + b.english).map { it.trim() }.filter { it.isNotEmpty() && it.length <= 40 }.distinct()
+    }
 }

@@ -178,7 +178,7 @@ object TransferManager {
     /** Initiate a phone → Mac file transfer. Calls [onResult] on completion. */
     fun pushToMac(uri: Uri, ctx: Context, onResult: (ok: Boolean, error: String?) -> Unit) {
         val socket = ws
-        if (socket == null) { onResult(false, "Not connected to Mac"); return }
+        if (socket == null) { onResult(false, ConnectionManager.notSentText(wifiOnly = true)); return }
         val name = uriFileName(ctx, uri) ?: "file"
         val size = uriFileSize(ctx, uri)
         val reqId = "pp${phonePushSeq.getAndIncrement()}"

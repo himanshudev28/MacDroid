@@ -108,6 +108,11 @@ enum LinkHealth {
                              detail: tr("Without it the Bluetooth fallback can't find the phone."),
                              fixLabel: tr("Open Settings"),
                              fix: { open("x-apple.systempreferences:com.apple.preference.security?Privacy_Bluetooth") }))
+        } else if cfgBle.pairingStale == true, cfgBle.state != "connected", cfgBle.radio == "poweredOn" {
+            out.append(.init(id: "ble-pairing", severity: "warn", title: tr("Bluetooth pairing is out of date"),
+                             detail: tr("The phone no longer has this Mac's Bluetooth keys, so the Bluetooth fallback can't connect. In Bluetooth settings, remove the phone, then pair it again."),
+                             fixLabel: tr("Open Settings"),
+                             fix: { open("x-apple.systempreferences:com.apple.BluetoothSettings") }))
         } else if cfgBle.radio == "poweredOff" {
             out.append(.init(id: "ble-off", severity: "info", title: tr("Bluetooth is turned off on this Mac"),
                              detail: tr("The Bluetooth fallback is unavailable while it's off."),

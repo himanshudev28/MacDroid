@@ -333,6 +333,16 @@ pub async fn await_connected(state: &SharedState) {
 /// Every Mac→phone feature added after the protocol froze has to ask this
 /// before sending, or an older phone build gets messages it will log as
 /// unknown. False when nothing is connected.
+/// Why a Wi-Fi-only request could not be sent: honest about a Bluetooth-only link (§2).
+pub async fn wifi_only_error(state: &SharedState) -> String {
+    let ble_only = state.phone.lock().await.as_ref().is_some_and(|p| p.ws.is_none() && p.ble.is_some());
+    if ble_only {
+        "Needs Wi-Fi: the phone is connected over Bluetooth only".into()
+    } else {
+        "Phone not connected over Wi-Fi".into()
+    }
+}
+
 pub async fn phone_has_cap(state: &SharedState, cap: &str) -> bool {
     state
         .phone
@@ -535,13 +545,17 @@ pub async fn request(
     let (tx, rx) = oneshot::channel();
     state.pending.add(req_id, (family, tx)).await;
 
+    let wifi_class = {
+        use crate::transport_class::{class_of, Class, Dir};
+        class_of(&Value::Object(body.clone()), Dir::MacToPhone) == Class::Wifi
+    };
     match send_json_on(state, Value::Object(body), None).await {
         Some(kind) => {
             state.pending_link.lock().await.insert(req_id, kind);
         }
         None => {
             state.pending.take(&req_id).await;
-            return Err("Phone not connected over Wi-Fi".into());
+            return Err(if wifi_class { wifi_only_error(state).await } else { "Phone not connected".into() });
         }
     }
 
@@ -606,7 +620,7 @@ async fn request_binary_thumb(
 
     if !send_json(state, build(req_id)).await {
         state.pending_thumb.take(&req_id).await;
-        return Err("Phone not connected over Wi-Fi".into());
+        return Err(wifi_only_error(state).await);
     }
 
     match tokio::time::timeout(THUMB_TIMEOUT, rx).await {
@@ -832,7 +846,10 @@ pub async fn run(app: AppHandle, state: SharedState, port: u16) {
                 tokio::spawn(handle_connection(app.clone(), state.clone(), stream, peer.ip()));
             }
             Err(e) => {
+                // Persistent errors (EMFILE/ENFILE) return at once; without a
+                // pause this loop would spin a core and flood the log.
                 eprintln!("[ws] accept error: {e}");
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                 continue;
             }
         }
@@ -1889,6 +1906,11 @@ async fn route_text(app: &AppHandle, state: &SharedState, raw: Value, origin: Li
         "mirror-started" => crate::mirror::on_started(app, &raw),
         "mirror-stopped" => crate::mirror::on_stopped(app, &raw),
         "mirror-error" => crate::mirror::on_error(app, &raw),
+        "camera-zoom-state" => crate::mirror::on_zoom_state(app, &raw),
+        "camera-orientation" => crate::mirror::on_orientation(app, &raw),
+        "camera-photo-data" => crate::mirror::on_photo_data(app, &raw),
+        "camera-photo-error" => crate::mirror::on_photo_error(app, &raw),
+        "camera-lens-failed" => crate::mirror::on_lens_failed(app, &raw),
         "audio-started" => crate::audio::on_started(app, &raw),
         "audio-stopped" => crate::audio::on_stopped(app, &raw),
         "audio-error" => crate::audio::on_error(app, &raw),

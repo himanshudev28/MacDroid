@@ -77,6 +77,9 @@ final class H26xDecoder: @unchecked Sendable {
     var onSize: (@Sendable (Int, Int) -> Void)?
     /// Called (rate-limited, any thread) when the stream needs a fresh sync frame.
     var onNeedKeyframe: (@Sendable () -> Void)?
+    /// Every access unit as a ready CMSampleBuffer (AVCC), on the decode queue, before it goes to VideoToolbox. The
+    /// recorder's tap: must return immediately (it only hands the sample to its own queue).
+    var onSample: (@Sendable (CMSampleBuffer, CMVideoFormatDescription, Bool) -> Void)?
 
     static let maxInFlight = 8   // ~130 ms at 60 fps: rides out VT session creation on the first keyframe
 
@@ -370,6 +373,7 @@ final class H26xDecoder: @unchecked Sendable {
             allocator: kCFAllocatorDefault, dataBuffer: block, formatDescription: fmt, sampleCount: 1,
             sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleSizeEntryCount: 1,
             sampleSizeArray: &size, sampleBufferOut: &sample) == noErr, let sample else { lostFrame(); return }
+        onSample?(sample, fmt, isKey)
 
         let st = VTDecompressionSessionDecodeFrame(
             session, sampleBuffer: sample, flags: [._EnableAsynchronousDecompression], frameRefcon: nil,

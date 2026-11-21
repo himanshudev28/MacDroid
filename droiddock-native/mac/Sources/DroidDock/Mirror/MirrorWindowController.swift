@@ -17,8 +17,8 @@ final class MirrorPanel: NSPanel {
         let mods = e.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.shift, .numericPad, .function, .capsLock])
         if mods == .command, let c = e.charactersIgnoringModifiers {
             switch c {
-            case "=", "+": if onSizeKey?(.larger) == true { return true }
-            case "-", "_": if onSizeKey?(.smaller) == true { return true }
+            case "=", "+": if MainActor.assumeIsolated({ MirrorSession.shared.zoomKey(1) }) { return true }; if onSizeKey?(.larger) == true { return true }
+            case "-", "_": if MainActor.assumeIsolated({ MirrorSession.shared.zoomKey(-1) }) { return true }; if onSizeKey?(.smaller) == true { return true }
             case "0": if onSizeKey?(.actual) == true { return true }
             // Keyboard route to end the session even with the capsule hidden (closing the window stops the stream).
             case "w": performClose(nil); return true

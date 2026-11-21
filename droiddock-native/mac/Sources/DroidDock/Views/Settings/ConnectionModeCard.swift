@@ -99,6 +99,12 @@ struct ConnectionModeCard: View {
     private var stateText: String {
         if ble.radio == "poweredOff" { return tr("Bluetooth is off") }
         if ble.radio == "unsupported" { return tr("Bluetooth isn't available on this Mac") }
+        // Never "Looking for your phone…" when it cannot possibly find it.
+        if ble.radio == "unauthorized" || ble.auth == "denied" || ble.auth == "restricted" {
+            return tr("Bluetooth is blocked for DroidDock")
+        }
+        if ble.mode == "fallback" && ble.auth == "notDetermined" { return tr("Waiting for Bluetooth permission") }
+        if ble.pairingStale == true && ble.state != "connected" { return tr("Bluetooth pairing is out of date") }
         switch ble.state {
         case "connected": return tr("Bluetooth connected")
         case "authenticating": return tr("Connecting over Bluetooth…")

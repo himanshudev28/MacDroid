@@ -102,6 +102,10 @@ pub const COMMANDS: &[&str] = &[
     "adb_reconnect_now",
     "adb_qr_pair_start",
     "adb_qr_pair_cancel",
+    "camera_select_lens",
+    "camera_orient_watch",
+    "camera_set_zoom",
+    "camera_take_photo",
     "adb_camera",
     "adb_mirror",
     "adb_desktop",
@@ -312,6 +316,10 @@ const NEW_COMMANDS: &[&str] = &[
     "set_notif_app_settings",
     "server_restart",
     "core_ping",
+    "camera_select_lens",
+    "camera_orient_watch",
+    "camera_set_zoom",
+    "camera_take_photo",
     "mirror_closed",
     "automation_open_url",
     "menubar_opened",
@@ -649,6 +657,22 @@ pub async fn dispatch(
             let s0 = app.state::<crate::adb::AdbState>();
             crate::adb::adb_qr_pair_cancel(s0);
             Ok(Value::Null)
+        }
+        "camera_select_lens" => {
+            let s1 = app.state::<crate::ws_server::SharedState>();
+            res(crate::mirror::camera_select_lens(app.clone(), s1, arg!(args, "lens")).await)
+        }
+        "camera_orient_watch" => {
+            let s1 = app.state::<crate::ws_server::SharedState>();
+            res(crate::mirror::camera_orient_watch(s1, arg!(args, "on")).await)
+        }
+        "camera_set_zoom" => {
+            let s1 = app.state::<crate::ws_server::SharedState>();
+            res(crate::mirror::camera_set_zoom(app.clone(), s1, arg!(args, "ratio")).await)
+        }
+        "camera_take_photo" => {
+            let s1 = app.state::<crate::ws_server::SharedState>();
+            res(crate::mirror::camera_take_photo(app.clone(), s1).await)
         }
         "adb_camera" => {
             let s1 = app.state::<crate::adb::AdbState>();

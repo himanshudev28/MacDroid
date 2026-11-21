@@ -21,7 +21,7 @@
 
 use crate::ws_server::{self, SharedState};
 use serde_json::{json, Value};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::Mutex;
 use crate::host::ipc::Channel;
 use crate::host::{AppHandle, Emitter, Manager};
@@ -62,11 +62,190 @@ pub struct MirrorState {
     paused: AtomicBool,
     /// `(serial, natural display size)` for `adb shell input` coordinate mapping.
     adb_screen: Mutex<Option<(String, (u32, u32))>>,
+    /// Latest `camera-orientation` rotation (0/90/180/270), stored as rotation+1 so the Default 0 means unknown. Cleared on stop.
+    rotation: AtomicI32,
+    /// Latest phone `device` angle (0/90/180/270; stored +1, 0 = unknown).
+    device: AtomicI32,
 }
 
 /// Phone capability: understands `mirror-pause` / `mirror-resume` (video only;
 /// the encoder and projection stay alive, audio keeps playing).
 pub const CAP_MIRROR_PAUSE: &str = "mirrorpause";
+
+/// Phone capability: understands `camera-lens {lens}` / `camera-photo {}` and announces
+/// `lenses`/`lens`/`photo` in `mirror-started` (Wi-Fi camera path).
+pub const CAP_CAMERA_LENS: &str = "cameralens";
+
+/// Phone capability: sends `camera-orientation {rotation}` and obeys `camera-orient-watch {on}`.
+pub const CAP_CAMERA_ORIENT: &str = "cameraorient";
+
+/// Start/stop the phone's orientation reports (for an embedded ADB camera, where the phone's
+/// own app is not the video source). A no-op Ok when the phone lacks the cap or is not linked.
+pub async fn camera_orient_watch(state: crate::host::State<'_, SharedState>, on: bool) -> Result<(), String> {
+    if ws_server::phone_has_cap(&state, CAP_CAMERA_ORIENT).await {
+        ws_server::push(&state, json!({ "type": "camera-orient-watch", "on": on })).await;
+    }
+    Ok(())
+}
+
+/// Set the camera zoom. Embedded (ADB) camera: debounced silent restart with `camera_zoom`.
+/// Wi-Fi: push `camera-zoom` when the phone's announce carried `zoomRange`.
+pub async fn camera_set_zoom(
+    app: AppHandle,
+    state: crate::host::State<'_, SharedState>,
+    ratio: f64,
+) -> Result<(), String> {
+    if !ratio.is_finite() || ratio <= 0.0 {
+        return Err("bad zoom ratio".into());
+    }
+    if app.state::<crate::scrcpy_client::ScrcpyState>().is_running() {
+        return crate::scrcpy_client::camera_set_zoom(&app, ratio as f32);
+    }
+    let has_range = app.state::<MirrorState>().last_started.lock().unwrap().as_ref().is_some_and(|v| v.get("zoomRange").is_some());
+    if !has_range {
+        return Err("unsupported".into());
+    }
+    if ws_server::push(&state, json!({ "type": "camera-zoom", "ratio": ratio })).await {
+        Ok(())
+    } else {
+        Err("Phone not linked over Wi-Fi".into())
+    }
+}
+
+/// `camera-zoom-state {ratio}` from the phone (pass-through to Swift).
+pub fn on_zoom_state(app: &AppHandle, payload: &Value) {
+    if let Some(r) = payload.get("ratio").and_then(Value::as_f64) {
+        if let Some(Value::Object(o)) = app.state::<MirrorState>().last_started.lock().unwrap().as_mut() {
+            o.insert("zoom".into(), r.into());
+        }
+        let _ = app.emit("camera-zoom-state", json!({ "ratio": r }));
+    }
+}
+
+/// Tell the phone to stop reporting orientation (an embedded camera session ended).
+pub async fn orient_watch_off(app: &AppHandle) {
+    let state: SharedState = app.state::<SharedState>().inner().clone();
+    if ws_server::phone_has_cap(&state, CAP_CAMERA_ORIENT).await {
+        ws_server::push(&state, json!({ "type": "camera-orient-watch", "on": false })).await;
+    }
+}
+
+/// Valid rotation from a `camera-orientation` payload.
+fn rotation_of(payload: &Value) -> Option<i32> {
+    let r = payload.get("rotation").and_then(Value::as_i64)?;
+    matches!(r, 0 | 90 | 180 | 270).then_some(r as i32)
+}
+
+/// Android's documented JPEG_ORIENTATION formula (device = OrientationEventListener clockwise angle):
+/// back `(sensor + device) mod 360`, front `(sensor - device) mod 360`.
+pub fn camera_rotation(front: bool, sensor: i32, device: i32) -> i32 {
+    (if front { sensor - device } else { sensor + device }).rem_euclid(360)
+}
+
+/// Rotation to report: recomputed for an embedded (USB) camera, where the phone app's own
+/// value assumes the back sensor; otherwise the phone's rotation as-is.
+fn effective_rotation(app: &AppHandle, phone_rotation: Option<i32>) -> Option<i32> {
+    let device = app.state::<MirrorState>().device.load(Ordering::Relaxed) - 1;
+    if device >= 0 {
+        if let Some((front, sensor)) = crate::scrcpy_client::active_camera_sensor(app) {
+            return Some(camera_rotation(front, sensor, device));
+        }
+    }
+    phone_rotation
+}
+
+/// `camera-orientation {rotation}` from the phone: remember it (so a window attaching later
+/// or a re-announce carries it) and forward it to Swift.
+pub fn on_orientation(app: &AppHandle, payload: &Value) {
+    let device = payload.get("device").and_then(Value::as_i64).filter(|d| matches!(d, 0 | 90 | 180 | 270));
+    if let Some(d) = device {
+        app.state::<MirrorState>().device.store(d as i32 + 1, Ordering::Relaxed);
+    }
+    let Some(r) = effective_rotation(app, rotation_of(payload)) else { return };
+    let st = app.state::<MirrorState>();
+    st.rotation.store(r + 1, Ordering::Relaxed);
+    if let Some(Value::Object(o)) = st.last_started.lock().unwrap().as_mut() {
+        o.insert("rotation".into(), r.into());
+    }
+    let _ = app.emit("camera-orientation", json!({ "rotation": r }));
+}
+
+/// Pick a lens. Embedded (ADB) camera: restart the scrcpy session behind the same window.
+/// Wi-Fi: push `camera-lens` to a phone that advertised `cameralens`, else "unsupported".
+pub async fn camera_select_lens(
+    app: AppHandle,
+    state: crate::host::State<'_, SharedState>,
+    lens: String,
+) -> Result<(), String> {
+    if app.state::<crate::scrcpy_client::ScrcpyState>().is_running() {
+        return crate::scrcpy_client::camera_select_lens(&app, &lens).await;
+    }
+    if !ws_server::phone_has_cap(&state, CAP_CAMERA_LENS).await {
+        return Err("unsupported".into());
+    }
+    if ws_server::push(&state, json!({ "type": "camera-lens", "lens": lens })).await {
+        Ok(())
+    } else {
+        Err("Phone not linked over Wi-Fi".into())
+    }
+}
+
+/// Ask the phone for a full-resolution still (Wi-Fi + `cameralens` only). The JPEG comes back
+/// as `camera-photo-data` and is announced to the Mac as `camera-photo-saved {path}` /
+/// `camera-photo-error {error}`. Errors with "unsupported" otherwise: the Mac then grabs the frame.
+pub async fn camera_take_photo(
+    app: AppHandle,
+    state: crate::host::State<'_, SharedState>,
+) -> Result<(), String> {
+    if app.state::<crate::scrcpy_client::ScrcpyState>().is_running()
+        || !ws_server::phone_has_cap(&state, CAP_CAMERA_LENS).await
+    {
+        return Err("unsupported".into());
+    }
+    if ws_server::push(&state, json!({ "type": "camera-photo" })).await {
+        Ok(())
+    } else {
+        Err("Phone not linked over Wi-Fi".into())
+    }
+}
+
+/// `camera-photo-data {name, data}` (base64 JPEG) from the phone: save it like a frame grab.
+pub fn on_photo_data(app: &AppHandle, payload: &Value) {
+    let saved = payload
+        .get("data")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "The photo had no data".to_string())
+        .and_then(|d| {
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, d)
+                .map_err(|e| format!("The photo was not valid base64: {e}"))
+        })
+        .and_then(|bytes| crate::capture::save(app, "jpg", &bytes));
+    match saved {
+        Ok(path) => {
+            let _ = app.emit("camera-photo-saved", json!({ "path": path }));
+        }
+        Err(error) => {
+            let _ = app.emit("camera-photo-error", json!({ "error": error }));
+        }
+    }
+}
+
+/// `camera-photo-error {error}` from the phone.
+pub fn on_photo_error(app: &AppHandle, payload: &Value) {
+    let error = payload.get("error").and_then(Value::as_str).unwrap_or("The phone could not take a photo");
+    let _ = app.emit("camera-photo-error", json!({ "error": error }));
+}
+
+/// `camera-lens-failed {lens, error}` from the phone: the Mac reverts its lens chip.
+pub fn on_lens_failed(app: &AppHandle, payload: &Value) {
+    let _ = app.emit(
+        "camera-lens-failed",
+        json!({
+            "lens": payload.get("lens").cloned().unwrap_or(Value::Null),
+            "error": payload.get("error").and_then(Value::as_str).unwrap_or("That lens is not available"),
+        }),
+    );
+}
 
 // ── Tauri commands (invoked from the frontend) ──────────────────────────
 
@@ -208,6 +387,14 @@ pub async fn mirror_input(
                 ws_server::push(&state, json!({ "type": "mirror-resume" })).await;
             }
             return Ok(());
+        }
+        // An older Mac UI's front/back flip on an embedded camera: pick the matching lens.
+        Some("camera-flip") if app.state::<crate::scrcpy_client::ScrcpyState>().is_running() => {
+            let want = msg.get("facing").and_then(Value::as_str).unwrap_or("back");
+            return match crate::scrcpy_client::lens_for_facing(&app, want) {
+                Some(id) => crate::scrcpy_client::camera_select_lens(&app, &id).await,
+                None => Err("unsupported".into()),
+            };
         }
         _ => {}
     }
@@ -378,6 +565,8 @@ impl MirrorState {
     pub(crate) fn clear(&self) {
         *self.last_started.lock().unwrap() = None;
         *self.frame_tx.lock().unwrap() = None;
+        self.rotation.store(0, Ordering::Relaxed);
+        self.device.store(0, Ordering::Relaxed);
         self.paused.store(false, Ordering::Relaxed);
     }
 }
@@ -399,6 +588,17 @@ pub fn on_started(app: &AppHandle, payload: &Value) {
         payload.get("codec").and_then(Value::as_str).unwrap_or("?"),
         payload.get("source").and_then(Value::as_str).unwrap_or("?")
     );
+    // A camera announce without a rotation (embedded scrcpy path) carries the latest known one.
+    let mut payload = payload.clone();
+    if payload.get("source").and_then(Value::as_str) == Some("camera") && payload.get("rotation").is_none() {
+        let r = effective_rotation(app, None).unwrap_or(app.state::<MirrorState>().rotation.load(Ordering::Relaxed) - 1);
+        if r >= 0 {
+            if let Some(o) = payload.as_object_mut() {
+                o.insert("rotation".into(), r.into());
+            }
+        }
+    }
+    let payload = &payload;
     *app.state::<MirrorState>().last_started.lock().unwrap() = Some(payload.clone());
     let _ = app.emit_to(LABEL, "mirror-started", payload);
 }
@@ -446,6 +646,23 @@ pub fn on_frame(app: &AppHandle, buf: &[u8]) {
 #[cfg(test)]
 mod input_tests {
     use super::*;
+
+    #[test]
+    fn camera_rotation_formula() {
+        for (device, back, front) in [(0, 90, 270), (90, 180, 180), (180, 270, 90), (270, 0, 0)] {
+            assert_eq!(camera_rotation(false, 90, device), back, "back {device}");
+            assert_eq!(camera_rotation(true, 270, device), front, "front {device}");
+        }
+    }
+
+    #[test]
+    fn rotation_accepts_only_quarter_turns() {
+        for r in [0, 90, 180, 270] {
+            assert_eq!(rotation_of(&json!({"rotation": r})), Some(r as i32));
+        }
+        assert_eq!(rotation_of(&json!({"rotation": 45})), None);
+        assert_eq!(rotation_of(&json!({})), None);
+    }
 
     #[test]
     fn shell_quoting_survives_quotes() {

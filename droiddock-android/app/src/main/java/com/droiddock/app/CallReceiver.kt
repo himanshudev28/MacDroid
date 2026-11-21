@@ -152,16 +152,59 @@ class CallReceiver : BroadcastReceiver() {
          * by hand.
          */
         fun armOutgoing(ctx: Context, number: String) {
-            announced = true
-            lastState = ""
-            lastNumber = number
-            lastName = ""
+            val app = ctx.applicationContext
+            val token = Any()
+            synchronized(stateLock) {
+                announced = true
+                lastState = ""
+                lastNumber = number
+                lastName = ""
+                armToken = token
+            }
             // Called from the link's reader thread: look the name up elsewhere.
             Thread({
-                val name = runCatching { SmsRepo.name(ctx, number) }.getOrNull().orEmpty()
+                val name = runCatching { SmsRepo.name(app, number) }.getOrNull().orEmpty()
                 if (lastNumber == number) lastName = name
+                // The arm can land after the call already went off-hook (the Mac dials over adb at
+                // the same moment it sends the arm): that OFFHOOK broadcast was dropped as "not
+                // ours", so report the live call now. Sent after the name lookup so it carries it.
+                if (realCallState(app) == CALL_STATE_OFFHOOK) {
+                    synchronized(stateLock) {
+                        if (armToken === token && announced && lastState.isEmpty()) {
+                            lastState = TelephonyManager.EXTRA_STATE_OFFHOOK
+                            ConnectionManager.send(payload(app, "active"))
+                        }
+                    }
+                }
             }, "call-name").start()
+            // A dial that never starts (no CALL_PHONE, dialer refused, number rejected) would leave
+            // the receiver armed, and the next call made by hand would pop up on the Mac.
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                synchronized(stateLock) {
+                    if (armToken === token && announced && lastState.isEmpty()) {
+                        announced = false
+                        lastNumber = ""
+                        lastName = ""
+                    }
+                }
+            }, ARM_TIMEOUT_MS)
         }
+
+        /** The Mac's dial failed after it armed us: drop the arm unless a call has started. */
+        fun disarmOutgoing(number: String) {
+            synchronized(stateLock) {
+                if (announced && lastState.isEmpty() && lastNumber == number) {
+                    announced = false
+                    lastNumber = ""
+                    lastName = ""
+                    armToken = null
+                }
+            }
+        }
+
+        private const val CALL_STATE_OFFHOOK = 2 // TelephonyManager.CALL_STATE_OFFHOOK
+        private const val ARM_TIMEOUT_MS = 30_000L
+        @Volatile private var armToken: Any? = null
 
         /**
          * The `call` message, carrying what the Mac needs to draw the overlay

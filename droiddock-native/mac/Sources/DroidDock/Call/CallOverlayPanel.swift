@@ -266,6 +266,10 @@ struct CallOverlayView: View {
                 }
                 CallCircle(symbol: "phone.down.fill", tint: DD.bad, label: tr("Decline  Esc"), size: 34) { controls.end() }
                     .keyboardShortcut(.cancelAction)
+                CallCircle(symbol: "speaker.wave.2.fill", tint: DD.ok, label: tr("Answer on speaker"), size: 34) {
+                    controls.answer(onSpeaker: true)
+                }
+                .disabled(call.canAnswer != true)
                 CallCircle(symbol: "phone.fill", tint: DD.ok, label: tr("Answer  ⏎"), size: 34) { controls.answer() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(call.canAnswer != true)
@@ -273,6 +277,10 @@ struct CallOverlayView: View {
                 let muted = controls.muted ?? call.muted ?? false
                 CallCircle(symbol: muted ? "mic.slash.fill" : "mic.fill", tint: DD.dim,
                            label: muted ? tr("Unmute") : tr("Mute"), filled: muted, size: 34) { controls.toggleMute() }
+                let onSpeaker = controls.speaker ?? call.speaker ?? false
+                CallCircle(symbol: "speaker.wave.2.fill", tint: DD.dim, label: tr("Speaker"), filled: onSpeaker, size: 34) {
+                    controls.toggleSpeaker()
+                }
                 CallCircle(symbol: "phone.down.fill", tint: DD.bad, label: tr("Hang Up")) { controls.end() }
             }
         }

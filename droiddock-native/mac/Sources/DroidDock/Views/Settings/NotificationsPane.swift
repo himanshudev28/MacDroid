@@ -8,6 +8,7 @@ struct NotificationsSettingsPane: View {
     @AppStorage(NotifPrefs.bannerStyleKey) private var bannerStyle = "default"
     @AppStorage(NotifPrefs.callAlertKey) private var callAlert = "popup"
     @AppStorage(NotifPrefs.callRingKey) private var callRing = false
+    @AppStorage(NotifPrefs.answerOnSpeakerKey) private var answerOnSpeaker = false
     @AppStorage(NotifPrefs.openOnClickKey) private var openOnClick = true
     @AppStorage(NotifPrefs.keepInCenterKey) private var keepInCenter = true
     @AppStorage(NotifPrefs.bannerSecondsKey) private var bannerSeconds = 5
@@ -132,6 +133,8 @@ struct NotificationsSettingsPane: View {
                 DescribedToggle(tr("Ring for calls"), detail: tr("Play a ringtone on the Mac while your phone rings."),
                                 symbol: "bell.and.waves.left.and.right.fill", tint: Color(nsColor: .systemPink), isOn: $callRing)
                     .disabled(callAlert == "off")
+                DescribedToggle(tr("Answer on speaker"), detail: tr("When you answer from the Mac, the call switches to the phone's speaker."),
+                                symbol: "speaker.wave.2.fill", tint: Color(nsColor: .systemBlue), isOn: $answerOnSpeaker)
             }
 
             DDSection(tr("App notifications"), symbol: "square.grid.2x2",

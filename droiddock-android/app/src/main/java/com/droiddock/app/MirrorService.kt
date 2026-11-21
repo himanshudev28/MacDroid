@@ -13,6 +13,20 @@ import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CaptureFailure
+import android.hardware.camera2.params.OutputConfiguration
+import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.TotalCaptureResult
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.ImageFormat
+import android.graphics.Matrix
+import android.media.ExifInterface
+import android.media.ImageReader
+import android.util.Base64
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.util.Date
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.MediaCodec
@@ -28,9 +42,11 @@ import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
 import android.util.DisplayMetrics
+import android.util.Log
 import android.util.Size
 import android.view.Surface
 import android.view.WindowManager
+import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.ByteBuffer
 import kotlin.concurrent.thread
@@ -68,6 +84,35 @@ class MirrorService : Service() {
     private var captureSession: CameraCaptureSession? = null
     private var camThread: HandlerThread? = null
     private var curFacing = CameraCharacteristics.LENS_FACING_BACK
+    // Request builder, ImageReader and handler are fields (not locals) so a seamless zoom change
+    // and a photo can reuse the live session instead of rebuilding it.
+    private var camHandler: Handler? = null
+    private var camRequest: CaptureRequest.Builder? = null
+    private var jpegReader: ImageReader? = null
+    private var sensorOrientation = 0
+    private var curCameraId: String? = null
+    @Volatile private var curZoom = 1.0
+    @Volatile private var curLens = ""
+    /** Discovered once per service instance; a lens whose camera won't open is dropped from it. */
+    @Volatile private var camLenses: List<CameraLenses.Lens> = emptyList()
+    /** False when the JPEG surface made session config fail: the Mac then grabs the decoded frame itself. */
+    @Volatile private var photoSupported = false
+    @Volatile private var photoPending = false
+    /** Set while a lens switch that needs a camera restart is in flight, so an open failure can revert. */
+    private var pendingLens: PendingLens? = null
+    private var restartGen = 0
+    @Volatile private var destroyed = false
+    private var curPhysical: String? = null
+    // Continuous zoom within the active lens: CONTROL_ZOOM_RATIO range (API 30+) or digital crop below that.
+    private var zoomMin = 1.0
+    private var zoomMaxR = 1.0
+    private var activeArray: android.graphics.Rect? = null
+    private var lastZoomReply = 0L
+    private var zoomReplyPending = false
+
+    private class PendingLens(
+        val toLens: String, val fromCameraId: String?, val fromZoom: Double, val fromFacing: Int, val fromPhysical: String?,
+    )
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -255,18 +300,211 @@ class MirrorService : Service() {
         }
     }
 
-    private fun startCamera(facing: Int) {
+    /** `lenses` / `lens` / `photo` on camera `mirror-started`. Older Macs ignore them. */
+    private fun putCameraFields(j: JSONObject) {
+        j.put(
+            "facing",
+            if (curFacing == CameraCharacteristics.LENS_FACING_FRONT) "front" else "back"
+        )
+        val lenses = camLenses
+        if (lenses.isNotEmpty()) {
+            j.put("lenses", CameraLenses.toJson(lenses))
+            j.put("lens", curLens)
+        }
+        j.put("rotation", OrientationWatcher.rotation())
+        if (zoomMaxR > zoomMin) {
+            j.put("zoomRange", JSONArray().put(zoomMin).put(zoomMaxR))
+            j.put("zoom", curZoom)
+        }
+        j.put("photo", if (photoSupported) "phone" else "frame")
+    }
+
+    /** drain() announces once per encoder; a seamless zoom change or a photo fallback has
+     *  no new encoder, so the updated fields are re-sent explicitly. */
+    private fun reannounce() {
+        val j = startedJson ?: return
+        putCameraFields(j)
+        if (streaming) { ConnectionManager.send(j); OrientationWatcher.sendCurrent() }
+    }
+
+    /** (sensor orientation, is-front) of the live camera stream, null for a screen stream. */
+    fun cameraOrientInfo(): Pair<Int, Boolean>? =
+        if (source == "camera" && cameraDevice != null) {
+            sensorOrientation to (curFacing == CameraCharacteristics.LENS_FACING_FRONT)
+        } else null
+
+    private fun candOf(
+        id: String, ch: CameraCharacteristics, listed: Boolean, physical: Boolean, parent: String? = null,
+    ): CameraLenses.Cand? {
+        val facing = when (ch.get(CameraCharacteristics.LENS_FACING)) {
+            CameraCharacteristics.LENS_FACING_BACK -> "back"
+            CameraCharacteristics.LENS_FACING_FRONT -> "front"
+            else -> return null // external cameras are not a phone lens
+        }
+        val focal = ch.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull()
+        val size = ch.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+        val eq = if (focal != null && size != null && size.width > 0f && size.height > 0f) {
+            CameraLenses.eqFocal(focal.toDouble(), size.width.toDouble(), size.height.toDouble())
+        } else 0.0
+        return CameraLenses.Cand(id, facing, eq, listed, physical, parent)
+    }
+
+    /** Listed ids + hidden ids (Samsung keeps its ultra-wide / tele out of cameraIdList but often lets
+     *  them open, so "0".."63" are probed) + the physical sub-cameras of logical ones. The result is
+     *  cached per device build (Build.FINGERPRINT) so the probe runs once; lenses that later fail to
+     *  open are removed from the cache for good. */
+    private fun discoverLenses(mgr: CameraManager): List<CameraLenses.Lens> {
+        camLenses.takeIf { it.isNotEmpty() }?.let { return it }
+        val prefs = getSharedPreferences("ddcamlenses", Context.MODE_PRIVATE)
+        if (prefs.getString("fp", null) == cacheKey()) {
+            val cached = CameraLenses.fromStoreJson(prefs.getString("lenses", null))
+            if (cached.isNotEmpty()) { camLenses = cached; return cached }
+        }
+        val listed = mgr.cameraIdList.toList()
+        val seen = HashSet<String>()
+        val cands = ArrayList<CameraLenses.Cand>()
+        var mainId: String? = null
+        var zMin: Double? = null
+        var zMax: Double? = null
+        var mainPhysical: Set<String> = emptySet()
+        fun consider(id: String, listedId: Boolean, physical: Boolean, parent: String?) {
+            if (!seen.add(id)) return
+            val chr = runCatching { mgr.getCameraCharacteristics(id) }
+            val ch = chr.getOrNull()
+            if (ch == null) {
+                // Most hidden ids simply don't exist; the class tells "no such id" from "permission/denied".
+                Log.i(TAG, "probe $id listed=$listedId physical=$physical: throws ${chr.exceptionOrNull()?.javaClass?.simpleName}")
+                return
+            }
+            val c = candOf(id, ch, listedId, physical, parent)
+            val phys = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) ch.physicalCameraIds else emptySet()
+            Log.i(
+                TAG,
+                "probe $id listed=$listedId physical=$physical parent=$parent: ok facing=${c?.facing ?: "other"} " +
+                    "focal=${ch.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.toList()} " +
+                    "sensor=${ch.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)} eq35=${c?.eqFocalMm?.let { "%.1f".format(it) }} " +
+                    "physicalIds=$phys zoomRange=" +
+                    (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) ch.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE) else null)
+            )
+            if (c == null) return
+            cands += c
+            if (c.facing == "back" && listedId && mainId == null) {
+                mainId = id
+                mainPhysical = phys
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    ch.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)?.let {
+                        zMin = it.lower.toDouble(); zMax = it.upper.toDouble()
+                    }
+                }
+            }
+            for (p in phys) consider(p, false, true, id)
+        }
+        for (id in listed) consider(id, true, false, null)
+        for (i in 0..63) consider(i.toString(), false, false, null)
+        val main = mainId ?: return emptyList()
+        val lenses = CameraLenses.build(
+            main, cands.filter { it.facing == "back" }, cands.filter { it.facing == "front" }, zMin, zMax, mainPhysical,
+        )
+        camLenses = lenses
+        for (l in lenses) {
+            Log.i(
+                TAG,
+                "offer ${l.id} label=${l.label} camera=${l.cameraId} physical=${l.physicalId} zoom=${l.zoom} " +
+                    "strategy=${if (l.physicalId != null) "physical-via-logical" else if (l.zoom != 1.0) "zoom-ratio" else "direct-open"}"
+            )
+        }
+        Log.i(TAG, "main=$main zoomRange=[$zMin,$zMax] mainPhysical=$mainPhysical candidates=${cands.map { it.id + "/" + it.facing + "/" + "%.1f".format(it.eqFocalMm) }}")
+        saveLenses()
+        return lenses
+    }
+
+    /** A new build, a new app version or a bumped discovery algorithm must never be masked by an old cache. */
+    private fun cacheKey() = "${Build.FINGERPRINT}|${BuildConfig.VERSION_CODE}|$DISCOVERY_VERSION"
+
+    private fun saveLenses() {
+        runCatching {
+            getSharedPreferences("ddcamlenses", Context.MODE_PRIVATE).edit()
+                .putString("fp", cacheKey()).putString("lenses", CameraLenses.toStoreJson(camLenses)).apply()
+        }
+    }
+
+    /** Largest JPEG the camera makes, bounded so a 200 MP sensor can't exhaust memory. */
+    private fun pickJpegSize(sizes: Array<Size>?): Size? {
+        if (sizes.isNullOrEmpty()) return null
+        return sizes.filter { it.width.toLong() * it.height <= 48_000_000L }
+            .maxByOrNull { it.width.toLong() * it.height } ?: sizes.minByOrNull { it.width.toLong() * it.height }
+    }
+
+    private fun applyZoom(b: CaptureRequest.Builder, zoom: Double) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (zoom != 1.0 || zoomMaxR > 1.0) b.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom.toFloat())
+        } else {
+            // Below API 30 there is no zoom ratio: crop the active array around its centre instead.
+            val r = activeArray ?: return
+            val z = zoom.coerceAtLeast(1.0)
+            val w = (r.width() / z).toInt(); val h = (r.height() / z).toInt()
+            val x = r.left + (r.width() - w) / 2; val y = r.top + (r.height() - h) / 2
+            b.set(CaptureRequest.SCALER_CROP_REGION, android.graphics.Rect(x, y, x + w, y + h))
+        }
+    }
+
+    /** `camera-zoom {ratio}`: continuous zoom on the current lens, no restart and no re-announce. The
+     *  state reply is rate-limited (~10/s, trailing value always sent) so a slider drag doesn't flood the link. */
+    fun setZoom(ratio: Double) {
+        Handler(Looper.getMainLooper()).post {
+            val req = camRequest; val session = captureSession; val handler = camHandler
+            if (source != "camera" || req == null || session == null || handler == null || zoomMaxR <= zoomMin) return@post
+            val z = ratio.coerceIn(zoomMin, zoomMaxR)
+            try {
+                applyZoom(req, z)
+                session.setRepeatingRequest(req.build(), null, handler)
+                curZoom = z
+            } catch (_: Exception) { return@post }
+            val now = android.os.SystemClock.uptimeMillis()
+            val wait = ZOOM_REPLY_MS - (now - lastZoomReply)
+            if (wait <= 0) sendZoomState()
+            else if (!zoomReplyPending) {
+                zoomReplyPending = true
+                Handler(Looper.getMainLooper()).postDelayed({ zoomReplyPending = false; sendZoomState() }, wait)
+            }
+        }
+    }
+
+    private fun sendZoomState() {
+        lastZoomReply = android.os.SystemClock.uptimeMillis()
+        ConnectionManager.send(JSONObject().put("type", "camera-zoom-state").put("ratio", curZoom))
+    }
+
+    private fun startCamera(facing: Int, cameraId: String? = null, zoom: Double? = null, physical: String? = null) {
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             throw SecurityException("Grant the Camera permission to DroidDock")
         }
         val mgr = getSystemService(Context.CAMERA_SERVICE) as CameraManager
-        val camId = mgr.cameraIdList.firstOrNull {
+        val lenses = discoverLenses(mgr)
+        val wanted = if (cameraId != null) {
+            lenses.firstOrNull { it.cameraId == cameraId && it.zoom == (zoom ?: 1.0) && it.physicalId == physical }
+        }
+        else lenses.firstOrNull {
+            it.mult == 1.0 && it.facing == (if (facing == CameraCharacteristics.LENS_FACING_FRONT) "front" else "back")
+        }
+        val camId = cameraId ?: wanted?.cameraId ?: mgr.cameraIdList.firstOrNull {
             mgr.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == facing
         } ?: mgr.cameraIdList.firstOrNull() ?: throw IllegalStateException("no camera")
-        curFacing = mgr.getCameraCharacteristics(camId)
-            .get(CameraCharacteristics.LENS_FACING) ?: facing
+        val camZoom = zoom ?: wanted?.zoom ?: 1.0
+        curCameraId = camId
+        curZoom = camZoom
+        curPhysical = physical
+        curLens = wanted?.id ?: CameraLenses.lensId(physical ?: camId, camZoom)
 
         val chars = mgr.getCameraCharacteristics(camId)
+        curFacing = chars.get(CameraCharacteristics.LENS_FACING) ?: facing
+        sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+        activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+        zoomMin = 1.0; zoomMaxR = 1.0
+        val zr = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE) else null
+        if (zr != null) { zoomMin = zr.lower.toDouble(); zoomMaxR = zr.upper.toDouble() }
+        else chars.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM)?.let { zoomMaxR = it.toDouble() }
+        OrientationWatcher.enable(applicationContext, "stream")
         val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         val sizes = (map?.getOutputSizes(MediaCodec::class.java) ?: emptyArray()).toList()
         val cap = if (reqMaxSize > 0) reqMaxSize else 1280
@@ -286,44 +524,108 @@ class MirrorService : Service() {
         val w = pick.width and 1.inv()
         val h = pick.height and 1.inv()
 
+        // A full-res JPEG target on the same session lets the Mac ask for a real photo. Set before
+        // the encoder starts so the first mirror-started already says photo:"phone".
+        val jpeg = runCatching { pickJpegSize(map?.getOutputSizes(ImageFormat.JPEG)) }.getOrNull()
+            ?.let { runCatching { ImageReader.newInstance(it.width, it.height, ImageFormat.JPEG, 2) }.getOrNull() }
+        jpegReader = jpeg
+        photoSupported = jpeg != null
+
         val surface = startEncoder(w, h, "camera")
         val ht = HandlerThread("ddcam").also { it.start() }
         camThread = ht
         val handler = Handler(ht.looper)
+        camHandler = handler
 
         mgr.openCamera(camId, object : CameraDevice.StateCallback() {
             override fun onOpened(device: CameraDevice) {
                 cameraDevice = device
+                Log.i(TAG, "opened camera $camId physical=$physical")
                 val req = device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
-                    .apply { addTarget(surface) }
-                @Suppress("DEPRECATION")
-                device.createCaptureSession(
-                    listOf(surface),
-                    object : CameraCaptureSession.StateCallback() {
-                        override fun onConfigured(session: CameraCaptureSession) {
-                            captureSession = session
-                            runCatching { session.setRepeatingRequest(req.build(), null, handler) }
-                        }
-
-                        override fun onConfigureFailed(session: CameraCaptureSession) {
-                            stopSelf()
-                        }
-                    },
-                    handler
-                )
+                    .apply { addTarget(surface); applyZoom(this, camZoom) }
+                camRequest = req
+                configure(device, surface, req, handler, withPhoto = true, physical = physical)
             }
 
             override fun onDisconnected(device: CameraDevice) {
-                stopSelf()
+                onOpenProblem(null)
             }
 
             override fun onError(device: CameraDevice, error: Int) {
-                ConnectionManager.send(
-                    JSONObject().put("type", "mirror-error").put("error", "camera error $error")
-                )
-                stopSelf()
+                onOpenProblem("camera error $error")
             }
         }, handler)
+    }
+
+    private fun configure(
+        device: CameraDevice, surface: Surface, req: CaptureRequest.Builder, handler: Handler, withPhoto: Boolean,
+        physical: String? = null,
+    ) {
+        val reader = jpegReader
+        val cb = object : CameraCaptureSession.StateCallback() {
+            override fun onConfigured(session: CameraCaptureSession) {
+                captureSession = session
+                Log.i(TAG, "session configured lens=$curLens")
+                pendingLens = null // the lens opened and configured; nothing to revert to
+                runCatching { session.setRepeatingRequest(req.build(), null, handler) }
+            }
+
+            override fun onConfigureFailed(session: CameraCaptureSession) {
+                runCatching { session.close() }
+                if (withPhoto && reader != null) {
+                    // Some HALs refuse a video + full-res JPEG combination: stream without the still
+                    // target and tell the Mac to grab frames itself.
+                    runCatching { reader.close() }
+                    jpegReader = null
+                    photoSupported = false
+                    runCatching { configure(device, surface, req, handler, withPhoto = false, physical = physical) }
+                        .onFailure { onOpenProblem("session configure failed") }
+                    reannounce()
+                } else onOpenProblem("session configure failed")
+            }
+        }
+        if (physical != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            // Stream from a hidden physical lens through the logical camera that owns it: apps can open
+            // the logical id even when the physical one is not openable on its own.
+            val outs = ArrayList<OutputConfiguration>()
+            outs += OutputConfiguration(surface).also { it.setPhysicalCameraId(physical) }
+            if (withPhoto && reader != null) outs += OutputConfiguration(reader.surface)
+            @Suppress("DEPRECATION")
+            device.createCaptureSessionByOutputConfigurations(outs, cb, handler)
+            return
+        }
+        val targets = if (withPhoto && reader != null) listOf(surface, reader.surface) else listOf(surface)
+        @Suppress("DEPRECATION")
+        device.createCaptureSession(targets, cb, handler)
+    }
+
+    /** The camera failed to open or dropped. During a lens switch that means "that lens doesn't work":
+     *  drop it, tell the Mac to revert, and go back to the previous lens rather than ending the stream. */
+    private fun onOpenProblem(error: String?) {
+        Log.i(TAG, "open/config problem: $error pending=${pendingLens?.toLens}")
+        Handler(Looper.getMainLooper()).post {
+            val p = pendingLens
+            if (p == null) {
+                if (error != null) {
+                    ConnectionManager.send(JSONObject().put("type", "mirror-error").put("error", error))
+                }
+                stopSelf()
+                return@post
+            }
+            failLens(p, error ?: "camera disconnected")
+        }
+    }
+
+    private fun failLens(p: PendingLens, error: String) {
+        Log.i(TAG, "lens ${p.toLens} FAILED, dropped: $error")
+        pendingLens = null
+        // Dropped for good on this phone (remembered in the cache): only lenses that truly open are offered.
+        camLenses = camLenses.filterNot { it.id == p.toLens }
+        saveLenses()
+        ConnectionManager.send(
+            JSONObject().put("type", "camera-lens-failed").put("lens", p.toLens).put("error", error)
+        )
+        restartCamera(p.fromCameraId, p.fromZoom, p.fromFacing, p.fromPhysical)
     }
 
     private fun drain(enc: MediaCodec, w: Int, h: Int, source: String, mime: String) {
@@ -371,8 +673,12 @@ class MirrorService : Service() {
                                 "facing",
                                 if (curFacing == CameraCharacteristics.LENS_FACING_FRONT) "front" else "back"
                             )
+                        if (source == "camera") putCameraFields(started)
                         startedJson = started
-                        if (streaming) ConnectionManager.send(started)
+                        if (streaming) {
+                            ConnectionManager.send(started)
+                            if (source == "camera") OrientationWatcher.sendCurrent()
+                        }
                         announced = true
                     }
                 } else if (streaming && !videoGate.paused) {
@@ -451,30 +757,216 @@ class MirrorService : Service() {
     }
 
     /** Switch front/back camera in place — no re-consent (permission already granted). */
-    fun flip(facing: Int) {
+    fun flip(facing: Int) = restartCamera(null, null, facing, null)
+
+    /** Close camera + encoder and start them again on [cameraId]/[zoom] (null = that facing's 1x). No
+     *  `mirror-stopped` is sent: the Mac keeps its window and just gets a fresh `mirror-started`. */
+    private fun restartCamera(cameraId: String?, zoom: Double?, facing: Int = curFacing, physical: String? = null) {
         Handler(Looper.getMainLooper()).post {
+            // A newer restart supersedes this one; only the latest generation goes on to open a camera.
+            val gen = ++restartGen
             runCatching { captureSession?.close() }
             runCatching { cameraDevice?.close() }
+            runCatching { jpegReader?.close() }
+            val oldDrain = drainThread
+            val oldEnc = encoder
+            val old = camThread
             captureSession = null
             cameraDevice = null
+            jpegReader = null
+            camRequest = null
+            camHandler = null
+            photoPending = false
             running = false
-            runCatching { drainThread?.join(250) }
             drainThread = null
-            runCatching { encoder?.stop() }
-            runCatching { encoder?.release() }
             encoder = null
             configBytes = null
-            val old = camThread
             camThread = null
-            runCatching { old?.quitSafely() }
-            runCatching { startCamera(facing) }.onFailure {
-                ConnectionManager.send(
-                    JSONObject().put("type", "mirror-error")
-                        .put("error", it.message ?: "camera flip failed")
-                )
-                stopSelf()
+            // The drain join and codec stop block (~250 ms+); keep them off the main thread. The camera is
+            // already closed above, and the new encoder only starts after the old one is fully released,
+            // because `running` is shared with the old drain loop.
+            thread(name = "ddrestart") {
+                runCatching { oldDrain?.join(250) }
+                runCatching { oldEnc?.stop() }
+                runCatching { oldEnc?.release() }
+                runCatching { old?.quitSafely() }
+                Handler(Looper.getMainLooper()).post {
+                    if (gen != restartGen || destroyed) return@post
+                    runCatching { startCamera(facing, cameraId, zoom, physical) }.onFailure {
+                        val p = pendingLens
+                        if (p != null) failLens(p, it.message ?: "camera failed to open")
+                        else {
+                            ConnectionManager.send(
+                                JSONObject().put("type", "mirror-error")
+                                    .put("error", it.message ?: "camera restart failed")
+                            )
+                            stopSelf()
+                        }
+                    }
+                }
             }
         }
+    }
+
+    /** `camera-lens`: same camera + new zoom is seamless (Samsung's logical camera swaps the physical
+     *  lens itself); a different camera id restarts camera and encoder like a flip. */
+    fun selectLens(lensId: String) {
+        Handler(Looper.getMainLooper()).post {
+            val lens = camLenses.firstOrNull { it.id == lensId }
+            if (source != "camera" || lens == null) {
+                ConnectionManager.send(
+                    JSONObject().put("type", "camera-lens-failed").put("lens", lensId)
+                        .put("error", if (lens == null) "unknown lens" else "camera is not running")
+                )
+                return@post
+            }
+            if (lensId == curLens) { reannounce(); return@post }
+            val req = camRequest
+            val session = captureSession
+            val handler = camHandler
+            if (lens.cameraId == curCameraId && lens.physicalId == null && curPhysical == null && req != null && session != null && handler != null) {
+                try {
+                    applyZoom(req, lens.zoom)
+                    if (lens.zoom == 1.0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        req.set(CaptureRequest.CONTROL_ZOOM_RATIO, 1f)
+                    }
+                    session.setRepeatingRequest(req.build(), null, handler)
+                    curZoom = lens.zoom
+                    curLens = lens.id
+                    reannounce()
+                } catch (e: Exception) {
+                    ConnectionManager.send(
+                        JSONObject().put("type", "camera-lens-failed").put("lens", lensId)
+                            .put("error", e.message ?: "zoom change failed")
+                    )
+                }
+                return@post
+            }
+            val facing = if (lens.facing == "front") CameraCharacteristics.LENS_FACING_FRONT
+            else CameraCharacteristics.LENS_FACING_BACK
+            Log.i(TAG, "verify-open lens=$lensId camera=${lens.cameraId} physical=${lens.physicalId} zoom=${lens.zoom}")
+            pendingLens = PendingLens(lensId, curCameraId, curZoom, curFacing, curPhysical)
+            restartCamera(lens.cameraId, lens.zoom, facing, lens.physicalId)
+        }
+    }
+
+    private fun photoError(msg: String) {
+        photoPending = false
+        clearPhotoTimeout()
+        ConnectionManager.send(JSONObject().put("type", "camera-photo-error").put("error", msg))
+    }
+
+    /** `camera-photo`: one full-resolution still on the live session, same zoom, sent as base64 JSON. */
+    fun takePhoto() {
+        // Main looper: the same thread restartCamera tears the session down on, so this never sees it half-torn-down.
+        Handler(Looper.getMainLooper()).post { takePhotoOnMain() }
+    }
+
+    private var photoTimeout: Runnable? = null
+
+    private fun clearPhotoTimeout() {
+        photoTimeout?.let { camHandler?.removeCallbacks(it) }
+        photoTimeout = null
+    }
+
+    private fun takePhotoOnMain() {
+        val handler = camHandler
+        val device = cameraDevice
+        val session = captureSession
+        val reader = jpegReader
+        if (source != "camera" || handler == null || device == null || session == null || reader == null || !photoSupported) {
+            photoError("phone photo unavailable")
+            return
+        }
+        if (photoPending) { photoError("a photo is already being taken"); return }
+        photoPending = true
+        try {
+            // Anything left in the reader is from an earlier, abandoned shot.
+            runCatching { reader.acquireLatestImage()?.close() }
+            reader.setOnImageAvailableListener({ r ->
+                val img = runCatching { r.acquireLatestImage() }.getOrNull() ?: return@setOnImageAvailableListener
+                val bytes = try {
+                    val b = img.planes[0].buffer
+                    ByteArray(b.remaining()).also { b.get(it) }
+                } finally { img.close() }
+                if (!photoPending) return@setOnImageAvailableListener
+                photoPending = false
+                clearPhotoTimeout()
+                // Re-encoding and base64 are heavy; keep them off the camera thread so the preview doesn't stall.
+                thread(name = "ddphoto") { sendPhoto(bytes) }
+            }, handler)
+            val b = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
+                addTarget(reader.surface)
+                applyZoom(this, curZoom)
+                set(
+                    CaptureRequest.JPEG_ORIENTATION,
+                    CameraOrientation.rotation(
+                        sensorOrientation, curFacing == CameraCharacteristics.LENS_FACING_FRONT, OrientationWatcher.device
+                    )
+                )
+                set(CaptureRequest.JPEG_QUALITY, 95.toByte())
+                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+            }
+            session.capture(b.build(), object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureFailed(s: CameraCaptureSession, r: CaptureRequest, f: CaptureFailure) {
+                    if (photoPending) photoError("capture failed")
+                }
+            }, handler)
+            clearPhotoTimeout()
+            // Kept in a field so a finished shot cancels it; otherwise it would fire during the next shot.
+            val t = Runnable { if (photoPending) photoError("photo timed out") }
+            photoTimeout = t
+            handler.postDelayed(t, PHOTO_TIMEOUT_MS)
+        } catch (e: Exception) {
+            photoError(e.message ?: "photo failed")
+        }
+    }
+
+    private fun sendPhoto(raw: ByteArray) {
+        val jpeg = fitJpeg(raw)
+        val b64 = Base64.encodeToString(jpeg, Base64.NO_WRAP)
+        // OkHttp closes the socket if its outbound queue passes 16 MiB, and live video shares that
+        // queue — wait for room instead of risking the whole link.
+        var tries = 0
+        while (ConnectionManager.outboundQueueBytes() + b64.length > PHOTO_QUEUE_LIMIT && tries++ < 50) {
+            try { Thread.sleep(100) } catch (_: InterruptedException) { break }
+        }
+        val ok = ConnectionManager.send(
+            JSONObject().put("type", "camera-photo-data")
+                .put("name", CameraLenses.photoName(Date())).put("data", b64)
+        )
+        if (!ok) photoError("could not send photo")
+    }
+
+    /** A JPEG over [MAX_PHOTO_BYTES] would make a text frame near the 16 MiB socket queue cap, so it is
+     *  re-encoded smaller (EXIF rotation baked in, since re-encoding drops the tag). Normal 12 MP stills pass untouched. */
+    private fun fitJpeg(src: ByteArray): ByteArray {
+        if (src.size <= MAX_PHOTO_BYTES) return src
+        return runCatching {
+            val rot = when (ExifInterface(ByteArrayInputStream(src))
+                .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+                ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+                ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+                ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+                else -> 0f
+            }
+            var sample = 1
+            while (sample <= 4) {
+                var bmp: Bitmap = BitmapFactory.decodeByteArray(
+                    src, 0, src.size, BitmapFactory.Options().apply { inSampleSize = sample }
+                ) ?: break
+                if (rot != 0f) {
+                    bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, Matrix().apply { postRotate(rot) }, true)
+                }
+                for (q in intArrayOf(90, 80, 70, 55)) {
+                    val out = ByteArrayOutputStream()
+                    bmp.compress(Bitmap.CompressFormat.JPEG, q, out)
+                    if (out.size() <= MAX_PHOTO_BYTES) return@runCatching out.toByteArray()
+                }
+                sample *= 2
+            }
+            src
+        }.getOrDefault(src)
     }
 
     /** Ask the encoder for an IDR now. Used to resume after a dropped-frame
@@ -528,18 +1020,29 @@ class MirrorService : Service() {
     /** Release everything a running stream holds. Used by [onDestroy] and before a
      *  second start (camera-start / fresh consent while already streaming), so the old
      *  encoder, VirtualDisplay, camera and projection are never silently overwritten. */
-    private fun releaseStream() {
+    private fun releaseStream(async: Boolean = false) {
         running = false
-        runCatching { audio?.stop() }
+        OrientationWatcher.disable("stream")
+        // Joins (audio pump, drain) and the codec stop can block ~600 ms. onDestroy runs on the main
+        // thread, so there they go to a short-lived thread; a second start needs them finished first.
+        val oldAudio = audio
+        val oldDrain = drainThread
+        val oldEnc = encoder
         audio = null
-        runCatching { drainThread?.join(300) }
         drainThread = null
+        encoder = null
+        // Camera and display go first (here, on the caller's thread) so the encoder is never
+        // released while something is still writing to its surface.
         runCatching { captureSession?.close() }
         runCatching { cameraDevice?.close() }
         runCatching { camThread?.quitSafely() }
+        runCatching { jpegReader?.close() }
+        jpegReader = null
+        camRequest = null
+        camHandler = null
+        pendingLens = null
+        photoPending = false
         runCatching { virtualDisplay?.release() }
-        runCatching { encoder?.stop() }
-        runCatching { encoder?.release() }
         val oldProj = projection
         // Clear first: the projection's onStop callback must not stopSelf() a service that is restarting.
         projection = null
@@ -548,15 +1051,22 @@ class MirrorService : Service() {
         cameraDevice = null
         camThread = null
         virtualDisplay = null
-        encoder = null
         configBytes = null
+        val blocking = {
+            runCatching { oldAudio?.stop() }
+            runCatching { oldDrain?.join(300) }
+            runCatching { oldEnc?.stop() }
+            runCatching { oldEnc?.release() }
+        }
+        if (async) thread(name = "ddrelease") { blocking() } else blocking()
     }
 
     override fun onDestroy() {
         if (instance === this) { instance = null; startedAt = 0L }
         DockWidget.refresh(applicationContext)
         startedJson = null
-        releaseStream()
+        destroyed = true
+        releaseStream(async = true)
         runCatching { ConnectionManager.send(JSONObject().put("type", "mirror-stopped")) }
         super.onDestroy()
     }
@@ -625,6 +1135,14 @@ class MirrorService : Service() {
          * and catching up matters more than completeness.
          */
         private const val VIDEO_BACKLOG_BYTES = 1_500_000L
+        /** Raw JPEG ceiling: base64 grows it by a third, and OkHttp's outbound queue caps at 16 MiB (shared with video). */
+        private const val MAX_PHOTO_BYTES = 7_500_000
+        private const val PHOTO_QUEUE_LIMIT = 15_000_000L
+        private const val PHOTO_TIMEOUT_MS = 10_000L
+        private const val ZOOM_REPLY_MS = 100L
+        /** Bump when discovery logic changes so cached lens lists are rebuilt. */
+        private const val DISCOVERY_VERSION = 2
+        private const val TAG = "DDCam"
 
         @Volatile var instance: MirrorService? = null
 

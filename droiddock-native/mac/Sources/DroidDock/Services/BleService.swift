@@ -37,6 +37,8 @@ final class BleService: NSObject, @unchecked Sendable {
     private var failStreak = 0
     private var scanHoldUntil = Date.distantPast
     private var holdTimer: DispatchSourceTimer?
+    /// The last connect failed on a stale bond (CBError 14/15); cleared once a link subscribes.
+    private var pairingStale = false
 
     /// One GATT connection.
     private final class Link {
@@ -137,6 +139,8 @@ final class BleService: NSObject, @unchecked Sendable {
             if let s = o["conn"] as? String, let id = UUID(uuidString: s), let l = conns[id] {
                 abort(l.peripheral, "core-drop", "core asked to close (see the [ble] close:* line in the core log)")
             }
+        case "log":                       // the core's `ble_log` lines (its stderr is lost in the installed app)
+            if let line = o["line"] as? String { log.info("core \(line, privacy: .public)") }
         default: break
         }
     }
@@ -147,6 +151,7 @@ final class BleService: NSObject, @unchecked Sendable {
     }
 
     private func tearDown() {
+        if pairingStale { pairingStale = false; report() }
         scanWanted = false
         stopScan()
         for l in conns.values { central?.cancelPeripheralConnection(l.peripheral) }
@@ -196,7 +201,7 @@ final class BleService: NSObject, @unchecked Sendable {
 
     private func report(radio: String? = nil) {
         let r = radio ?? Self.radioName(central?.state ?? .unknown)
-        fire("ble_radio", ["radio": r, "auth": Self.authorizationName])
+        fire("ble_radio", ["radio": r, "auth": Self.authorizationName, "pairingStale": pairingStale])
     }
 
     private static func radioName(_ s: CBManagerState) -> String {
@@ -347,6 +352,7 @@ extension BleService: CBCentralManagerDelegate, CBPeripheralDelegate {
         report()
         if central.state == .poweredOn { startScanIfPossible() }
         else if central.state == .poweredOff || central.state == .unauthorized {
+            pairingStale = false
             for l in conns.values { close(l, reason: "poweredOff") }
         }
     }
@@ -361,9 +367,10 @@ extension BleService: CBCentralManagerDelegate, CBPeripheralDelegate {
         let l = Link(peripheral)
         conns[peripheral.identifier] = l
         peripheral.delegate = self
-        // CoreBluetooth's connect never times out; cancel after 10 s.
+        // CoreBluetooth's connect never times out; cancel after 20 s. Not less: a stale bond fails with
+        // CBError 14 "Peer removed pairing information" only after ~14 s, and a 10 s timer hid that cause.
         let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now() + 10)
+        t.schedule(deadline: .now() + 20)
         t.setEventHandler { [weak self, weak l] in
             guard let self, let l, !l.registered else { return }
             l.why = "connect-timeout"
@@ -382,10 +389,23 @@ extension BleService: CBCentralManagerDelegate, CBPeripheralDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        if conns[peripheral.identifier] != nil { notePairing(error) }
         if let l = conns[peripheral.identifier] { close(l, reason: "error", detail: "didFailToConnect \(Self.describe(error))") }
     }
 
+    /// (Only called for connections in `conns`, i.e. ones whose advert carried OUR phone's rotating id.)
+    /// macOS encrypts every LE link to a bonded peer. When the phone no longer has the matching keys
+    /// (it was unpaired or reset) every connect fails this way and no retry can help: tell the core, so the
+    /// UI can say "pair again" instead of "looking for your phone" forever.
+    private func notePairing(_ error: Error?) {
+        guard BleBackoff.isStaleBond(error) else { return }
+        pairingStale = true
+        note("pairing-stale", "the Mac's Bluetooth pairing for this phone is out of date (\(Self.describe(error)))")
+        report()
+    }
+
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        if conns[peripheral.identifier] != nil { notePairing(error) }
         if let l = conns[peripheral.identifier] {
             close(l, reason: error == nil ? "disconnected" : "error", detail: "didDisconnect \(Self.describe(error))")
         }
@@ -420,6 +440,7 @@ extension BleService: CBCentralManagerDelegate, CBPeripheralDelegate {
         guard !l.registered else { return }
         l.registered = true
         l.stage = "handshake"
+        if pairingStale { pairingStale = false; report() }
         note("subscribed", "\(short(peripheral)) notifications on; handing the link to the core")
         l.connectTimer?.cancel()
         let id = peripheral.identifier
@@ -483,6 +504,11 @@ struct BleLogLimiter {
 }
 
 enum BleBackoff {
+    /// CBError 14 "Peer removed pairing information" / 15 "Encryption timed out": the bond is stale.
+    static func isStaleBond(_ error: Error?) -> Bool {
+        guard let e = error as NSError?, e.domain == CBErrorDomain else { return false }
+        return e.code == 14 || e.code == 15
+    }
     /// A link that never reached the handshake, or died within 5 s of connecting, counts as a failure.
     static func isFailure(registered: Bool, ageMs: Int) -> Bool { !registered || ageMs < 5_000 }
     /// 0 for the first failure (retry at once), then 3, 6, 12 ... capped at 60 s.

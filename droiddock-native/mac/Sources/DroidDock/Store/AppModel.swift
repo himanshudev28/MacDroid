@@ -95,6 +95,8 @@ final class AppModel {
     var onMirrorStarted: (@MainActor (MirrorStarted) -> Void)?
     var onMirrorStopped: (@MainActor () -> Void)?
     var onMirrorError: (@MainActor (String?) -> Void)?
+    /// `camera-photo-saved` | `camera-photo-error` | `camera-lens-failed` | `camera-switching`, with the event's payload.
+    var onCameraEvent: (@MainActor (String, CameraEventPayload) -> Void)?
     func clearAudioError() { if audioError != nil { audioError = nil } }
     /// The phone cannot act on taps / keys (accessibility service off) and no adb route exists.
     var onMirrorControlUnavailable: (@MainActor () -> Void)?
@@ -103,6 +105,8 @@ final class AppModel {
 
     // Quick Share
     var quickShare: QuickShareRequest?
+    /// Id of the request already accepted (from the sheet or the notification); the sheet then shows progress.
+    var quickShareAcceptedId: Int?
     private(set) var quickShareProgress: QuickShareProgress?
     private(set) var quickShareReceived: [String] = []
     /// Quick Share *send* (Mac → nearby device). Devices appear while discovery runs.
@@ -462,6 +466,26 @@ final class AppModel {
         Task { try? await Core.shared.notifDismiss(key: key) }
     }
 
+    /// Above this many notifications, "Clear All" asks first (every surface uses it).
+    static let clearConfirmThreshold = 5
+
+    /// The one place "Clear All" / per-app clear lives. Skips calls and live (ongoing progress / timer) items, removes the rest
+    /// in a single write, drops their Notification Center copies and floating banners, and dismisses on the phone with the
+    /// same "Sync notification dismissals" rule as `dismissNotification`.
+    func clearNotifications(_ items: [PhoneNotification]) {
+        let doomed = items.filter { $0.type != "call" && !$0.isLive }
+        guard !doomed.isEmpty else { return }
+        let keys = Set(doomed.map(\.key))
+        setNotifications(notifications.filter { !keys.contains($0.key) })
+        for n in doomed {
+            NotificationService.shared.remove(id: n.key)
+            BannerCenter.shared.dismiss(id: n.key)
+        }
+        let toPhone = doomed.filter { syncsDismissals(pkg: $0.pkg) }.map(\.key)
+        guard !toPhone.isEmpty else { return }
+        Task { for k in toPhone { try? await Core.shared.notifDismiss(key: k) } }
+    }
+
     func syncsDismissals(pkg: String?) -> Bool {
         guard let c = config else { return true }
         return c.syncNotifDismissals && (pkg.map { c.appNotif($0).syncDismissals } ?? true)
@@ -705,6 +729,12 @@ final class AppModel {
         case "call-state":
             guard let s = decode(CallState.self, ev) else { return }
             set(\.callState, s)
+            // adb only knows "off-hook", not dialing vs answered: a Mac-dialled call that adb sees
+            // off-hook is live, so the pop-up shows the timer (End/Mute/Speaker fall back to adb).
+            if s.state == "ACTIVE", var cur = activeCall, cur.state == "dialing" {
+                cur.state = "active"
+                set(\.activeCall, cur)
+            }
             if s.state == "IDLE" {
                 set(\.activeCall, nil)
                 NotificationService.shared.remove(id: "call")   // the "Incoming call" banner must not outlive the call
@@ -745,19 +775,25 @@ final class AppModel {
             set(\.qrPair, decode(QrPairStatus.self, ev))
         case "quickshare-request":
             guard let r = decode(QuickShareRequest.self, ev) else { return }
-            if quickShare != nil {   // already prompting: decline the newcomer
+            if quickShare != nil || NotificationService.shared.isRepeatAfterDecline(peer: r.peer) {
+                // Already prompting, or the same device was just declined: decline quietly, no notification.
                 Task { try? await Core.shared.quickshareRespond(id: r.id, accept: false) }
-            } else { quickShare = r; quickShareProgress = nil }
+            } else { quickShare = r; quickShareAcceptedId = nil; quickShareProgress = nil; NotificationService.shared.quickShareRequested(r) }
+        case "quickshare-rejected":
+            // Consent timeout or the sender gave up: the sheet and notification are stale.
+            let id = decode(QuickShareRejected.self, ev)?.id
+            if quickShare != nil, quickShareEnded(id: id) { toast(.info, tr("Quick Share request expired")) }
         case "quickshare-progress":
             set(\.quickShareProgress, decode(QuickShareProgress.self, ev))
         case "quickshare-received":
             if let r = decode(QuickShareReceived.self, ev) {
-                quickShareReceived = r.paths; quickShare = nil; quickShareProgress = nil
+                quickShareReceived = r.paths
+                _ = quickShareEnded(id: r.id)
                 toast(.ok, tn("Received {n} file", "Received {n} files", r.paths.count))
             }
         case "quickshare-error":
             if let e = decode(ErrorPayload.self, ev) {
-                quickShare = nil; quickShareProgress = nil
+                _ = quickShareEnded(id: e.id)
                 toast(.bad, e.error ?? tr("Quick Share failed"))
             }
         case "quickshare-devices":
@@ -787,6 +823,8 @@ final class AppModel {
         case "mirror-error":
             mirrorError = decode(ErrorPayload.self, ev)?.error
             onMirrorError?(mirrorError)
+        case "camera-photo-saved", "camera-photo-error", "camera-lens-failed", "camera-switching", "camera-orientation", "camera-zoom-state":
+            if let p = decode(CameraEventPayload.self, ev) { onCameraEvent?(ev.name, p) }
         case "mirror-control":
             onMirrorControlUnavailable?()
         case "mirror-window":
@@ -820,6 +858,7 @@ final class AppModel {
 
     /// Mirrors App.tsx: ringing adds a call card, active swaps controls, idle clears.
     private func applyCall(_ c: IncomingCall) {
+        if c.state != "dialing" { dialExpiry?.cancel(); dialExpiry = nil }
         switch c.state {
         case "ringing":
             let item = PhoneNotification(
@@ -830,7 +869,14 @@ final class AppModel {
                 replyable: false, time: Date().timeIntervalSince1970 * 1000, type: "call")
             putNotification(item)
             set(\.activeCall, c)
-        case "active", "dialing":
+        case "dialing":
+            // The core announces a Mac-placed call at once; the phone's own events may already have
+            // reported it live, which must not be rolled back to "Calling…".
+            if let cur = activeCall, cur.state == "active" { return }
+            dropCallCards()
+            set(\.activeCall, c)
+            expireUnconfirmedDial(c)
+        case "active":
             // Answered: the call module/pop-up takes over, so the "Incoming call" card goes.
             dropCallCards()
             set(\.activeCall, c)
@@ -849,6 +895,20 @@ final class AppModel {
         }
     }
 
+    /// A dial that nothing ever confirms (the phone only opened its dialer, the link dropped, an
+    /// old phone app) would leave "Calling…" up forever: Android reports off-hook within a few
+    /// seconds of dialling, so a call still "dialing" after 20 s never started.
+    private func expireUnconfirmedDial(_ c: IncomingCall) {
+        dialExpiry?.cancel()
+        dialExpiry = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(20))
+            // Cancelled when any later call event arrives, so an old dial's timer can never close a redial.
+            guard !Task.isCancelled, let self, let cur = self.activeCall, cur.state == "dialing" else { return }
+            self.set(\.activeCall, nil)
+        }
+    }
+    @ObservationIgnored private var dialExpiry: Task<Void, Never>?
+
     /// `art` rides only on track changes: keep the cached image unless the payload says otherwise.
     private func applyMedia(_ m: MediaState?) {
         guard let m else { media = nil; mediaArt = nil; return }
@@ -865,4 +925,16 @@ import OSLog
 enum NavTrail {
     private static let logger = Logger(subsystem: "com.droiddock.mac", category: "nav")
     static func log(_ message: String) { logger.notice("\(message, privacy: .public)") }
+}
+
+extension AppModel {
+    /// Clears the Quick Share prompt when `id` is the current request (or absent, for older cores).
+    /// Returns whether it cleared anything. A late event for an older request leaves the current one alone.
+    @discardableResult
+    func quickShareEnded(id: Int?) -> Bool {
+        guard let cur = quickShare, id == nil || id == cur.id else { return false }
+        quickShare = nil; quickShareAcceptedId = nil; quickShareProgress = nil
+        NotificationService.shared.quickShareResolved(id: cur.id)
+        return true
+    }
 }

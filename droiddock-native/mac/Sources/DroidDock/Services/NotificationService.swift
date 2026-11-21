@@ -14,6 +14,14 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, @un
     static let copyAction = "dd.copy.action"
     static let replyAction = "dd.reply.action"
     static let openAction = "dd.open.action"
+    static let quickShareCategory = "dd.quickshare"
+    static let qsAcceptAction = "dd.qs.accept"
+    static let qsDeclineAction = "dd.qs.decline"
+    private static let qsPrefix = "dd-quickshare-"
+    private let qsLock = NSLock()
+    private var qsPending: Int?   // id of the request whose notification may still be answered
+    private var qsDeclined: [String: Date] = [:]   // peer name -> last decline
+    private var qsSeen: [String: Date] = [:]       // peer name -> last request that was shown
 
     private var available: Bool { Bundle.main.bundleIdentifier != nil && Bundle.main.bundleURL.pathExtension == "app" }
 
@@ -41,6 +49,11 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, @un
             UNNotificationCategory(identifier: Self.otpPlainCategory, actions: [copy, open], intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: Self.replyCategory, actions: [open, reply], intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: Self.plainCategory, actions: [open], intentIdentifiers: [], options: []),
+            UNNotificationCategory(identifier: Self.quickShareCategory, actions: [
+                // Requests an unlocked device (macOS enforcement is unverified; the code on screen is the real check).
+                UNNotificationAction(identifier: Self.qsAcceptAction, title: tr("Accept"), options: [.authenticationRequired]),
+                UNNotificationAction(identifier: Self.qsDeclineAction, title: tr("Decline"), options: [.destructive]),
+            ], intentIdentifiers: [], options: []),
         ])
         requestAuthorizationIfNeeded()
     }
@@ -154,6 +167,17 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, @un
             c.userInfo["otp"] = code
         }
         Task {
+            // Remembered on the notification itself: the phone's list may no longer have it when "Open" is pressed.
+            // The phone's list can lag the post, so poll briefly (same budget as iconFile).
+            var src: PhoneNotification?
+            let deadline = Date().addingTimeInterval(0.4)
+            repeat {
+                src = await MainActor.run { AppModel.shared.notifications.first { $0.key == n.id } }
+                if src != nil { break }
+                try? await Task.sleep(for: .milliseconds(50))
+            } while Date() < deadline
+            if let p = src?.pkg { c.userInfo["pkg"] = p }
+            if let a = src?.app { c.userInfo["app"] = a }
             if let f = await self.iconFile(forKey: n.id) {
                 let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("dd-icon-\(UUID().uuidString).png")
                 if (try? FileManager.default.copyItem(at: f, to: tmp)) != nil,
@@ -218,6 +242,10 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, @un
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        if response.notification.request.content.categoryIdentifier == Self.quickShareCategory {
+            await handleQuickShare(response)
+            return
+        }
         if let r = response as? UNTextInputNotificationResponse, r.actionIdentifier == Self.replyAction,
            let key = r.notification.request.content.userInfo["replyKey"] as? String {
             do { try await Core.shared.notifReply(key: key, text: r.userText) }
@@ -228,13 +256,101 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, @un
             }
         } else if response.actionIdentifier == Self.openAction {
             let key = response.notification.request.identifier
+            let info = response.notification.request.content.userInfo
+            let pkg = info["pkg"] as? String, app = info["app"] as? String
             await MainActor.run {
-                let c = NotificationClickActions.shared
-                if c.canOpenOnPhone(key: key) { c.open(key: key) } else { c.handleBannerClick(key: key) }
+                NotificationClickActions.shared.explicitOpen(key: key, pkg: pkg, app: app)   // never silent
             }
         } else if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
             let key = response.notification.request.identifier
             await MainActor.run { NotificationClickActions.shared.handleBannerClick(key: key) }
+        }
+    }
+}
+
+// MARK: Incoming Quick Share request
+
+/// The request sheet lives on the main window, which is usually closed in a menu-bar app, and the sender is blocked
+/// until we answer. So the request also goes out as a notification; if macOS cannot show one, the window opens instead.
+extension NotificationService {
+    func quickShareRequested(_ r: QuickShareRequest) {
+        qsLock.lock()
+        qsPending = r.id
+        let repeatRequest = qsSeen[r.peer].map { Date().timeIntervalSince($0) < 60 } ?? false
+        qsSeen[r.peer] = Date()
+        qsLock.unlock()
+        let openWindow: @Sendable () -> Void = { Task { @MainActor in WindowControl.showMain() } }
+        guard available else { openWindow(); return }
+        let total = r.files.reduce(0) { $0 + max(0, $1.size) }
+        let c = UNMutableNotificationContent()
+        c.title = tn("{peer} wants to send {n} file", "{peer} wants to send {n} files", r.files.count, ["peer": r.peer])
+        c.body = tr("Code {pin}. Accept only if it matches the sending device.", ["pin": r.pin])
+            + (total > 0 ? " " + ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file) : "")
+        c.categoryIdentifier = Self.quickShareCategory
+        if !repeatRequest { c.interruptionLevel = .timeSensitive; c.sound = .default }
+        c.userInfo = ["qsId": r.id]
+        requestAuthorizationIfNeeded { banners, _ in
+            self.qsLock.lock(); let stillPending = self.qsPending == r.id; self.qsLock.unlock()
+            guard stillPending else { return }   // answered or ended while authorization was being checked
+            guard banners else { dlog("quickshare request: system banners off, opening the window"); openWindow(); return }
+            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: Self.qsPrefix + "\(r.id)", content: c, trigger: nil)) {
+                if let e = $0 { dlog("quickshare notification failed: \(e)"); openWindow() }
+            }
+        }
+    }
+
+    /// The request was answered or ended by any path: drop its notification so a stale Accept cannot fire.
+    func quickShareResolved(id: Int? = nil) {
+        qsLock.lock()
+        let pending = qsPending
+        if id == nil || id == pending { qsPending = nil }
+        qsLock.unlock()
+        guard available, let gone = id ?? pending else { return }
+        let ident = [Self.qsPrefix + "\(gone)"]
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ident)
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ident)
+    }
+
+    private func claimQuickShare(id: Int) -> Bool {
+        qsLock.lock(); defer { qsLock.unlock() }
+        guard qsPending == id else { return false }
+        qsPending = nil
+        return true
+    }
+
+    func noteDeclined(peer: String) { qsLock.lock(); qsDeclined[peer] = Date(); qsLock.unlock() }
+
+    /// The same device asked again within 10 s of being declined: drop it quietly.
+    func isRepeatAfterDecline(peer: String) -> Bool {
+        qsLock.lock(); defer { qsLock.unlock() }
+        return qsDeclined[peer].map { Date().timeIntervalSince($0) < 10 } ?? false
+    }
+
+    fileprivate func handleQuickShare(_ response: UNNotificationResponse) async {
+        guard let id = response.notification.request.content.userInfo["qsId"] as? Int else { return }
+        let act = response.actionIdentifier
+        if act == UNNotificationDefaultActionIdentifier || act == Self.openAction {
+            await MainActor.run { WindowControl.showMain() }   // the sheet answers it
+            return
+        }
+        guard act == Self.qsAcceptAction || act == Self.qsDeclineAction else { return }
+        let live = claimQuickShare(id: id)
+        guard live else { dlog("quickshare: ignoring answer for finished request \(id)"); return }
+        let accept = act == Self.qsAcceptAction
+        if !accept { noteDeclined(peer: await MainActor.run { AppModel.shared.quickShare?.peer } ?? "") }
+        quickShareResolved(id: id)
+        do {
+            try await Core.shared.quickshareRespond(id: id, accept: accept)
+            await MainActor.run {
+                let m = AppModel.shared
+                guard m.quickShare?.id == id else { return }
+                if accept { m.quickShareAcceptedId = id } else { m.quickShareEnded(id: id) }   // accepted: the sheet shows progress
+            }
+        } catch {
+            await MainActor.run {
+                AppModel.shared.quickShareEnded(id: id)
+                AppModel.shared.toast(.bad, tr("Quick Share request expired"))
+            }
         }
     }
 }

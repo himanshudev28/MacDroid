@@ -57,7 +57,7 @@ final class Core: @unchecked Sendable {
         "scrcpy_embedded_start", "mirror_save_capture", "health_check", "health_fix", "webdav_start",
         "cache_clear", "server_restart", "contacts_list", "sms_threads", "sms_messages", "sms_send",
         "photos_list", "photo_thumb", "photo_open", "apps_list", "app_icon", "wallpaper_get", "audio_attach", "mirror_attach",
-        "mirror_popout", "tool_versions",
+        "mirror_popout", "tool_versions", "camera_select_lens", "camera_take_photo",
     ]
     /// Every `adb_*` command waits on an adb or scrcpy process, which the core bounds itself.
     private static func isLongRunning(_ cmd: String) -> Bool { longRunning.contains(cmd) || cmd.hasPrefix("adb_") }

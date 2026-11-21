@@ -24,7 +24,7 @@ class TransportClassTest {
         }
         assertEquals(TransportClass.WIFI, c("""{"type":"remote","action":"mouse_move"}"""))
         for (t in listOf("photos-changed", "remote-button", "fs-list", "phone-push", "photos-list", "photo-thumb",
-            "app-icon", "apps-list", "wallpaper", "screenshot", "mirror-start", "audio-x", "camera-start",
+            "app-icon", "apps-list", "wallpaper", "screenshot", "mirror-start", "audio-x", "camera-start", "camera-lens", "camera-photo", "camera-photo-data", "camera-photo-error", "camera-lens-failed", "camera-orientation", "camera-zoom-state", "camera-orient-watch",
             "control-unavailable", "mac-fs-list", "mac-apps-list", "mac-app-launch", "contacts", "never-heard-of-it")) {
             assertEquals(t, TransportClass.WIFI, c("""{"type":"$t"}"""))
         }
@@ -39,7 +39,7 @@ class TransportClassTest {
         }
         assertEquals(TransportClass.WIFI, c("""{"type":"clipboard","kind":"image"}""", d))
         for (t in listOf("contacts", "fs-list", "photos-list", "photo-thumb", "app-icon", "apps-list", "wallpaper",
-            "screenshot", "mirror-key", "camera-flip", "mac-fs-pull")) assertEquals(t, TransportClass.WIFI, c("""{"type":"$t"}""", d))
+            "screenshot", "mirror-key", "camera-flip", "camera-lens", "camera-photo", "camera-orient-watch", "camera-zoom", "mac-fs-pull")) assertEquals(t, TransportClass.WIFI, c("""{"type":"$t"}""", d))
     }
 }
 

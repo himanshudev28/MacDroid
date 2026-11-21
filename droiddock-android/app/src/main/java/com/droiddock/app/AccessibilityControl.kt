@@ -72,7 +72,7 @@ object AccessibilityControl {
      * when it comes from a background app, but a tap on the button counts as the user's own.
      * Blocks the caller (never the main thread) for up to ~2 s; returns whether a tap was made.
      */
-    fun clickLabel(labels: List<String>, openShade: Boolean): Boolean {
+    fun clickLabel(labels: List<String>, openShade: Boolean, packages: Set<String>? = null): Boolean {
         val svc = service ?: return false
         val wanted = labels.map { it.trim().lowercase() }.filter { it.isNotEmpty() }.distinct()
         if (wanted.isEmpty()) return false
@@ -80,7 +80,7 @@ object AccessibilityControl {
             val latch = java.util.concurrent.CountDownLatch(1)
             var done = false
             main.post {
-                done = runCatching { clickIn(svc, wanted) }.getOrDefault(false)
+                done = runCatching { clickIn(svc, wanted, packages) }.getOrDefault(false)
                 latch.countDown()
             }
             latch.await(1500, java.util.concurrent.TimeUnit.MILLISECONDS)
@@ -97,7 +97,8 @@ object AccessibilityControl {
         return ok
     }
 
-    private fun clickIn(svc: AccessibilityService, wanted: List<String>): Boolean {
+    /** [packages], when given, limits the search to windows of those apps (never a look-alike button elsewhere). */
+    private fun clickIn(svc: AccessibilityService, wanted: List<String>, packages: Set<String>? = null): Boolean {
         val roots = buildList {
             svc.windows?.forEach { w -> w.root?.let { add(it) } }
             svc.rootInActiveWindow?.let { add(it) }
@@ -105,6 +106,7 @@ object AccessibilityControl {
         for (label in wanted) for (root in roots) {
             val hits = root.findAccessibilityNodeInfosByText(label) ?: continue
             for (n in hits) {
+                if (packages != null && n.packageName?.toString() !in packages) continue
                 val text = (n.text ?: n.contentDescription)?.toString()?.trim()?.lowercase() ?: continue
                 if (text != label) continue   // never "Answer with message" for "Answer"
                 var target: AccessibilityNodeInfo? = n

@@ -186,7 +186,7 @@ internal fun ClipboardTab(
                 label = t("Send"),
                 onSend = {
                     val ok = ConnectionManager.sendClipboardText(draft.trim())
-                    if (ok) { draft = ""; sendCount++ } else Toast.makeText(ctx, notConnected, Toast.LENGTH_SHORT).show()
+                    if (ok) { draft = ""; sendCount++ } else Toast.makeText(ctx, if (connected) ConnectionManager.notSentText(false, draft.trim()) else notConnected, Toast.LENGTH_SHORT).show()
                     ok
                 },
             )
@@ -324,7 +324,7 @@ fun HomeClipboardCard(
             val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             val text = readClipboardText(cm, ctx)
             val ok = text.isNotEmpty() && ConnectionManager.sendClipboardText(text)
-            Toast.makeText(ctx, when { text.isEmpty() -> empty; ok -> sent; else -> offline }, Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, when { text.isEmpty() -> empty; ok -> sent; connected -> ConnectionManager.notSentText(false, text); else -> offline }, Toast.LENGTH_SHORT).show()
         },
         onOpen = onOpen,
         modifier = modifier,

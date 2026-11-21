@@ -97,6 +97,7 @@
 "Android layout" = "Android 布局";
 "Answer" = "接听";
 "Answer  ⏎" = "接听  ⏎";
+"Answer on speaker" = "接听时开启免提";
 "Answer or decline on your phone. Controlling the call from here needs the Phone permissions (Calls) granted to DroidDock on your phone." = "请在手机上接听或拒接。要在这里控制通话，需要在手机上向 DroidDock 授予电话（通话）权限。";
 "Answer or decline on your phone. Update the DroidDock app on your phone to control calls from the Mac." = "请在手机上接听或拒接。更新手机上的 DroidDock 应用即可从 Mac 控制通话。";
 "App" = "应用";
@@ -158,6 +159,7 @@
 "Bluetooth is off" = "蓝牙已关闭";
 "Bluetooth is turned off on this Mac" = "此 Mac 的蓝牙已关闭";
 "Bluetooth isn't available on this Mac" = "此 Mac 不支持蓝牙";
+"Bluetooth pairing is out of date" = "蓝牙配对已过期";
 "Both devices need the same Wi-Fi network." = "两台设备需要连接同一个 Wi-Fi 网络。";
 "Bring to Front" = "前置";
 "Bring to front" = "移到最前";
@@ -189,6 +191,7 @@
 "Cancelled on phone" = "已在手机上取消";
 "Cancelled on the phone" = "已在手机上取消";
 "Capabilities" = "功能";
+"Capture mode" = "拍摄模式";
 "Charging" = "充电中";
 "Check Again" = "重新检查";
 "Check again" = "重新检查";
@@ -245,12 +248,15 @@
 "Close window" = "关闭窗口";
 "Closest match · {number}" = "最接近的匹配 · {number}";
 "Code {pin}" = "代码 {pin}";
+"Code {pin}. Accept only if it matches the sending device." = "验证码 {pin}。仅当与发送设备显示的一致时才接受。";
 "Codes are copied as secrets, so clipboard history apps skip them and they are not sent to your phone. Auto-copy only applies to new notifications." = "验证码会作为机密内容复制，剪贴板历史类应用会跳过它，也不会发送到手机。自动复制仅适用于新通知。";
 "Collapse sidebar" = "收起侧边栏";
 "Coming soon" = "即将推出";
 "Command bar" = "命令栏";
 "Computer" = "电脑";
+"Confirm" = "确认";
 "Confirm PIN {pin} on {name}" = "请在 {name} 上确认 PIN {pin}";
+"Confirm clearing {n} notifications" = "确认清除 {n} 条通知";
 "Connect a USB cable, or pair wirelessly below." = "连接 USB 线，或在下方进行无线配对。";
 "Connect a phone via USB or wireless ADB from the Devices tab." = "在“设备”标签页中通过 USB 或无线 ADB 连接手机。";
 "Connect an ADB device to manage these." = "连接 ADB 设备后才能管理这些内容。";
@@ -309,6 +315,7 @@
 "Couldn't download the files to share." = "无法下载要共享的文件。";
 "Couldn't list apps" = "无法列出应用";
 "Couldn't open the file" = "无法打开文件";
+"Couldn't open {app} on your phone" = "无法在手机上打开 {app}";
 "Couldn't open — the notification is gone" = "无法打开：该通知已不存在";
 "Couldn't place the call" = "无法拨打电话";
 "Couldn't reveal in Finder" = "无法在 Finder 中显示";
@@ -319,6 +326,8 @@
 "Couldn't start mirroring" = "无法开始镜像";
 "Couldn't start the backup" = "无法开始备份";
 "Couldn't start the camera" = "无法启动摄像头";
+"Couldn't switch the call to speaker" = "无法将通话切换到免提";
+"Couldn't take the photo" = "无法拍照";
 "Crash logs" = "崩溃日志";
 "Crash reports" = "崩溃报告";
 "Custom" = "自定";
@@ -429,6 +438,7 @@
 "Folder name" = "文件夹名称";
 "Folders can't be dragged out yet. Open the folder and drag its files." = "暂不支持拖出文件夹。请打开文件夹，再拖出其中的文件。";
 "Folders the phone's Mac Files tab may browse and pull from. Nothing outside this list is ever reachable." = "手机上的“Mac 文件”标签页可浏览和下载的文件夹。此列表之外的内容一律无法访问。";
+"Follow phone orientation" = "跟随手机方向";
 "Forget" = "忘记";
 "Forget Phone" = "忘记手机";
 "Forget phone" = "忘记此手机";
@@ -443,6 +453,7 @@
 "Front" = "前置";
 "Full-quality camera preview over USB or wireless ADB via scrcpy — opens in its own window." = "通过 scrcpy 经 USB 或无线 ADB 提供全画质摄像头预览——在独立窗口中打开。";
 "Full-quality camera preview over USB or wireless ADB via scrcpy, in its own window." = "通过 scrcpy 经 USB 或无线 ADB，在独立窗口中显示高画质相机预览。";
+"Full-quality camera preview over USB or wireless ADB, in this app. Pick a lens and take photos or record video; photos are grabbed from the preview." = "通过 USB 或无线 ADB 在本应用内显示全画质相机预览。选择镜头即可拍照或录像；照片取自预览画面。";
 "Full-quality, low-latency mirroring over USB or wireless ADB via scrcpy — opens in its own window." = "通过 scrcpy 经 USB 或无线 ADB 提供全画质、低延迟投屏——在独立窗口中打开。";
 "Full-quality, low-latency mirroring over USB or wireless ADB via scrcpy, in its own window." = "通过 scrcpy 经 USB 或无线 ADB，在独立窗口中进行高画质、低延迟投屏。";
 "General" = "通用";
@@ -541,6 +552,7 @@
 "Latency" = "延迟";
 "Later" = "稍后";
 "Launch at login" = "登录时启动";
+"Lens {name}" = "镜头 {name}";
 "Let the phone browse these folders" = "允许手机浏览这些文件夹";
 "Let the phone control this Mac" = "允许手机控制此 Mac";
 "Lets your Mac and phone find each other." = "让 Mac 和手机能够互相发现。";
@@ -791,6 +803,7 @@
 "Open video" = "打开视频";
 "Open {app} on phone" = "在手机上打开 {app}";
 "Open {name}" = "打开 {name}";
+"Opened on your phone — Wi-Fi is off, so it can't be shown here" = "已在手机上打开：Wi-Fi 已关闭，无法在此显示";
 "Opened phone files" = "已打开的手机文件";
 "Opened the release page." = "已打开发布页面。";
 "Opened {app} in its own window" = "已在独立窗口中打开 {app}";
@@ -809,6 +822,7 @@
 "Optional: adb and scrcpy" = "可选：adb 与 scrcpy";
 "Options for {app}" = "{app} 的选项";
 "Outgoing call" = "去电";
+"PHOTO" = "照片";
 "PIN {pin}" = "PIN {pin}";
 "Pair" = "配对";
 "Pair Wirelessly…" = "无线配对…";
@@ -941,6 +955,7 @@
 "Quick Look" = "快速查看";
 "Quick Share" = "快速分享";
 "Quick Share failed" = "Quick Share 失败";
+"Quick Share request expired" = "Quick Share 请求已过期";
 "Quick Share to {name}" = "通过 Quick Share 发送到 {name}";
 "Quick Share…" = "Quick Share…";
 "Quick actions" = "快捷操作";
@@ -973,6 +988,8 @@
 "Reconnecting…" = "正在重新连接…";
 "Record" = "录制";
 "Record to Movies/DroidDock (video only — phone audio isn't part of this window)" = "录制到 影片/DroidDock（仅画面——手机音频不属于此窗口）";
+"Recording" = "正在录制";
+"Recording failed: {e}" = "录制失败：{e}";
 "Reduce transparency" = "降低透明度";
 "Reduce transparency is on, so the window is solid." = "已开启“降低透明度”，因此窗口为不透明。";
 "Refresh" = "刷新";
@@ -1019,6 +1036,7 @@
 "Ring phone" = "让手机响铃";
 "Ringing your phone — it stops itself after a minute" = "正在让手机响铃——一分钟后会自动停止";
 "Ringing your phone. It stops by itself after a minute." = "正在让手机响铃，一分钟后会自动停止。";
+"Rotate the picture" = "旋转画面";
 "Round trip" = "往返延迟";
 "Run Setup Check" = "运行设置检查";
 "SMS sends through your phone's SIM — carrier rates apply as usual." = "短信通过手机的 SIM 卡发送——按运营商标准资费计费。";
@@ -1203,6 +1221,7 @@
 "Start mirroring" = "开始投屏";
 "Start mirroring your phone?" = "要开始镜像你的手机吗？";
 "Start or stop screen mirror" = "开始或停止屏幕投屏";
+"Start recording" = "开始录制";
 "Start screen mirror" = "开始屏幕镜像";
 "Start with" = "默认启动方式";
 "Starting…" = "正在启动…";
@@ -1215,6 +1234,7 @@
 "Stop Mirroring" = "停止投屏";
 "Stop mirror" = "停止投屏";
 "Stop reconnecting wirelessly" = "停止无线重新连接";
+"Stop recording" = "停止录制";
 "Stop recording and save to Movies/DroidDock" = "停止录制并保存到 影片/DroidDock";
 "Stop ringing" = "停止响铃";
 "Stop screen mirror" = "停止屏幕镜像";
@@ -1225,6 +1245,7 @@
 "Streaming" = "直播中";
 "Streams the phone's back camera into a pop-out window over Wi-Fi. Flip to the front camera once it's running." = "通过 Wi-Fi 把手机后置摄像头画面传输到弹出窗口。启动后可切换到前置摄像头。";
 "Streams the phone's back camera over Wi-Fi. Flip to the front camera once it's running." = "通过 Wi-Fi 串流手机的后置相机。启动后可切换到前置相机。";
+"Streams the phone's camera over Wi-Fi. Pick a lens, flip to the front camera, and take photos or videos once it's running." = "通过 Wi-Fi 串流手机相机。选择镜头、切换到前置摄像头，运行后即可拍照或录像。";
 "Support" = "支持";
 "Support report" = "支持报告";
 "Switch back automatically" = "自动切换回来";
@@ -1249,6 +1270,7 @@
 "Tablet" = "平板";
 "Take Screenshot" = "截屏";
 "Take phone screenshot" = "截取手机屏幕";
+"Take photo" = "拍照";
 "Take screenshot" = "截屏";
 "Takes effect the next time you start desktop mode or open an app on this Mac." = "下次启动桌面模式或在此 Mac 上打开应用时生效。";
 "Tap Accept on the other device." = "请在另一台设备上点按“接受”。";
@@ -1261,10 +1283,14 @@
 "Text sent to phone" = "文本已发送到手机";
 "That Mac app is no longer installed" = "该 Mac 应用已不再安装";
 "That didn't take. Right-click DroidDock in the Dock › Options › Assign To › None." = "设置未生效。请在 Dock 中右键点按 DroidDock，选择“选项 › 指定给 › 无”。";
+"That lens isn't available" = "该镜头不可用";
+"That notification is gone" = "该通知已不存在";
+"That notification is gone — opened {app}" = "该通知已不存在，已打开 {app}";
 "The Bluetooth fallback is unavailable while it's off." = "蓝牙关闭时无法使用蓝牙备用连接。";
 "The Dashboard shows a QR code. In the phone app, tap “Pair with Mac” and scan it. Both devices must be on the same Wi-Fi network — if the code won't scan, there's an IP-and-token fallback on the same screen." = "“仪表盘”会显示一个二维码。在手机应用中点按“与 Mac 配对”并扫描它。两台设备必须处于同一 Wi-Fi 网络——如果扫不出来，同一界面上还有 IP 加令牌的备用方式。";
 "The Dock's Assign To setting puts its windows on whichever desktop you switch to." = "Dock 的“指定给”设置会让它的窗口出现在你切换到的任何桌面上。";
 "The adapter decides which address DroidDock advertises in the QR code and on Bonjour; the server itself accepts connections on every adapter." = "适配器决定 DroidDock 在二维码和 Bonjour 中公布的地址；服务器本身会接受所有适配器上的连接。";
+"The camera window turns to portrait or landscape as you hold the phone. You can also rotate it by hand with R." = "相机窗口会随你握持手机的方向切换为竖屏或横屏。你也可以按 R 手动旋转。";
 "The current Mac clipboard would be copied to your phone." = "当前 Mac 剪贴板的内容将被复制到你的手机。";
 "The file has been moved or deleted" = "文件已被移动或删除";
 "The in-app mirror needs scrcpy." = "应用内投屏需要 scrcpy。";
@@ -1273,6 +1299,7 @@
 "The phone didn't answer. Check that it's nearby and try again." = "手机没有响应。请确认它在附近，然后重试。";
 "The phone finds this Mac again by itself over Bonjour on most networks. If it doesn't, scan the new QR code once." = "在大多数网络上，手机会通过 Bonjour 自动重新找到这台 Mac。若没有，请扫描一次新的二维码。";
 "The phone isn't responding. Unplug and reconnect it, or tap Reconnect." = "手机没有响应。请拔掉线缆后重新连接，或点按“重新连接”。";
+"The phone no longer has this Mac's Bluetooth keys, so the Bluetooth fallback can't connect. In Bluetooth settings, remove the phone, then pair it again." = "手机已不再保存这台 Mac 的蓝牙密钥，因此蓝牙备用连接无法连接。请在蓝牙设置中移除手机，然后重新配对。";
 "The phone reported no launchable apps." = "手机未报告任何可启动的应用。";
 "The phone still responds; it just isn't showing anything." = "手机仍有响应，只是没有显示任何内容。";
 "The phone's own layout, scaled up to the window." = "手机自身的布局，按窗口大小放大。";
@@ -1363,6 +1390,7 @@
 "Use your phone's camera as a live feed on this Mac." = "把手机摄像头作为此 Mac 上的实时画面来源。";
 "Uses Bluetooth only when Wi-Fi to your phone is unavailable, and switches back automatically." = "仅在与手机之间的 Wi-Fi 不可用时使用蓝牙，并会自动切换回来。";
 "Uses the cable when your phone is plugged in. Needs USB debugging turned on on the phone." = "手机插入数据线时使用数据线连接。需要在手机上开启 USB 调试。";
+"VIDEO" = "视频";
 "Verification code copied" = "已复制验证码";
 "Verification codes" = "验证码";
 "Verifying…" = "正在验证…";
@@ -1378,7 +1406,9 @@
 "Virtual displays need scrcpy 3.0 or newer. Run `brew upgrade scrcpy`, then reopen DroidDock." = "虚拟显示器需要 scrcpy 3.0 或更高版本。请运行 `brew upgrade scrcpy`，然后重新打开 DroidDock。";
 "Volume" = "音量";
 "Waiting" = "等待中";
+"Waiting for Bluetooth permission" = "正在等待蓝牙权限";
 "Waiting for a phone" = "正在等待手机";
+"Waiting for keyframe…" = "正在等待关键帧…";
 "Waiting for phone" = "正在等待手机";
 "Waiting for scan…" = "等待扫描……";
 "Waiting for the phone…" = "正在等待手机……";
@@ -1397,6 +1427,7 @@
 "What's playing" = "正在播放";
 "When DroidDock shows its own banner, also keep the notification in macOS Notification Center." = "当 DroidDock 显示自己的横幅时，同时将通知保留在 macOS 通知中心。";
 "When clicked" = "点按时";
+"When you answer from the Mac, the call switches to the phone's speaker." = "在 Mac 上接听时，通话会切换到手机的免提。";
 "Where a click opens an app. Hold Option to do the other one." = "点击时应用在何处打开。按住 Option 可执行另一种方式。";
 "Where clicking an app opens it" = "点击应用时的打开位置";
 "Where it appears" = "显示位置";
@@ -1446,6 +1477,7 @@
 "Your phone on the left, five tabs along the top." = "手机在左侧，顶部有五个标签页。";
 "Your phone will be disconnected and must scan the new QR code to pair again." = "你的手机将断开连接,需要扫描新的二维码才能再次配对。";
 "Your phone's camera is streaming in its own window. Flip front/back from there." = "手机摄像头画面正在独立窗口中传输。可在该窗口切换前／后置。";
+"Zoom" = "缩放";
 "adb was not found" = "未找到 adb";
 "adb — installed automatically on first launch" = "adb — 首次启动时自动安装";
 "and scan this code" = "并扫描此二维码";
@@ -1525,6 +1557,8 @@
 "{n}% — charging" = "{n}% — 充电中";
 "{peer} wants to send you {n} file" = "{peer} 想向你发送 {n} 个文件";
 "{peer} wants to send you {n} files" = "{peer} 想向你发送 {n} 个文件";
+"{peer} wants to send {n} file" = "{peer} 想发送 {n} 个文件";
+"{peer} wants to send {n} files" = "{peer} 想发送 {n} 个文件";
 "{size} total" = "共 {size}";
 "{time} left" = "剩余 {time}";
 "⌘Q only closes the windows. DroidDock keeps running in the menu bar, with the phone link and Quick Share still on. Choose Quit DroidDock in its menu to stop everything." = "⌘Q 只会关闭窗口。DroidDock 会继续在菜单栏中运行，手机连接和 Quick Share 保持开启。请在其菜单中选择“退出 DroidDock”以停止全部服务。";

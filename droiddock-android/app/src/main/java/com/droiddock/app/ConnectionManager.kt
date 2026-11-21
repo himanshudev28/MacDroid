@@ -98,6 +98,11 @@ object ConnectionManager {
         // the Mac sends them when the mirror window is hidden so the encoder and
         // radio go quiet). Unconditional: it names a message, not a grant.
         add("mirrorpause")
+        // "cameralens": understands `camera-lens {lens}` / `camera-photo` and announces `lenses`/`lens`/`photo`
+        // on camera `mirror-started`. Unconditional: it names a message, not a grant.
+        add("cameralens")
+        // "cameraorient": sends `camera-orientation {rotation, device}` and honours `camera-orient-watch {on}`.
+        add("cameraorient")
         // "notifopen": understands `notif-open` (fire a notification's tap action).
         add("notifopen")
         // "notifopendisplay": `notif-open` may carry an optional `displayId` (fire the tap action on that display).
@@ -793,6 +798,8 @@ object ConnectionManager {
         val dead = wsLink
         ws = null
         wsLink = null
+        // A Mac-requested orientation watch must not outlive the Mac link; the app's own camera stream keeps its own claim.
+        OrientationWatcher.disable("watch")
         wifiUpSince = 0L
         usb.value = false
         LinkSecurity.encrypted.value = null
@@ -1030,8 +1037,11 @@ object ConnectionManager {
         if (obj.optString("type") in MessageIds.STAMPED && !obj.has("mid") && macCaps.value.contains("ble")) {
             obj.put("mid", MessageIds.next())
         }
-        val link = (if (TransportClassifier.classOf(obj) == TransportClass.WIFI) wsLink else currentPrimary())
-            ?: return false
+        val wifiOnly = TransportClassifier.classOf(obj) == TransportClass.WIFI
+        val link = (if (wifiOnly) wsLink else currentPrimary()) ?: run {
+            if (wifiOnly && obj.optString("type") == "clipboard" && bleOnly()) lastEvent.value = "Too large for Bluetooth"
+            return false
+        }
         return sendOn(link, obj)
     }
 
@@ -1196,6 +1206,8 @@ object ConnectionManager {
         val wifiAvailable: Boolean = false,
         /** Wi-Fi is carrying traffic and a Bluetooth session is also live: "Use Bluetooth now". */
         val bleAvailable: Boolean = false,
+        /** A Wi-Fi link exists (Wi-Fi-only features work even while Bluetooth is still primary). */
+        val wifiUp: Boolean = false,
     )
     val linkUi = MutableStateFlow(LinkUi())
 
@@ -1226,6 +1238,29 @@ object ConnectionManager {
 
     private fun parseCaps(msg: JSONObject): List<String> =
         msg.optJSONArray("caps")?.let { arr -> List(arr.length()) { i -> arr.optString(i) } } ?: emptyList()
+
+    /** Connected, but only over Bluetooth: Wi-Fi-only actions (files, images, mirroring) cannot run. */
+    fun bleOnly(): Boolean = wsLink == null && bleLink != null
+
+    /** The honest reason a send failed, for toasts. [text]: the clipboard text that failed, if any. */
+    fun notSentText(wifiOnly: Boolean, text: String? = null): String = when {
+        bleOnly() && wifiOnly -> t("Needs Wi-Fi \u2014 connected over Bluetooth only")
+        bleOnly() && text != null && text.toByteArray().size > TransportClassifier.MAX_BLE_CLIPBOARD ->
+            t("Too large for Bluetooth")
+        bleOnly() -> t("Couldn't send over Bluetooth")
+        else -> t("Not connected to Mac")
+    }
+
+    @Volatile private var clipTooLargeToastAt = 0L
+
+    /** Background copies (accessibility path) that are too big for Bluetooth: say so, at most once a minute. */
+    fun noteClipTooLargeForBle(text: String) {
+        if (!bleOnly() || text.toByteArray().size <= TransportClassifier.MAX_BLE_CLIPBOARD) return
+        val now = System.currentTimeMillis()
+        if (now - clipTooLargeToastAt < 60_000) return
+        clipTooLargeToastAt = now
+        toast(t("Too large for Bluetooth"))
+    }
 
     /** Where ANY-class traffic goes right now. */
     private fun currentPrimary(): Link? {
@@ -1283,6 +1318,7 @@ object ConnectionManager {
         val ui = LinkUi(
             wifiAvailable = d.wifiAvailableWhileBle,
             bleAvailable = bleLink != null && wsLink != null && d.primary == LinkKind.WIFI,
+            wifiUp = wsLink != null,
         )
         if (linkUi.value != ui) linkUi.value = ui
         refreshState()
@@ -1608,6 +1644,8 @@ object ConnectionManager {
         val p = pendingClip ?: return
         if (currentPrimary() == null) return
         if (p == lastFromMac) { pendingClip = null; return }
+        // Too big for Bluetooth: keep it for Wi-Fi without re-toasting on every Bluetooth reconnect.
+        if (wsLink == null && p.toByteArray().size > TransportClassifier.MAX_BLE_CLIPBOARD) return
         if (send(JSONObject().put("type", "clipboard").put("text", p))) {
             recordClip(p, fromMac = false)
             pendingClip = null

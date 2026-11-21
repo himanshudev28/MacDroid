@@ -6,8 +6,29 @@ struct MirrorStarted: Codable, Sendable, Equatable {
     var codec: String          // avc1.PPCCLL | hvc1... | h265
     var source: String         // screen | camera
     var facing: String?        // front | back
+    /// Camera only, optional (older phones omit all three): the lenses the phone can switch between, the active
+    /// one, and who takes stills ("phone" = full-resolution on the phone, "frame" = the Mac grabs the picture).
+    var lenses: [MirrorLens]?
+    var lens: String?
+    var photo: String?
+    /// Camera only: degrees clockwise to turn the received frame upright (0/90/180/270).
+    var rotation: Int?
+    /// Camera zoom: supported ratio range [min, max] and the current ratio. Absent = no zoom control.
+    var zoomRange: [Double]?
+    var zoom: Double?
 }
-struct ErrorPayload: Codable, Sendable, Equatable { var error: String? }
+/// One selectable camera lens. `id` is opaque to the Mac ("0@0.5", "adb:2@1"); `label` is "0.5×", "1×", "Front".
+struct MirrorLens: Codable, Sendable, Equatable, Identifiable {
+    var id: String
+    var facing: String         // back | front | external
+    var label: String
+    var zoom: Double?
+}
+/// `camera-photo-saved {path}` / `camera-photo-error {error}` / `camera-lens-failed {lens,error}` / `camera-switching {lens}`.
+struct CameraEventPayload: Codable, Sendable, Equatable {
+    var path: String?; var error: String?; var lens: String?; var rotation: Int?; var ratio: Double?
+}
+struct ErrorPayload: Codable, Sendable, Equatable { var error: String?; var id: Int? }
 struct AudioStarted: Codable, Sendable, Equatable {
     var sampleRate: Double; var channels: Int; var format: String
 }
@@ -17,7 +38,8 @@ struct QuickShareRequest: Codable, Sendable, Equatable, Identifiable {
     var id: Int; var peer: String; var pin: String; var files: [QuickShareFile]
 }
 struct QuickShareProgress: Codable, Sendable, Equatable { var received: Double; var total: Double }
-struct QuickShareReceived: Codable, Sendable, Equatable { var paths: [String] }
+struct QuickShareReceived: Codable, Sendable, Equatable { var paths: [String]; var id: Int? }
+struct QuickShareRejected: Codable, Sendable, Equatable { var id: Int? }
 
 struct UpdateInfo: Codable, Sendable, Equatable {
     var version: String

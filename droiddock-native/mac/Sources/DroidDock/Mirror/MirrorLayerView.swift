@@ -67,6 +67,10 @@ final class MirrorSurfaceView: NSView {
     var input: MirrorInput?
     var inputEnabled = false
     var mirrored = false { didSet { applyTransform() } }
+    /// Degrees clockwise (0/90/180/270) the picture is turned for display; mirroring is applied after rotation.
+    /// Preview crop (>= 1): the picture scaled about its centre while a zoom change is still on its way.
+    var cropScale: CGFloat = 1 { didSet { if cropScale != oldValue { applyTransform() } } }
+    var rotation = 0 { didSet { if rotation != oldValue { applyTransform(); fitLayer() } } }
     /// Clip with the video layer's own corner radius (no SwiftUI clip mask over the live layer).
     var cornerRadius: CGFloat = 0 { didSet { applyCorners() } }
     var videoHidden = false { didSet { renderer?.layer.isHidden = videoHidden } }
@@ -146,10 +150,16 @@ final class MirrorSurfaceView: NSView {
         l.cornerRadius = cornerRadius
         l.cornerCurve = .continuous
         l.masksToBounds = cornerRadius > 0
+        if let host = layer { host.cornerRadius = cornerRadius; host.cornerCurve = .continuous; host.masksToBounds = true }
     }
 
     private func applyTransform() {
-        renderer?.layer.setAffineTransform(mirrored ? CGAffineTransform(scaleX: -1, y: 1) : .identity)
+        let rot = CGAffineTransform(rotationAngle: CGFloat(rotation) * .pi / 180)
+        var t = mirrored ? rot.concatenating(CGAffineTransform(scaleX: -1, y: 1)) : rot
+        if cropScale != 1 { t = t.concatenating(CGAffineTransform(scaleX: cropScale, y: cropScale)) }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        renderer?.layer.setAffineTransform(t)
+        CATransaction.commit()
     }
 
     override func layout() {
@@ -166,7 +176,12 @@ final class MirrorSurfaceView: NSView {
 
     private func fitLayer() {
         CATransaction.begin(); CATransaction.setDisableActions(true)
-        renderer?.layer.frame = bounds
+        if let l = renderer?.layer {
+            // A quarter turn swaps the layer's own width/height so that, once turned, it fills the view exactly.
+            let odd = rotation % 180 != 0
+            l.bounds = CGRect(x: 0, y: 0, width: odd ? bounds.height : bounds.width, height: odd ? bounds.width : bounds.height)
+            l.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        }
         CATransaction.commit()
     }
 
@@ -199,13 +214,35 @@ final class MirrorSurfaceView: NSView {
         guard inputEnabled else { return super.rightMouseDown(with: e) }
         input?.key("back")
     }
+    override func magnify(with e: NSEvent) {
+        if MainActor.assumeIsolated({ MirrorSession.shared.zoomBy(factor: 1 + e.magnification) }) { return }
+        super.magnify(with: e)
+    }
     override func scrollWheel(with e: NSEvent) {
+        if MainActor.assumeIsolated({ MirrorSession.shared.zoomBy(factor: exp(Double(e.scrollingDeltaY) * (e.hasPreciseScrollingDeltas ? 0.004 : 0.03))) }) { return }
         guard inputEnabled, e.momentumPhase == [] else { return super.scrollWheel(with: e) }
         input?.scroll(domDeltaY: Double(-e.scrollingDeltaY))
     }
     override func keyDown(with e: NSEvent) {
+        if e.modifierFlags.intersection([.command, .control, .option]).isEmpty,
+           MainActor.assumeIsolated({ Self.cameraKey(e) }) { return }
         if inputEnabled, input?.keyDown(e) == true { return }
         super.keyDown(with: e)
+    }
+}
+
+extension MirrorSurfaceView {
+    /// Camera shortcuts while the picture has focus: Space shutter, 1-9 lens, F flip, R rotate, P/V mode.
+    @MainActor static func cameraKey(_ e: NSEvent) -> Bool {
+        let s = MirrorSession.shared
+        guard s.isCamera, s.phase == .live, !e.isARepeat, let c = e.charactersIgnoringModifiers?.lowercased() else { return false }
+        if c == " " { s.shutter(); return true }
+        if c == "f" { s.flipCamera(); return true }
+        if c == "r" { s.rotateManually(); return true }
+        // P / V pick the capture mode (locked while recording, like the mode switch in the bar).
+        if (c == "p" || c == "v"), !s.recording { s.captureMode = c == "v" ? .video : .photo; return true }
+        if let d = Int(c), (1...9).contains(d) { s.selectLens(index: d - 1); return true }
+        return false
     }
 }
 
@@ -215,6 +252,8 @@ struct MirrorLayerView: NSViewRepresentable {
     var input: MirrorInput?
     var inputEnabled: Bool
     var mirrored: Bool = false
+    var rotation: Int = 0
+    var cropScale: CGFloat = 1
     var cornerRadius: CGFloat = 0
     var hidden: Bool = false
 
@@ -229,6 +268,8 @@ struct MirrorLayerView: NSViewRepresentable {
         v.input = input
         v.inputEnabled = inputEnabled
         v.mirrored = mirrored
+        v.rotation = rotation
+        v.cropScale = cropScale
         v.cornerRadius = cornerRadius
         v.videoHidden = hidden
     }

@@ -8,6 +8,39 @@ to a generic body.
 
 ---
 
+## v4.1.0
+
+Calls you control from the Mac, a real camera window, and Bluetooth that works without Wi-Fi. Update both apps.
+
+**Calls**
+- Calls you dial from the Mac now show the floating call pop-up (Calling…, then Mute, Speaker and End), also on dual-SIM phones and when the Mac dialled over USB.
+- **Speaker** and **Mute** now work on normal phone calls. DroidDock presses the button in your phone's own call screen for you and checks that it took effect.
+- New **Answer on speaker**: a button in the ringing pop-up, and a setting in Settings › Notifications › Call alerts, so the phone goes straight to speaker when you answer from the Mac.
+
+**Camera**
+- Lens buttons match your phone: DroidDock finds the lenses your phone lets apps use (ultra-wide, main, telephoto, front) instead of a fixed list. Some phones, such as the Galaxy S21 FE, keep the telephoto for Samsung's own camera app.
+- Zoom with pinch, scroll, ⌘+ / ⌘− or the slider.
+- Photo and Video modes: full-resolution photos from the phone over Wi-Fi, and recordings saved to Movies › DroidDock.
+- The picture turns with the phone, upright in portrait and level in landscape, and there's a rotate button when you want to override it.
+- Over USB, the camera opens inside DroidDock's own window.
+
+**Works without Wi-Fi**
+- The Bluetooth link now connects and reconnects reliably, and hands back to Wi-Fi when Wi-Fi returns.
+- If the Mac and phone's Bluetooth pairing goes out of date, DroidDock says so instead of waiting forever.
+- Features that need Wi-Fi say "Needs Wi-Fi" while you're on Bluetooth only, on both the Mac and the phone.
+
+**Desktop mode**
+- Desktop mode and apps opened on their own display no longer open blank when the phone is asleep or locked.
+
+**Notifications and Quick Share**
+- **Open** on a notification always does something you can see: it opens the app in a window or on the phone, or tells you why it can't.
+- **Clear All** in the menu bar's notification list.
+- Quick Share requests appear as a Mac notification with Accept, Decline and the PIN, even with DroidDock's window closed. Sending is faster.
+- Android 15: verification codes in notifications are no longer hidden when the phone is connected over USB.
+
+**Under the hood**
+- Fixed spots where DroidDock could spin the CPU or wake up needlessly in the background.
+
 ## v4.0.0
 
 DroidDock 4.0: the redesigned Mac and phone apps from 3.7, now stable. Update both apps.

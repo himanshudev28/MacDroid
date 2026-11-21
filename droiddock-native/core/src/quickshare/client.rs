@@ -40,7 +40,9 @@ use super::proto::sharing::nearby as sharing;
 use super::secure::SecureChannel;
 use super::wire;
 
-const CHUNK: usize = 64 * 1024;
+/// 512 KiB per payload frame, as NearDrop and rquickshare send and Android accepts: far fewer frames and AES/HMAC
+/// calls per file than 64 KiB. Sealed size is chunk plus a few hundred bytes of framing, well under wire::MAX_FRAME (8 MiB).
+const CHUNK: usize = 512 * 1024;
 const KEEP_ALIVE: Duration = Duration::from_secs(10);
 /// How long the person on the other device has to tap Accept.
 const CONSENT_TIMEOUT: Duration = Duration::from_secs(90);

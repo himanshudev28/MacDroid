@@ -74,6 +74,10 @@ pub struct QuickShareState {
     /// Transfers waiting on the user's accept/reject.
     pending: Mutex<HashMap<u64, oneshot::Sender<bool>>>,
     next_id: AtomicU64,
+    /// Id of the request the user accepted, so id-less transfer events can be tagged with it.
+    accepted: Mutex<Option<u64>>,
+    /// Id of the most recent request, tagged onto `quickshare-rejected`.
+    last_request: Mutex<Option<u64>>,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -142,7 +146,15 @@ pub async fn start(app: AppHandle) -> Result<u16, String> {
     let conns = Arc::new(Mutex::new(ConnTable::default()));
     let task = crate::host::async_runtime::spawn(async move {
         loop {
-            let Ok((stream, peer)) = listener.accept().await else { continue };
+            let (stream, peer) = match listener.accept().await {
+                Ok(a) => a,
+                Err(e) => {
+                    // Back off: EMFILE etc. fail instantly and would spin.
+                    eprintln!("[quickshare] accept error: {e}");
+                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                    continue;
+                }
+            };
             let ip = peer.ip();
             if !conns.lock().unwrap_or_else(|e| e.into_inner()).try_take(ip, MAX_CONNECTIONS, MAX_PER_IP) {
                 eprintln!("[quickshare] too many connections; dropping {peer}");
@@ -235,6 +247,7 @@ async fn forward_events(app: AppHandle, mut rx: mpsc::UnboundedReceiver<Event>) 
                 let id = state.next_id.fetch_add(1, Ordering::Relaxed);
                 pending.insert(id, reply);
                 drop(pending);
+                *state.last_request.lock().unwrap() = Some(id);
                 eprintln!("[quickshare] {peer} offers {} file(s), PIN {pin}", files.len());
                 let _ = app.emit("quickshare-request", RequestPayload { id, peer, pin, files });
             }
@@ -256,7 +269,7 @@ async fn forward_events(app: AppHandle, mut rx: mpsc::UnboundedReceiver<Event>) 
                 crate::transfer_log::progress(&app, key, received.max(0) as u64);
                 let _ = app.emit(
                     "quickshare-progress",
-                    serde_json::json!({ "received": received, "total": total }),
+                    serde_json::json!({ "received": received, "total": total, "id": *state.accepted.lock().unwrap() }),
                 );
             }
             Event::Done { paths } => {
@@ -270,24 +283,28 @@ async fn forward_events(app: AppHandle, mut rx: mpsc::UnboundedReceiver<Event>) 
                     };
                     t.finish(crate::transfer_log::Outcome::Done { path });
                 }
+                let id = state.accepted.lock().unwrap().take();
                 let _ = app.emit(
                     "quickshare-received",
                     serde_json::json!({
-                        "paths": paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>()
+                        "paths": paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>(),
+                        "id": id,
                     }),
                 );
             }
             // Declined on this Mac before any bytes moved, so there's no
             // Transfers row to close.
             Event::Rejected => {
-                let _ = app.emit("quickshare-rejected", serde_json::json!({}));
+                let id = *state.last_request.lock().unwrap();
+                let _ = app.emit("quickshare-rejected", serde_json::json!({ "id": id }));
             }
             Event::Failed { error } => {
                 eprintln!("[quickshare] transfer failed: {error}");
                 if let Some(t) = tracked.take() {
                     t.finish(crate::transfer_log::Outcome::Failed(error.clone()));
                 }
-                let _ = app.emit("quickshare-error", serde_json::json!({ "error": error }));
+                let id = state.accepted.lock().unwrap().take();
+                let _ = app.emit("quickshare-error", serde_json::json!({ "error": error, "id": id }));
             }
         }
     }
@@ -326,7 +343,16 @@ pub fn quickshare_respond(app: AppHandle, id: u64, accept: bool) -> Result<(), S
         .remove(&id);
     match tx {
         Some(tx) => {
-            let _ = tx.send(accept);
+            // Tag before sending: progress events can follow the answer immediately.
+            if accept {
+                *app.state::<QuickShareState>().accepted.lock().unwrap() = Some(id);
+            }
+            if tx.send(accept).is_err() {
+                if accept {
+                    *app.state::<QuickShareState>().accepted.lock().unwrap() = None;
+                }
+                return Err("the sender gave up before the answer arrived".to_string());
+            }
             Ok(())
         }
         // Already answered, or the sender gave up first.

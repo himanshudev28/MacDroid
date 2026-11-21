@@ -16,11 +16,16 @@ import com.droiddock.app.ConnectionManager
 import com.droiddock.app.link.Transport
 import com.droiddock.app.t
 
-/** True while the only link to the Mac is Bluetooth. Files, mirroring and Mac apps need Wi-Fi. */
+/**
+ * True while the only link to the Mac is Bluetooth. Files, mirroring and Mac apps need Wi-Fi.
+ * Wi-Fi-only traffic uses the Wi-Fi link as soon as it exists, even while Bluetooth is still primary
+ * (stability window, "Use Bluetooth now", auto-return off), so those panes come back with it.
+ */
 @Composable
 internal fun rememberBleOnly(): Boolean {
     val tr by ConnectionManager.transport.collectAsStateWithLifecycle()
-    return tr == Transport.BLE
+    val ui by ConnectionManager.linkUi.collectAsStateWithLifecycle()
+    return tr == Transport.BLE && !ui.wifiUp
 }
 
 /** The designed "Needs Wi-Fi" state (BLE-DESIGN §2): never a blank pane or a button that does nothing. */

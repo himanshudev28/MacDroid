@@ -128,6 +128,8 @@ class ClipAccessibilityService : AccessibilityService() {
         lastSent = text
         if (ConnectionManager.sendClipboardText(text)) {
             ConnectionManager.lastEvent.value = "clipboard → Mac"
+        } else {
+            ConnectionManager.noteClipTooLargeForBle(text)
         }
     }
 

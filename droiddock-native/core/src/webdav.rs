@@ -851,7 +851,15 @@ pub async fn webdav_start(
                 _ = &mut stop_rx => break,
                 a = listener.accept() => a,
             };
-            let Ok((stream, _)) = accepted else { continue };
+            let stream = match accepted {
+                Ok((stream, _)) => stream,
+                Err(e) => {
+                    // Back off: EMFILE etc. fail instantly and would spin.
+                    eprintln!("[webdav] accept error: {e}");
+                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                    continue;
+                }
+            };
             let dav = dav.clone();
             let expected = expected.clone();
             tokio::spawn(async move {

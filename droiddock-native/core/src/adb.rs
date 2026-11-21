@@ -328,6 +328,123 @@ fn reap(app: AppHandle, what: &'static str, child: std::process::Child) {
     });
 }
 
+/// `spawn_scrcpy` for a window on a new virtual display (desktop mode, an app on its own display).
+///
+/// A virtual display shares the phone's power state: started while the phone sleeps it never draws
+/// a frame (the Mac window stays blank), and on a locked phone it goes black ~5 s later. So, like the
+/// second screen, it reads the server's "New display: … (id=N)" line, registers the window and runs
+/// the phone's keeper for it (`vdKeepAwake`). The window is recorded under `serial|<tag>` so a
+/// keeper started by another window can hand over to it, and the reverse.
+fn spawn_scrcpy_vd(
+    app: AppHandle,
+    mut cmd: std::process::Command,
+    what: &'static str,
+    adb: Option<&str>,
+    serial: &str,
+    tag: &str,
+    keep_awake: bool,
+) -> Result<(), String> {
+    let (Some(adb), true) = (adb.map(str::to_string), keep_awake) else {
+        return spawn_scrcpy(app, cmd, what);
+    };
+    // scrcpy 5.x logs its INFO lines (the display id among them) to stdout, older versions to stderr.
+    let mut child = cmd
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let pid = child.id();
+    // The pid makes the key unique: two Desktop windows (a double-click) must not share one, or closing
+    // the first would stop the keeper the second still needs.
+    let key = format!("{serial}|{tag}:{pid}");
+    let seen = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let on_line = {
+        let (key, serial, adb, seen) = (key.clone(), serial.to_string(), adb.clone(), seen.clone());
+        std::sync::Arc::new(move |line: &str| {
+            let Some(id) = parse_new_display_id(line) else { return };
+            if seen.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
+            APP_WINDOWS.lock().unwrap().insert(key.clone(), AppWin { display_id: id, pid });
+            vd_keeper_start(&adb, &serial, &key, id);
+        })
+    };
+    if let Some(out) = child.stdout.take() {
+        let on_line = on_line.clone();
+        std::thread::spawn(move || for_each_line(out, |l| on_line(l)));
+    }
+    // stderr: the display id (older scrcpy) and the last line for the immediate-failure toast, as `reap`.
+    let err = child.stderr.take();
+    let (serial, reaper_key) = (serial.to_string(), key);
+    std::thread::spawn(move || {
+        let started = Instant::now();
+        let mut tail = String::new();
+        OPEN_WINDOWS.lock().unwrap().push(pid);
+        if crate::shutdown::quitting() {
+            send_signal(pid, Signal::Term);
+        }
+        if let Some(err) = err {
+            for_each_line(err, |line| {
+                on_line(line);
+                if !line.trim().is_empty() {
+                    tail = line.to_string();
+                }
+            });
+        }
+        let ok = child.wait().map(|s| s.success()).unwrap_or(false);
+        OPEN_WINDOWS.lock().unwrap().retain(|&p| p != pid);
+        {
+            let mut map = APP_WINDOWS.lock().unwrap();
+            if map.get(&reaper_key).is_some_and(|w| w.pid == pid) {
+                map.remove(&reaper_key);
+            }
+        }
+        vd_keeper_window_closed(&adb, &serial, &reaper_key);
+        if !ok && started.elapsed() < Duration::from_secs(3) {
+            let reason = if tail.trim().is_empty() { "scrcpy exited immediately".to_string() } else { tail };
+            emit_toast(&app, "bad", &format!("{what} failed — {reason}"));
+        }
+    });
+    Ok(())
+}
+
+/// Reads a pipe to EOF line by line (lossy UTF-8), so a stray non-UTF-8 byte can't stop the draining
+/// and leave scrcpy blocked on a full pipe.
+fn for_each_line(r: impl std::io::Read, mut f: impl FnMut(&str)) {
+    use std::io::BufRead;
+    let mut r = std::io::BufReader::new(r);
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        match r.read_until(b'\n', &mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => f(String::from_utf8_lossy(&buf).trim_end_matches(['\r', '\n'])),
+        }
+    }
+}
+
+/// Phones this app woke for a virtual display (serial → when). The keeper started for that display
+/// takes charge at once instead of treating the lit lock screen as "the user woke it" and letting the
+/// phone doze (~5 s on the lock screen) before reviving it, which blanked the new window for seconds.
+static VD_WOKE: std::sync::LazyLock<Mutex<HashMap<String, Instant>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Wake the phone (it stays locked) before opening a virtual display: one started while the phone
+/// sleeps draws nothing until something wakes it. Best effort; a phone already awake is left alone.
+async fn wake_for_vd(adb: Option<&str>, serial: &str) {
+    let Some(adb) = adb else { return };
+    let power = run(adb, &["-s", serial, "shell", "dumpsys power | grep -m1 mWakefulness="], Duration::from_secs(4))
+        .await
+        .unwrap_or_default();
+    if power.contains("=Awake") {
+        return;
+    }
+    if run(adb, &["-s", serial, "shell", "input", "keyevent", "KEYCODE_WAKEUP"], Duration::from_secs(4)).await.is_ok() {
+        VD_WOKE.lock().unwrap().insert(serial.to_string(), Instant::now());
+    }
+}
+
 pub async fn start_server(adb: &str) {
     let _ = run(adb, &["start-server"], DEFAULT_TIMEOUT).await;
 }
@@ -530,6 +647,81 @@ pub async fn usb_link_apply(app: &AppHandle) {
             }
         }
     }
+}
+
+/// Per serial: do not try again before this instant (far future once handled for this process run).
+static SENSITIVE_RETRY: std::sync::Mutex<Option<HashMap<String, Instant>>> = std::sync::Mutex::new(None);
+const SENSITIVE_RETRY_AFTER: Duration = Duration::from_secs(300);
+
+/// Android 15 (SDK 35) hides OTP and other sensitive notification text from listeners unless the app holds
+/// RECEIVE_SENSITIVE_NOTIFICATIONS; adb can grant it, and OTP Copy needs the codes. Runs once per online device
+/// per process run, only when DroidDock is installed on it. Failures are logged, never returned; an unreadable
+/// device or a missing app is retried after 5 minutes, not on every device-list update.
+pub async fn sensitive_notifications_apply(app: &AppHandle) {
+    let state = app.state::<AdbState>();
+    let Some(adb) = state.adb.lock().unwrap().clone() else { return };
+    let serials: Vec<String> =
+        state.devices.lock().unwrap().iter().filter(|d| d.state == "device").map(|d| d.serial.clone()).collect();
+    for serial in serials {
+        {
+            let mut g = SENSITIVE_RETRY.lock().unwrap();
+            let m = g.get_or_insert_with(Default::default);
+            if m.get(&serial).is_some_and(|t| *t > Instant::now()) {
+                continue;
+            }
+            // Claimed up front so overlapping device-list updates do not run it twice.
+            m.insert(serial.clone(), Instant::now() + SENSITIVE_RETRY_AFTER);
+        }
+        if sensitive_notifications_one(&adb, &serial).await {
+            if let Some(m) = SENSITIVE_RETRY.lock().unwrap().as_mut() {
+                m.insert(serial.clone(), Instant::now() + Duration::from_secs(10 * 365 * 86400));
+            }
+        }
+    }
+}
+
+/// Returns true when the serial is done for this process run (granted, or nothing to grant).
+async fn sensitive_notifications_one(adb: &str, serial: &str) -> bool {
+    let pkg = "com.droiddock.app";
+    let sdk = match run(adb, &["-s", serial, "shell", "getprop", "ro.build.version.sdk"], Duration::from_secs(5)).await {
+        Ok(o) => parse_sdk(&o),
+        Err(e) => {
+            eprintln!("[adb] sdk read on {serial} failed: {e}");
+            return false;
+        }
+    };
+    match sdk {
+        None => return false,
+        Some(v) if v < 35 => return true,
+        _ => {}
+    }
+    match run(adb, &["-s", serial, "shell", "pm", "path", pkg], Duration::from_secs(5)).await {
+        Ok(o) if !o.trim().is_empty() => {}
+        _ => return false,
+    }
+    let op = "RECEIVE_SENSITIVE_NOTIFICATIONS";
+    if let Err(e) = run(adb, &["-s", serial, "shell", "appops", "set", pkg, op, "allow"], Duration::from_secs(6)).await {
+        eprintln!("[adb] {op} on {serial} failed: {e}");
+        return false;
+    }
+    match run(adb, &["-s", serial, "shell", "appops", "get", pkg, op], Duration::from_secs(6)).await {
+        Ok(o) if o.to_lowercase().contains("allow") => {
+            eprintln!("[adb] granted {op} on {serial}");
+            true
+        }
+        Ok(o) => {
+            eprintln!("[adb] {op} on {serial} not granted: {}", o.trim());
+            false
+        }
+        Err(e) => {
+            eprintln!("[adb] {op} read-back on {serial} failed: {e}");
+            false
+        }
+    }
+}
+
+fn parse_sdk(out: &str) -> Option<u32> {
+    out.trim().parse().ok()
 }
 
 fn parse_device_block(text: &str) -> Vec<RawDevice> {
@@ -904,6 +1096,10 @@ async fn on_device_list(app: &AppHandle, raw0: Vec<RawDevice>) {
     }
     *state.prev_has_adb.lock().unwrap() = Some(adb_now);
     *state.idle_since.lock().unwrap() = Instant::now();
+    {
+        let app3 = app.clone();
+        crate::host::async_runtime::spawn(async move { sensitive_notifications_apply(&app3).await });
+    }
     // Re-applied on every list update: a re-attach or an adb-server restart loses the mapping.
     // Off the tracker's read loop: a slow or hung device must not delay later device events.
     if app.state::<crate::AppState>().config.lock().unwrap().usb_link {
@@ -1222,7 +1418,7 @@ pub async fn connect_tcp(adb: &str, addr: &str) {
 
 // ── scrcpy (mirror / camera) ─────────────────────────────────────────────
 
-fn scrcpy_env(adb: Option<&str>) -> HashMap<String, String> {
+pub(crate) fn scrcpy_env(adb: Option<&str>) -> HashMap<String, String> {
     let mut env: HashMap<String, String> = std::env::vars().collect();
     env.insert("PATH".into(), augmented_path());
     if let Some(adb) = adb {
@@ -1544,7 +1740,7 @@ pub fn desktop(
     // apply — desktop mode drives ~3× the pixels of a portrait phone view.
     cmd.args(desktop_quality_args(&app));
     cmd.args(scrcpy_option_args(&prefs, caps));
-    spawn_scrcpy(app, cmd, "Desktop mode")
+    spawn_scrcpy_vd(app, cmd, "Desktop mode", adb, serial, "#desktop", prefs.vd_keep_awake)
 }
 
 /// What the UI shows when the local scrcpy predates virtual displays.
@@ -1619,6 +1815,10 @@ pub fn mirror_app(
         cmd.args(scrcpy_quality_args(&app));
     }
     cmd.args(scrcpy_option_args(&prefs, caps));
+    if new_display {
+        let tag = format!("#app-display:{package}");
+        return spawn_scrcpy_vd(app, cmd, "App window", adb, serial, &tag, prefs.vd_keep_awake);
+    }
     spawn_scrcpy(app, cmd, "App window")
 }
 
@@ -1894,23 +2094,57 @@ async fn keyevent(adb: &str, serial: &str, code: &str) -> Result<(), String> {
 }
 
 /// Returns "IDLE" | "RINGING" | "ACTIVE".
+///
+/// Dual-SIM phones report one state per slot (`gsm.call.state` as "IDLE,OFFHOOK",
+/// or one `mCallState=` per phone in `telephony.registry`); the busiest slot
+/// wins, or a call on SIM 2 read as IDLE and closed the call pop-up.
 pub async fn get_call_state(adb: &str, serial: &str) -> String {
-    let Ok(out) = run(adb, &["-s", serial, "shell", "getprop", "gsm.call.state"], Duration::from_secs(3)).await else {
-        return "IDLE".into();
-    };
-    let out = out.trim().to_uppercase();
-    if out == "IDLE" || out == "RINGING" || out == "ACTIVE" {
-        return out;
+    if let Ok(out) = run(adb, &["-s", serial, "shell", "getprop", "gsm.call.state"], Duration::from_secs(3)).await {
+        if let Some(st) = parse_prop_call_state(&out) {
+            return st.into();
+        }
     }
     let Ok(dump) = run(adb, &["-s", serial, "shell", "dumpsys", "telephony.registry"], Duration::from_secs(4)).await else {
         return "IDLE".into();
     };
-    match dump.split("mCallState=").nth(1).and_then(|s| s.chars().next()) {
-        Some('0') => "IDLE".into(),
-        Some('1') => "RINGING".into(),
-        Some(_) => "ACTIVE".into(),
-        None => "IDLE".into(),
+    parse_registry_call_state(&dump).into()
+}
+
+/// 0 idle, 1 ringing, 2 active (off-hook); higher is busier.
+fn call_state_name(rank: u8) -> &'static str {
+    match rank {
+        0 => "IDLE",
+        1 => "RINGING",
+        _ => "ACTIVE",
     }
+}
+
+/// `getprop gsm.call.state`: "", "IDLE", "OFFHOOK", or comma-joined per slot.
+/// None when it says nothing usable (empty on many Samsung builds).
+fn parse_prop_call_state(out: &str) -> Option<&'static str> {
+    let mut best: Option<u8> = None;
+    for part in out.trim().split(',') {
+        let rank = match part.trim().to_ascii_uppercase().as_str() {
+            "IDLE" => 0,
+            "RINGING" => 1,
+            "ACTIVE" | "OFFHOOK" => 2,
+            _ => continue,
+        };
+        best = Some(best.map_or(rank, |b: u8| b.max(rank)));
+    }
+    best.map(call_state_name)
+}
+
+/// Every `mCallState=N` in `dumpsys telephony.registry` (one per SIM slot).
+fn parse_registry_call_state(dump: &str) -> &'static str {
+    let best = dump
+        .split("mCallState=")
+        .skip(1)
+        .filter_map(|s| s.chars().next()?.to_digit(10))
+        .map(|d| d.min(2) as u8)
+        .max()
+        .unwrap_or(0);
+    call_state_name(best)
 }
 
 pub async fn call_end(adb: &str, serial: &str) -> Result<(), String> {
@@ -1948,6 +2182,12 @@ pub fn start_call_polling(app: AppHandle, serial: String) {
     let stop = Arc::new(AtomicBool::new(false));
     *state.call_poll_stop.lock().unwrap() = Some(stop.clone());
     crate::host::async_runtime::spawn(async move {
+        // A just-dialled call can still read IDLE for a moment; an IDLE before
+        // the call was ever seen must not end the poll (and the pop-up) unless
+        // the call truly never started.
+        const START_GRACE: Duration = Duration::from_secs(10);
+        let started = std::time::Instant::now();
+        let mut seen_call = false;
         tokio::time::sleep(Duration::from_millis(1500)).await;
         loop {
             if stop.load(Ordering::Relaxed) {
@@ -1956,8 +2196,12 @@ pub fn start_call_polling(app: AppHandle, serial: String) {
             let adb = app.state::<AdbState>().adb.lock().unwrap().clone();
             let Some(adb) = adb else { return };
             let call_state = get_call_state(&adb, &serial).await;
-            let _ = app.emit("call-state", serde_json::json!({ "state": call_state, "serial": serial }));
-            if call_state == "IDLE" {
+            let idle = call_state == "IDLE";
+            seen_call |= !idle;
+            if !idle || seen_call || started.elapsed() >= START_GRACE {
+                let _ = app.emit("call-state", serde_json::json!({ "state": call_state, "serial": serial }));
+            }
+            if idle && (seen_call || started.elapsed() >= START_GRACE) {
                 return;
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
@@ -2163,6 +2407,15 @@ pub fn adb_qr_pair_cancel(state: crate::host::State<AdbState>) {
 pub async fn adb_camera(app: AppHandle, state: crate::host::State<'_, AdbState>, serial: String) -> Result<(), String> {
     let scrcpy = state.scrcpy.lock().unwrap().clone().ok_or("scrcpy not found — brew install scrcpy")?;
     let adb = state.adb.lock().unwrap().clone();
+    // Embedded first: the camera shows in the app's own window with lens controls. The
+    // external scrcpy window is only the fallback when the embedded start fails outright.
+    if let Some(adb_bin) = adb.clone() {
+        match crate::scrcpy_client::camera_embedded_start(app.clone(), adb_bin, scrcpy.clone(), serial.clone()).await {
+            Ok(()) => return Ok(()),
+            Err(e) if e == "already mirroring" => return Err(e),
+            Err(e) => eprintln!("[camera] embedded start failed ({e}); falling back to the scrcpy window"),
+        }
+    }
     camera(app, &scrcpy, &serial, adb.as_deref())
 }
 
@@ -2183,6 +2436,9 @@ pub async fn adb_desktop(
     let scrcpy = state.scrcpy.lock().unwrap().clone().ok_or("scrcpy not found — brew install scrcpy")?;
     let adb = state.adb.lock().unwrap().clone();
     let caps = scrcpy_caps(&state);
+    if caps.virtual_display && mirror_prefs(&app).vd_keep_awake {
+        wake_for_vd(adb.as_deref(), &serial).await;
+    }
     desktop(app, &scrcpy, &serial, size.as_deref(), caps, adb.as_deref())
 }
 
@@ -2199,6 +2455,9 @@ pub async fn adb_mirror_app(
     let scrcpy = state.scrcpy.lock().unwrap().clone().ok_or("scrcpy not found — brew install scrcpy")?;
     let adb = state.adb.lock().unwrap().clone();
     let caps = scrcpy_caps(&state);
+    if new_display && caps.virtual_display && mirror_prefs(&app).vd_keep_awake {
+        wake_for_vd(adb.as_deref(), &serial).await;
+    }
     mirror_app(app, &scrcpy, &serial, &package, new_display, caps, adb.as_deref())
 }
 
@@ -2384,7 +2643,7 @@ static APP_WINDOWS: std::sync::LazyLock<Mutex<HashMap<String, AppWin>>> =
 // the display check ends it; and without the Shift key a locked phone sleeps within ~5 s.
 
 /// Phone-side loop. `__VD__` is the virtual display id to send the keep-awake key to.
-const VD_KEEPER_SCRIPT: &str = r#"V=__VD__; own=0; slept=4; revive=1; gone=0
+const VD_KEEPER_SCRIPT: &str = r#"V=__VD__; own=__OWN__; slept=4; revive=1; gone=0
 locked() { dumpsys window policy 2>/dev/null | grep -qE '^ *(mIsShowing|mShowingLockscreen|isKeyguardShowing)=true'; }
 # On the way out, never leave the panel forced off: a dark locked phone goes to sleep normally, an
 # unlocked one gets its panel back.
@@ -2435,11 +2694,16 @@ static VD_KEEPERS: std::sync::LazyLock<Mutex<HashMap<String, VdKeeper>>> =
 
 /// Start the phone's keeper for this window, unless one already runs for the phone.
 fn vd_keeper_start(adb: &str, serial: &str, window_key: &str, display_id: u32) {
+    // We just woke this phone for the display: start in charge (panel off, keep-awake pokes). Taken
+    // before the early return, so a mark left by this wake can never apply to a later handover keeper.
+    let woke = VD_WOKE.lock().unwrap().remove(serial).is_some_and(|t| t.elapsed() < Duration::from_secs(30));
     let mut keepers = VD_KEEPERS.lock().unwrap();
     if keepers.contains_key(serial) || crate::shutdown::quitting() {
         return;
     }
-    let script = VD_KEEPER_SCRIPT.replace("__VD__", &display_id.to_string());
+    let script = VD_KEEPER_SCRIPT
+        .replace("__VD__", &display_id.to_string())
+        .replace("__OWN__", if woke { "1" } else { "0" });
     let child = std::process::Command::new(adb)
         .args(["-s", serial, "shell", &script])
         .stdin(std::process::Stdio::null())
@@ -2658,6 +2922,9 @@ async fn open_vd_window(app: AppHandle, state: &AdbState, w: VdWindow) -> Result
     let density = display_density(&adb, &serial).await.unwrap_or(420);
     let (geometry, canvas) = app_window_geometry(phone, density);
     let prefs = mirror_prefs(&app);
+    if prefs.vd_keep_awake {
+        wake_for_vd(Some(&adb), &serial).await;
+    }
 
     let mut cmd = scrcpy_cmd(&scrcpy, &serial, &title, Some(&adb));
     cmd.arg(format!("--new-display={geometry}"));
@@ -3032,6 +3299,14 @@ pub async fn adb_projection_grant(state: crate::host::State<'_, AdbState>, allow
 #[cfg(test)]
 mod tests {
     #[test]
+    fn parse_sdk_handles_getprop_output() {
+        assert_eq!(super::parse_sdk("35\r\n"), Some(35));
+        assert_eq!(super::parse_sdk(" 34 \n"), Some(34));
+        assert_eq!(super::parse_sdk(""), None);
+        assert_eq!(super::parse_sdk("error: closed"), None);
+    }
+
+    #[test]
     fn usb_link_only_for_cabled_online_devices() {
         use super::usb_link_eligible as ok;
         assert!(ok("R58M123ABC", "device"));
@@ -3241,5 +3516,29 @@ mod tests {
     fn appops_mode_is_parsed() {
         assert_eq!(parse_appop_mode("PROJECT_MEDIA: allow; rejectTime=+54m ago"), "allow");
         assert_eq!(parse_appop_mode("PROJECT_MEDIA: default"), "default");
+    }
+}
+
+#[cfg(test)]
+mod call_state_tests {
+    use super::{parse_prop_call_state, parse_registry_call_state};
+
+    #[test]
+    fn prop_takes_the_busiest_slot() {
+        assert_eq!(parse_prop_call_state(""), None);
+        assert_eq!(parse_prop_call_state("\n"), None);
+        assert_eq!(parse_prop_call_state("IDLE"), Some("IDLE"));
+        assert_eq!(parse_prop_call_state("IDLE,OFFHOOK\n"), Some("ACTIVE"));
+        assert_eq!(parse_prop_call_state("RINGING,IDLE"), Some("RINGING"));
+        assert_eq!(parse_prop_call_state("ACTIVE"), Some("ACTIVE"));
+    }
+
+    #[test]
+    fn registry_reads_every_slot() {
+        let dual = "Phone Id=0\n  mCallState=0\n  mCallIncomingNumber=\nPhone Id=1\n  mCallState=2\n";
+        assert_eq!(parse_registry_call_state(dual), "ACTIVE");
+        assert_eq!(parse_registry_call_state("mCallState=1\nmCallState=0"), "RINGING");
+        assert_eq!(parse_registry_call_state("mCallState=0\nmCallState=0"), "IDLE");
+        assert_eq!(parse_registry_call_state("nothing"), "IDLE");
     }
 }

@@ -165,7 +165,7 @@ final class MirrorBarPanel: NSPanel {
     /// Gap between the window's bottom edge and the capsule.
     static let gap: CGFloat = 2
     /// Wide enough for the longest capsule (camera + audio + pin) even under a narrow window.
-    static let minWidth: CGFloat = 380
+    static let minWidth: CGFloat = 512
     /// Top of the panel that is only shadow room (the capsule starts below it).
     static let shadowRoom: CGFloat = 14
     /// Space the capsule needs under the window's bottom edge (gap + capsule + its shadow). Window sizing reserves it.

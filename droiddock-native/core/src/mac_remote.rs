@@ -146,7 +146,9 @@ pub fn parse_button(raw: &Value) -> Option<(Btn, bool)> {
 }
 
 static HOLD: std::sync::Mutex<Option<HoldMachine>> = std::sync::Mutex::new(None);
-static WATCHDOG: std::sync::Once = std::sync::Once::new();
+/// True while the hold watchdog thread is alive. It runs only while a button
+/// is held (it used to wake twice a second for the life of the process).
+static WATCHDOG_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn with_hold<R>(f: impl FnOnce(&mut HoldMachine) -> R) -> R {
     let mut g = HOLD.lock().unwrap_or_else(|e| e.into_inner());
@@ -164,16 +166,25 @@ pub fn release_all() {
 }
 
 fn start_watchdog() {
-    WATCHDOG.call_once(|| {
-        // Plain thread, not tokio: it only ever sleeps and checks a timestamp.
-        std::thread::spawn(|| loop {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            let mut g = HOLD.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(p) = g.as_mut().and_then(|m| m.release_if_idle(std::time::Instant::now())) {
-                eprintln!("[remote] held button timed out, releasing");
-                imp::post_ev(p);
-            }
-        });
+    use std::sync::atomic::Ordering;
+    if WATCHDOG_RUNNING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    // Plain thread, not tokio: it only ever sleeps and checks a timestamp.
+    // It exits once nothing is held; the flag is cleared under the HOLD lock,
+    // and callers start it only after setting `held` (and dropping the lock),
+    // so a new press can never land between "saw nothing held" and "exited".
+    std::thread::spawn(|| loop {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let mut g = HOLD.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(p) = g.as_mut().and_then(|m| m.release_if_idle(std::time::Instant::now())) {
+            eprintln!("[remote] held button timed out, releasing");
+            imp::post_ev(p);
+        }
+        if g.as_ref().map_or(true, |m| m.click_allowed()) {
+            WATCHDOG_RUNNING.store(false, Ordering::Release);
+            return;
+        }
     });
 }
 
@@ -184,13 +195,15 @@ pub fn on_button_message(app: &AppHandle, raw: &Value) {
         return;
     }
     let Some((b, down)) = parse_button(raw) else { return };
-    if down {
-        start_watchdog();
-    }
     let mut g = HOLD.lock().unwrap_or_else(|e| e.into_inner());
     let m = g.get_or_insert_with(HoldMachine::default);
     if let Some(p) = m.button(b, down, std::time::Instant::now()) {
         imp::post_ev(p);
+    }
+    let held = !m.click_allowed();
+    drop(g);
+    if held {
+        start_watchdog();
     }
 }
 

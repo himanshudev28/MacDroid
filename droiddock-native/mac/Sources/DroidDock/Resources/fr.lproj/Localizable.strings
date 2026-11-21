@@ -97,6 +97,7 @@
 "Android layout" = "Disposition Android";
 "Answer" = "Répondre";
 "Answer  ⏎" = "Répondre  ⏎";
+"Answer on speaker" = "Répondre sur haut-parleur";
 "Answer or decline on your phone. Controlling the call from here needs the Phone permissions (Calls) granted to DroidDock on your phone." = "Répondez ou refusez depuis votre téléphone. Pour gérer l'appel d'ici, DroidDock doit disposer des autorisations Téléphone (Appels) sur votre téléphone.";
 "Answer or decline on your phone. Update the DroidDock app on your phone to control calls from the Mac." = "Répondez ou refusez depuis votre téléphone. Mettez à jour l'app DroidDock sur votre téléphone pour gérer les appels depuis le Mac.";
 "App" = "App";
@@ -158,6 +159,7 @@
 "Bluetooth is off" = "Le Bluetooth est désactivé";
 "Bluetooth is turned off on this Mac" = "Le Bluetooth est désactivé sur ce Mac";
 "Bluetooth isn't available on this Mac" = "Le Bluetooth n'est pas disponible sur ce Mac";
+"Bluetooth pairing is out of date" = "L’appairage Bluetooth n’est plus à jour";
 "Both devices need the same Wi-Fi network." = "Les deux appareils doivent être sur le même réseau Wi-Fi.";
 "Bring to Front" = "Mettre au premier plan";
 "Bring to front" = "Mettre au premier plan";
@@ -189,6 +191,7 @@
 "Cancelled on phone" = "Annulé sur le téléphone";
 "Cancelled on the phone" = "Annulé sur le téléphone";
 "Capabilities" = "Capacités";
+"Capture mode" = "Mode de capture";
 "Charging" = "En charge";
 "Check Again" = "Vérifier à nouveau";
 "Check again" = "Vérifier à nouveau";
@@ -245,12 +248,15 @@
 "Close window" = "Fermer la fenêtre";
 "Closest match · {number}" = "Résultat le plus proche · {number}";
 "Code {pin}" = "Code {pin}";
+"Code {pin}. Accept only if it matches the sending device." = "Code {pin}. N'acceptez que s'il correspond à l'appareil émetteur.";
 "Codes are copied as secrets, so clipboard history apps skip them and they are not sent to your phone. Auto-copy only applies to new notifications." = "Les codes sont copiés comme secrets : les gestionnaires d'historique du presse-papiers les ignorent et ils ne sont pas envoyés à votre téléphone. La copie automatique ne concerne que les nouvelles notifications.";
 "Collapse sidebar" = "Réduire la barre latérale";
 "Coming soon" = "Bientôt disponible";
 "Command bar" = "Barre de commandes";
 "Computer" = "Ordinateur";
+"Confirm" = "Confirmer";
 "Confirm PIN {pin} on {name}" = "Confirmez le code PIN {pin} sur {name}";
+"Confirm clearing {n} notifications" = "Confirmer la suppression de {n} notifications";
 "Connect a USB cable, or pair wirelessly below." = "Branchez un câble USB, ou associez sans fil ci-dessous.";
 "Connect a phone via USB or wireless ADB from the Devices tab." = "Connectez un téléphone en USB ou en ADB sans fil depuis l'onglet Appareils.";
 "Connect an ADB device to manage these." = "Connectez un appareil ADB pour les gérer.";
@@ -309,6 +315,7 @@
 "Couldn't download the files to share." = "Impossible de télécharger les fichiers à partager.";
 "Couldn't list apps" = "Impossible de lister les apps";
 "Couldn't open the file" = "Impossible d'ouvrir le fichier";
+"Couldn't open {app} on your phone" = "Impossible d'ouvrir {app} sur votre téléphone";
 "Couldn't open — the notification is gone" = "Impossible d’ouvrir : la notification n’existe plus";
 "Couldn't place the call" = "Impossible de passer l'appel";
 "Couldn't reveal in Finder" = "Impossible d'afficher dans le Finder";
@@ -319,6 +326,8 @@
 "Couldn't start mirroring" = "Impossible de démarrer la recopie";
 "Couldn't start the backup" = "Impossible de démarrer la sauvegarde";
 "Couldn't start the camera" = "Impossible de démarrer la caméra";
+"Couldn't switch the call to speaker" = "Impossible de passer l'appel sur haut-parleur";
+"Couldn't take the photo" = "Impossible de prendre la photo";
 "Crash logs" = "Rapports de plantage";
 "Crash reports" = "Rapports de plantage";
 "Custom" = "Personnalisé";
@@ -429,6 +438,7 @@
 "Folder name" = "Nom du dossier";
 "Folders can't be dragged out yet. Open the folder and drag its files." = "Les dossiers ne peuvent pas encore être glissés vers l'extérieur. Ouvrez le dossier et faites glisser ses fichiers.";
 "Folders the phone's Mac Files tab may browse and pull from. Nothing outside this list is ever reachable." = "Dossiers que l'onglet Fichiers Mac du téléphone peut parcourir et récupérer. Rien en dehors de cette liste n'est jamais accessible.";
+"Follow phone orientation" = "Suivre l'orientation du téléphone";
 "Forget" = "Oublier";
 "Forget Phone" = "Oublier le téléphone";
 "Forget phone" = "Oublier le téléphone";
@@ -443,6 +453,7 @@
 "Front" = "Avant";
 "Full-quality camera preview over USB or wireless ADB via scrcpy — opens in its own window." = "Aperçu caméra en pleine qualité via USB ou ADB sans fil avec scrcpy – s'ouvre dans sa propre fenêtre.";
 "Full-quality camera preview over USB or wireless ADB via scrcpy, in its own window." = "Aperçu de la caméra en pleine qualité via USB ou ADB sans fil avec scrcpy, dans sa propre fenêtre.";
+"Full-quality camera preview over USB or wireless ADB, in this app. Pick a lens and take photos or record video; photos are grabbed from the preview." = "Aperçu de la caméra en pleine qualité via USB ou ADB sans fil, dans cette app. Choisissez un objectif, prenez des photos ou filmez ; les photos sont tirées de l'aperçu.";
 "Full-quality, low-latency mirroring over USB or wireless ADB via scrcpy — opens in its own window." = "Recopie en pleine qualité et à faible latence via USB ou ADB sans fil avec scrcpy – s'ouvre dans sa propre fenêtre.";
 "Full-quality, low-latency mirroring over USB or wireless ADB via scrcpy, in its own window." = "Recopie en pleine qualité et à faible latence via USB ou ADB sans fil avec scrcpy, dans sa propre fenêtre.";
 "General" = "Général";
@@ -541,6 +552,7 @@
 "Latency" = "Latence";
 "Later" = "Plus tard";
 "Launch at login" = "Ouvrir à l'ouverture de session";
+"Lens {name}" = "Objectif {name}";
 "Let the phone browse these folders" = "Autoriser le téléphone à parcourir ces dossiers";
 "Let the phone control this Mac" = "Autoriser le téléphone à contrôler ce Mac";
 "Lets your Mac and phone find each other." = "Permet à votre Mac et à votre téléphone de se trouver.";
@@ -791,6 +803,7 @@
 "Open video" = "Ouvrir la vidéo";
 "Open {app} on phone" = "Ouvrir {app} sur le téléphone";
 "Open {name}" = "Ouvrir {name}";
+"Opened on your phone — Wi-Fi is off, so it can't be shown here" = "Ouvert sur votre téléphone : le Wi-Fi est désactivé, il ne peut pas être affiché ici";
 "Opened phone files" = "Fichiers du téléphone ouverts";
 "Opened the release page." = "Page de la version ouverte.";
 "Opened {app} in its own window" = "{app} ouverte dans sa propre fenêtre";
@@ -809,6 +822,7 @@
 "Optional: adb and scrcpy" = "Facultatif : adb et scrcpy";
 "Options for {app}" = "Options pour {app}";
 "Outgoing call" = "Appel sortant";
+"PHOTO" = "PHOTO";
 "PIN {pin}" = "Code PIN {pin}";
 "Pair" = "Associer";
 "Pair Wirelessly…" = "Associer sans fil…";
@@ -941,6 +955,7 @@
 "Quick Look" = "Coup d'œil";
 "Quick Share" = "Quick Share";
 "Quick Share failed" = "Échec de Quick Share";
+"Quick Share request expired" = "La demande Quick Share a expiré";
 "Quick Share to {name}" = "Quick Share vers {name}";
 "Quick Share…" = "Quick Share…";
 "Quick actions" = "Actions rapides";
@@ -973,6 +988,8 @@
 "Reconnecting…" = "Reconnexion…";
 "Record" = "Enregistrer";
 "Record to Movies/DroidDock (video only — phone audio isn't part of this window)" = "Enregistrer dans Movies/DroidDock (vidéo seule – le son du téléphone ne fait pas partie de cette fenêtre)";
+"Recording" = "Enregistrement";
+"Recording failed: {e}" = "Échec de l'enregistrement : {e}";
 "Reduce transparency" = "Réduire la transparence";
 "Reduce transparency is on, so the window is solid." = "Réduire la transparence est activé : la fenêtre est donc opaque.";
 "Refresh" = "Actualiser";
@@ -1019,6 +1036,7 @@
 "Ring phone" = "Faire sonner le téléphone";
 "Ringing your phone — it stops itself after a minute" = "Votre téléphone sonne – il s'arrête tout seul au bout d'une minute";
 "Ringing your phone. It stops by itself after a minute." = "Votre téléphone sonne. Il s'arrête tout seul au bout d'une minute.";
+"Rotate the picture" = "Faire pivoter l'image";
 "Round trip" = "Aller-retour";
 "Run Setup Check" = "Lancer le contrôle de configuration";
 "SMS sends through your phone's SIM — carrier rates apply as usual." = "Les SMS partent par la SIM de votre téléphone – les tarifs de votre opérateur s'appliquent comme d'habitude.";
@@ -1203,6 +1221,7 @@
 "Start mirroring" = "Démarrer la recopie";
 "Start mirroring your phone?" = "Démarrer la recopie de l'écran de votre téléphone ?";
 "Start or stop screen mirror" = "Démarrer ou arrêter la recopie d'écran";
+"Start recording" = "Démarrer l'enregistrement";
 "Start screen mirror" = "Démarrer la recopie d’écran";
 "Start with" = "Démarrer avec";
 "Starting…" = "Démarrage…";
@@ -1215,6 +1234,7 @@
 "Stop Mirroring" = "Arrêter la recopie";
 "Stop mirror" = "Arrêter la recopie";
 "Stop reconnecting wirelessly" = "Arrêter la reconnexion sans fil";
+"Stop recording" = "Arrêter l'enregistrement";
 "Stop recording and save to Movies/DroidDock" = "Arrêter l'enregistrement et l'enregistrer dans Movies/DroidDock";
 "Stop ringing" = "Arrêter la sonnerie";
 "Stop screen mirror" = "Arrêter la recopie d’écran";
@@ -1225,6 +1245,7 @@
 "Streaming" = "En direct";
 "Streams the phone's back camera into a pop-out window over Wi-Fi. Flip to the front camera once it's running." = "Diffuse la caméra arrière du téléphone dans une fenêtre à part, via Wi-Fi. Basculez sur la caméra avant une fois la diffusion lancée.";
 "Streams the phone's back camera over Wi-Fi. Flip to the front camera once it's running." = "Diffuse la caméra arrière du téléphone par Wi-Fi. Passez à la caméra avant une fois lancé.";
+"Streams the phone's camera over Wi-Fi. Pick a lens, flip to the front camera, and take photos or videos once it's running." = "Diffuse la caméra du téléphone par Wi-Fi. Choisissez un objectif, passez à la caméra frontale et prenez des photos ou des vidéos une fois lancé.";
 "Support" = "Assistance";
 "Support report" = "Rapport pour l’assistance";
 "Switch back automatically" = "Revenir automatiquement";
@@ -1249,6 +1270,7 @@
 "Tablet" = "Tablette";
 "Take Screenshot" = "Faire une capture d'écran";
 "Take phone screenshot" = "Faire une capture d'écran du téléphone";
+"Take photo" = "Prendre une photo";
 "Take screenshot" = "Faire une capture d'écran";
 "Takes effect the next time you start desktop mode or open an app on this Mac." = "Prend effet au prochain démarrage du mode bureau ou à la prochaine ouverture d'app sur ce Mac.";
 "Tap Accept on the other device." = "Touchez Accepter sur l'autre appareil.";
@@ -1261,10 +1283,14 @@
 "Text sent to phone" = "Texte envoyé au téléphone";
 "That Mac app is no longer installed" = "Cette app Mac n'est plus installée";
 "That didn't take. Right-click DroidDock in the Dock › Options › Assign To › None." = "Cela n'a pas fonctionné. Faites un clic droit sur DroidDock dans le Dock › Options › Attribuer à › Aucun.";
+"That lens isn't available" = "Cet objectif n'est pas disponible";
+"That notification is gone" = "Cette notification n'existe plus";
+"That notification is gone — opened {app}" = "Cette notification n'existe plus : {app} ouvert";
 "The Bluetooth fallback is unavailable while it's off." = "Le secours Bluetooth est indisponible tant qu’il est désactivé.";
 "The Dashboard shows a QR code. In the phone app, tap “Pair with Mac” and scan it. Both devices must be on the same Wi-Fi network — if the code won't scan, there's an IP-and-token fallback on the same screen." = "Le tableau de bord affiche un code QR. Dans l'app téléphone, touchez « Associer avec le Mac » et scannez-le. Les deux appareils doivent être sur le même réseau Wi-Fi – si le code ne se scanne pas, un repli par IP et jeton est proposé sur le même écran.";
 "The Dock's Assign To setting puts its windows on whichever desktop you switch to." = "Le réglage « Attribuer à » du Dock place ses fenêtres sur le bureau vers lequel vous passez.";
 "The adapter decides which address DroidDock advertises in the QR code and on Bonjour; the server itself accepts connections on every adapter." = "L'adaptateur détermine l'adresse annoncée par DroidDock dans le QR code et via Bonjour ; le serveur accepte les connexions sur tous les adaptateurs.";
+"The camera window turns to portrait or landscape as you hold the phone. You can also rotate it by hand with R." = "La fenêtre de la caméra passe en portrait ou en paysage selon la façon dont vous tenez le téléphone. Vous pouvez aussi la faire pivoter à la main avec R.";
 "The current Mac clipboard would be copied to your phone." = "Le presse-papiers actuel du Mac serait copié sur votre téléphone.";
 "The file has been moved or deleted" = "Le fichier a été déplacé ou supprimé";
 "The in-app mirror needs scrcpy." = "La recopie intégrée nécessite scrcpy.";
@@ -1273,6 +1299,7 @@
 "The phone didn't answer. Check that it's nearby and try again." = "Le téléphone n'a pas répondu. Vérifiez qu'il est à proximité et réessayez.";
 "The phone finds this Mac again by itself over Bonjour on most networks. If it doesn't, scan the new QR code once." = "Sur la plupart des réseaux, le téléphone retrouve ce Mac tout seul via Bonjour. Sinon, scannez le nouveau QR code une fois.";
 "The phone isn't responding. Unplug and reconnect it, or tap Reconnect." = "Le téléphone ne répond pas. Débranchez-le et reconnectez-le, ou touchez Reconnecter.";
+"The phone no longer has this Mac's Bluetooth keys, so the Bluetooth fallback can't connect. In Bluetooth settings, remove the phone, then pair it again." = "Le téléphone n’a plus les clés Bluetooth de ce Mac, la connexion de secours Bluetooth ne peut donc pas se connecter. Dans les réglages Bluetooth, supprimez le téléphone, puis appairez-le à nouveau.";
 "The phone reported no launchable apps." = "Le téléphone ne signale aucune app lançable.";
 "The phone still responds; it just isn't showing anything." = "Le téléphone répond toujours, mais n'affiche rien.";
 "The phone's own layout, scaled up to the window." = "La disposition native du téléphone, agrandie à la taille de la fenêtre.";
@@ -1363,6 +1390,7 @@
 "Use your phone's camera as a live feed on this Mac." = "Utilisez la caméra de votre téléphone comme flux en direct sur ce Mac.";
 "Uses Bluetooth only when Wi-Fi to your phone is unavailable, and switches back automatically." = "N'utilise le Bluetooth que lorsque le Wi-Fi vers votre téléphone est indisponible, et revient automatiquement.";
 "Uses the cable when your phone is plugged in. Needs USB debugging turned on on the phone." = "Utilise le câble quand le téléphone est branché. Le débogage USB doit être activé sur le téléphone.";
+"VIDEO" = "VIDÉO";
 "Verification code copied" = "Code de vérification copié";
 "Verification codes" = "Codes de vérification";
 "Verifying…" = "Vérification…";
@@ -1378,7 +1406,9 @@
 "Virtual displays need scrcpy 3.0 or newer. Run `brew upgrade scrcpy`, then reopen DroidDock." = "Les écrans virtuels nécessitent scrcpy 3.0 ou plus récent. Exécutez `brew upgrade scrcpy`, puis rouvrez DroidDock.";
 "Volume" = "Volume";
 "Waiting" = "En attente";
+"Waiting for Bluetooth permission" = "En attente de l’autorisation Bluetooth";
 "Waiting for a phone" = "En attente d'un téléphone";
+"Waiting for keyframe…" = "En attente d'une image clé…";
 "Waiting for phone" = "En attente du téléphone";
 "Waiting for scan…" = "En attente du scan…";
 "Waiting for the phone…" = "En attente du téléphone…";
@@ -1397,6 +1427,7 @@
 "What's playing" = "Lecture en cours";
 "When DroidDock shows its own banner, also keep the notification in macOS Notification Center." = "Quand DroidDock affiche sa propre bannière, conserver aussi la notification dans le Centre de notifications de macOS.";
 "When clicked" = "Au clic";
+"When you answer from the Mac, the call switches to the phone's speaker." = "Quand vous répondez depuis le Mac, l'appel passe sur le haut-parleur du téléphone.";
 "Where a click opens an app. Hold Option to do the other one." = "Où un clic ouvre une app. Maintenez Option pour faire l'inverse.";
 "Where clicking an app opens it" = "Où un clic sur une app l'ouvre";
 "Where it appears" = "Où ça apparaît";
@@ -1446,6 +1477,7 @@
 "Your phone on the left, five tabs along the top." = "Votre téléphone à gauche, cinq onglets en haut.";
 "Your phone will be disconnected and must scan the new QR code to pair again." = "Votre téléphone sera déconnecté et devra scanner le nouveau code QR pour s’appairer à nouveau.";
 "Your phone's camera is streaming in its own window. Flip front/back from there." = "La caméra de votre téléphone est diffusée dans sa propre fenêtre. Basculez avant/arrière depuis celle-ci.";
+"Zoom" = "Zoom";
 "adb was not found" = "adb est introuvable";
 "adb — installed automatically on first launch" = "adb – installé automatiquement au premier lancement";
 "and scan this code" = "et scannez ce code";
@@ -1525,6 +1557,8 @@
 "{n}% — charging" = "{n} % — en charge";
 "{peer} wants to send you {n} file" = "{peer} veut vous envoyer {n} fichier";
 "{peer} wants to send you {n} files" = "{peer} veut vous envoyer {n} fichiers";
+"{peer} wants to send {n} file" = "{peer} veut envoyer {n} fichier";
+"{peer} wants to send {n} files" = "{peer} veut envoyer {n} fichiers";
 "{size} total" = "{size} au total";
 "{time} left" = "encore {time}";
 "⌘Q only closes the windows. DroidDock keeps running in the menu bar, with the phone link and Quick Share still on. Choose Quit DroidDock in its menu to stop everything." = "⌘Q ne ferme que les fenêtres. DroidDock continue de tourner dans la barre des menus, avec la liaison du téléphone et Quick Share toujours actifs. Choisissez « Quitter DroidDock » dans son menu pour tout arrêter.";

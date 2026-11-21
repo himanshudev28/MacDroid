@@ -102,6 +102,12 @@ extension Core {
     func mirrorInput(_ msg: [String: Any]) async throws { try await invoke("mirror_input", ["msg": msg]) }
     /// Call once the mirror window + decoder are ready; frames flow afterwards. Returns a pending `mirror-started`.
     func mirrorAttach() async throws -> MirrorStarted? { try await invoke("mirror_attach") }
+    func cameraSelectLens(_ lens: String) async throws { try await invoke("camera_select_lens", ["lens": lens]) }
+    /// Throws "unsupported" when neither path can take a phone-side photo (the caller then grabs the frame).
+    func cameraTakePhoto() async throws { try await invoke("camera_take_photo") }
+    /// Embedded (ADB) camera: the core reports the phone's orientation as `camera-orientation`. Harmless if unsupported.
+    func cameraOrientWatch(on: Bool) async throws { try await invoke("camera_orient_watch", ["on": on]) }
+    func cameraSetZoom(_ ratio: Double) async throws { try await invoke("camera_set_zoom", ["ratio": ratio]) }
     func mirrorClosed() async throws { try await invoke("mirror_closed") }
     func mirrorSetHevcSupported(_ supported: Bool) async throws { try await invoke("mirror_set_hevc_supported", ["supported": supported]) }
     func mirrorSaveCapture(_ data: Data, ext: String) async throws -> String {

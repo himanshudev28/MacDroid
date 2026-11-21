@@ -612,15 +612,33 @@ pub async fn action_call(app: AppHandle, state: State<'_, SharedState>, adb_stat
         adb.zip(serial)
     };
     if let Some((adb, serial)) = adb_serial {
-        adb::phone_call(&adb, &serial, &number).await?;
+        // Arm the phone app first (when linked), so the OFFHOOK/IDLE that follow
+        // reach the Mac as `call` events with real End/Mute/Speaker support.
+        // Without it the adb dial was invisible to the phone app and the Mac's
+        // call pop-up never appeared. Old phone apps ignore the unknown type.
+        let _ = ws_server::push(&state, json!({ "type": "call-arm", "number": number })).await;
+        if let Err(e) = adb::phone_call(&adb, &serial, &number).await {
+            // Don't leave the phone armed: its next hand-placed call would pop up here.
+            let _ = ws_server::push(&state, json!({ "type": "call-arm", "number": number, "cancel": true })).await;
+            return Err(e);
+        }
+        announce_dialing(&app, &number);
         adb::start_call_polling(app, serial);
         return Ok(());
     }
     if ws_server::push(&state, json!({ "type": "action-call", "number": number })).await {
+        announce_dialing(&app, &number);
         Ok(())
     } else {
         Err("No connection — connect via ADB or link the phone app first".into())
     }
+}
+
+/// Show the "Calling…" pop-up straight away for a call the Mac placed, whatever
+/// the path. The phone's `call` events (or adb `call-state`) take over from here;
+/// the Mac drops a `dialing` call that nothing ever confirms.
+fn announce_dialing(app: &AppHandle, number: &str) {
+    let _ = app.emit("call", json!({ "type": "call", "state": "dialing", "number": number, "name": "" }));
 }
 
 /// Answer, hang up, mute or change the route on the call the phone is holding,
@@ -795,7 +813,7 @@ pub async fn app_icon(state: State<'_, SharedState>, pkg: String) -> Result<Stri
 /// and the observable result is the phone's own screen.
 pub async fn app_launch(state: State<'_, SharedState>, pkg: String) -> Result<(), String> {
     if !ws_server::push(&state, json!({ "type": "app-launch", "pkg": pkg })).await {
-        return Err("Phone not connected over Wi-Fi".into());
+        return Err(ws_server::wifi_only_error(&state).await);
     }
     Ok(())
 }

@@ -10,6 +10,8 @@ enum NotifPrefs {
     static let callAlertKey = "droiddock.notif.callAlert"
     /// Play a ringtone on the Mac while the phone rings.
     static let callRingKey = "droiddock.notif.callRing"
+    /// Answering a call from the Mac also puts it on the phone's speaker (off by default).
+    static let answerOnSpeakerKey = "droiddock.call.answerOnSpeaker"
     /// Clicking a banner opens DroidDock (or the app mapped to that phone app).
     static let openOnClickKey = "droiddock.notif.openOnClick"
     /// When DroidDock shows its own floating banner, also file a quiet copy in macOS Notification Center.

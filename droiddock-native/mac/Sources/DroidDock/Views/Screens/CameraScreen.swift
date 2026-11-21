@@ -4,6 +4,7 @@ import SwiftUI
 struct CameraScreen: View {
     @Environment(AppModel.self) private var model
     @AppStorage("droiddock.camera.link") private var storedLink = CameraLink.wifi
+    @AppStorage(MirrorSession.followKey) private var followOrientation = true
     @AppStorage("droiddock.mirror.advanced") private var showAdvanced = false
     @State private var busy = false
     @State private var lastStart: (() async throws -> Void)?
@@ -62,13 +63,18 @@ struct CameraScreen: View {
                             blockedReason: tr("Pair your phone or connect it with a cable"), action: start)
             }
             Section {
-                Picker(tr("Connect over"), selection: $storedLink) {
+                Picker(tr("Connect over"), selection: Binding(get: { link }, set: { storedLink = $0 })) {
                     Text(tr("Wi-Fi")).tag(CameraLink.wifi).disabled(!model.isConnected)
                     Text(tr("USB or wireless ADB")).tag(CameraLink.adb).disabled(!adbOK)
                 }.pickerStyle(.menu)
             } header: { Text(tr("Connection")) } footer: {
-                Text(link == .wifi ? tr("Streams the phone's back camera over Wi-Fi. Flip to the front camera once it's running.")
-                                   : tr("Full-quality camera preview over USB or wireless ADB via scrcpy, in its own window."))
+                Text(link == .wifi ? tr("Streams the phone's camera over Wi-Fi. Pick a lens, flip to the front camera, and take photos or videos once it's running.")
+                                   : tr("Full-quality camera preview over USB or wireless ADB, in this app. Pick a lens and take photos or record video; photos are grabbed from the preview."))
+            }
+            Section {
+                Toggle(tr("Follow phone orientation"), isOn: $followOrientation)
+            } footer: {
+                Text(tr("The camera window turns to portrait or landscape as you hold the phone. You can also rotate it by hand with R."))
             }
             MirrorQualitySection(showAdvanced: $showAdvanced, audio: false, adbOptions: false)
             if !adbOK, let r = adbReason {
