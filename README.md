@@ -23,7 +23,7 @@ Electron and then a Tauri client; both are kept in the repo for reference.)*
 [![Download for Mac (.dmg)](https://img.shields.io/badge/Download%20for%20Mac-.dmg-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/himanshudev28/MacDroid/releases/latest/download/DroidDock.dmg)
 [![Download for Android (.apk)](https://img.shields.io/badge/Download%20for%20Android-.apk-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/himanshudev28/MacDroid/releases/latest/download/DroidDock-Android.apk)
 
-<sub>Latest release · Apple Silicon, macOS 14+ · Android 8+ · [all releases & notes](https://github.com/himanshudev28/MacDroid/releases)</sub>
+<sub>Latest release · Apple Silicon & Intel, macOS 14+ · Android 8+ · [all releases & notes](https://github.com/himanshudev28/MacDroid/releases)</sub>
 
 <br>
 
@@ -209,7 +209,7 @@ Grab the prebuilt apps from the [**Releases**](../../releases) page:
 
 1. **Mac** — download [**`DroidDock.dmg`**](https://github.com/himanshudev28/MacDroid/releases/latest/download/DroidDock.dmg)
    (always the latest version; the release page also lists it as `DroidDock-<version>.dmg`).
-   It needs an Apple Silicon Mac on macOS 14 or later. Open
+   It runs on Apple Silicon and Intel Macs with macOS 14 or later. Open
    it and drag **DroidDock.app** to Applications. The first launch needs one extra step:
    - **macOS 15 Sequoia or later:** double-click the app, click **Done** on the warning,
      then open **System Settings → Privacy & Security**, scroll down to *"DroidDock was

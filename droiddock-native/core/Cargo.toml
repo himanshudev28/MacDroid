@@ -1,6 +1,6 @@
 [package]
 name = "droiddock_core"
-version = "4.1.1"
+version = "4.1.2"
 description = "DroidDock native core (Rust): protocol, transfer, ADB, mirror, Quick Share"
 edition = "2021"
 
@@ -13,6 +13,8 @@ prost-build = "0.14"
 protox = "0.9"
 
 [dependencies]
+# Verifies signed self-updates (updater.rs). Every architecture: the app ships universal.
+ed25519-dalek = { version = "3", default-features = false, features = ["zeroize"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
@@ -106,9 +108,6 @@ objc2-core-foundation = { version = "0.3", default-features = false, features = 
     "std",
     "CFCGTypes",
 ] }
-
-[target.aarch64-apple-darwin.dependencies]
-ed25519-dalek = { version = "3", default-features = false, features = ["zeroize"] }
 
 
 [profile.release]

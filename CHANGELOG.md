@@ -8,6 +8,12 @@ to a generic body.
 
 ---
 
+## v4.1.2
+
+DroidDock now runs on Intel Macs.
+
+- The Mac app is now a universal app: the same `DroidDock.dmg` runs natively on Apple Silicon and on Intel Macs with macOS 14 Sonoma or later ([#2](https://github.com/himanshudev28/MacDroid/issues/2)). Nothing changes on Apple Silicon, and in-app updates keep working on both.
+
 ## v4.1.1
 
 Update the phone app.

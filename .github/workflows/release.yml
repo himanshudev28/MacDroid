@@ -18,13 +18,14 @@ jobs:
   # page, so all this job has to do is publish a release with the downloads.
   mac:
     name: Build DroidDock (macOS, native)
-    # Swift tools 6.0 needs Xcode 16; Apple Silicon matches the arm64-only build.
+    # Swift tools 6.0 needs Xcode 16. The runner is Apple Silicon and cross-builds
+    # the Intel slice: build.sh ships one universal (arm64 + x86_64) app.
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: droiddock-native/core -> target
@@ -97,7 +98,10 @@ jobs:
           { echo "CODESIGN_ID=$ID"; echo "CODESIGN_KEYCHAIN=$KC"; } >> "$GITHUB_ENV"
 
       - name: Build the app
-        run: droiddock-native/scripts/build.sh
+        run: |
+          droiddock-native/scripts/build.sh
+          # Intel Macs (issue #2) get the same download: refuse a build missing either slice.
+          lipo droiddock-native/build/DroidDock.app/Contents/MacOS/DroidDock -verify_arch arm64 x86_64
 
       - name: Package the DMG and a zipped .app
         run: |

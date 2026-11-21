@@ -2,11 +2,12 @@
 import PackageDescription
 import Foundation
 
-// Absolute path to the Rust static library (built by scripts/build.sh).
+// Absolute path to the Rust static library (built by scripts/build.sh): a universal
+// (arm64 + x86_64) archive, so every `swift build --arch` finds its slice.
 let coreLibDir = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()          // mac/
     .deletingLastPathComponent()          // droiddock-native/
-    .appendingPathComponent("core/target/aarch64-apple-darwin/release").path
+    .appendingPathComponent("core/target/universal/release").path
 
 let package = Package(
     name: "DroidDock",
