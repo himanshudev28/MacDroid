@@ -243,11 +243,12 @@
             </intent-filter>
         </receiver>
 
-        <!-- Restarts the bridge after a reboot (paired and not paused only). Not exported: BOOT_COMPLETED
+        <!-- Restarts the bridge after a reboot or an app update (paired and not paused only). Not exported: BOOT_COMPLETED
              comes from the system. -->
         <receiver android:name=".BootReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 

@@ -8,6 +8,12 @@ to a generic body.
 
 ---
 
+## v4.1.1
+
+Update the phone app.
+
+- After the phone app updates, it now reconnects to your Mac on its own. Before, the link stayed down until you opened DroidDock on the phone. Updating to this version still needs one open; every update after it reconnects by itself.
+
 ## v4.1.0
 
 Calls you control from the Mac, a real camera window, and Bluetooth that works without Wi-Fi. Update both apps.

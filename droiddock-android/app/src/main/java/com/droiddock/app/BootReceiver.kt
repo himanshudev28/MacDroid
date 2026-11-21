@@ -5,7 +5,9 @@ import android.content.Context
 import android.content.Intent
 
 /**
- * Brings the Mac link back after a reboot, but only for a phone that is paired and not paused.
+ * Brings the Mac link back after a reboot or an app update, but only for a phone that is paired and
+ * not paused. An update (in-app or `adb install -r`) kills the process, and without this the link stayed
+ * down until the user opened the app. MY_PACKAGE_REPLACED is exempt from background FGS-start limits.
  *
  * Android 15 forbids starting dataSync, camera, mediaPlayback, phoneCall, mediaProjection and
  * microphone foreground services from BOOT_COMPLETED. [BridgeService] runs as connectedDevice,
@@ -14,7 +16,7 @@ import android.content.Intent
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        if (intent.action != Intent.ACTION_BOOT_COMPLETED && intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
         val app = ctx.applicationContext
         if (!shouldStartOnBoot(Prefs.load(app) != null, Prefs.pausedUntil(app), System.currentTimeMillis())) return
         if (runCatching { BridgeService.start(app) }.isFailure) BridgeRearm.schedule(app)
